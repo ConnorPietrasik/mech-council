@@ -4,11 +4,12 @@ The defect is deliberate and small: `get` ignores the tenant, so one tenant read
 another's value.  The design choice — expired entries are dropped lazily, on read — is the
 kind of thing a council argues about instead of merely spotting.
 
-Deliberately **nothing here can hang a reviewer**.  An earlier version held the module lock
-across a call out, and a real seat in the §13.12 smoke wrote a deadlock reproduction, ran
-it, and never came back; §9 tells the watchdog chair to keep a seat unless it is clearly
-stuck, so the run waited.  A smoke test that spends tokens should fail for a reason the
-code under review caused, so the hazard here is one you can read rather than run.
+Deliberately **nothing here can hang a reviewer**.  An earlier version held the module
+lock across a call out, and a real seat in the smoke test wrote a deadlock
+reproduction, ran it, and never came back; the watchdog keeps a seat unless it is
+clearly stuck, so the run waited.  A smoke test that spends tokens should fail for a
+reason the code under review caused, so the hazard here is one you can read rather
+than run.
 """
 from __future__ import annotations
 

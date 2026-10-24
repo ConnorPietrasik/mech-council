@@ -1,1 +1,1 @@
-"""§5.4's prompt text, as data (§12.1.6): greppable, and never scattered through logic."""
+"""The briefing prompt text, as data: greppable, and never scattered through logic."""

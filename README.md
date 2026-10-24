@@ -176,6 +176,43 @@ when the ground turns out to be an overlay. Point `COUNCIL_TEST_FS` at a plain d
 choose it explicitly. A test skipped for any other reason fails the suite, and a test
 enforces that it can't be done quietly.
 
+## Lint and types
+
+```sh
+pip install -e ".[test,dev]"
+python -m ruff check .             # the lint bar
+python -m ruff format --check .    # the width it formats to: a check never contradicts it
+python -m mypy                     # the type bar, over src and tests
+pytest                             # the suite one section up
+```
+
+`python -m`, so you run the pinned pair from the venv and not whatever a global install put
+on your `PATH`. Both bars are stated in `pyproject.toml`, so a bare `python -m ruff check`
+and a bare `python -m mypy` run this project's bar and not whoever's flags happen to be in
+the shell history. The lint set is
+chosen rather than defaulted: real defects (pyflakes, syntax errors, import placement, the
+`except`/`None` smells, invalid escapes), the house shape at the formatter's 140 columns,
+and four habits — sorted imports, no dead `noqa`, stated `subprocess` intent, and a handle
+either closed in place or declared long-lived. `testdata/toy-project` is excluded from both
+tools on purpose: the defect in it is what a council is convened to find, not something to
+fix, and `force-exclude` means even naming that directory on the command line is refused.
+
+`mypy` checks `src` and `tests` with `check_untyped_defs`, so a test helper carrying no
+annotations is not a hole the checker walks past. It is deliberately not `--strict`: that
+wants 958 more annotations, and `--warn-unreachable` would settle two guards by erasure
+instead of by decision — both reasons are written out beside the config.
+
+The tools are pinned exactly and `[tool.ruff] required-version` makes ruff refuse to run
+under any other version, even one an editor found for itself. That is not fussiness: ruff
+counts breaking changes in the minor digit, so formatter style, the rule sets and the
+supported Python versions all change there, and a floating ruff can turn `format --check`
+red across a tree nobody edited. Bumping is a commit to itself: move the two pins and
+`required-version` together, run `python -m ruff format`, then `python -m ruff check --fix`,
+then `python -m mypy`, and keep a reflow out of any commit that also changes behaviour.
+
+Nothing runs any of this for you — there is no CI. A gate stays green because whoever
+staged the change ran it.
+
 ## License
 
 `council` — a council of coding agents that review a project or plan a task together.

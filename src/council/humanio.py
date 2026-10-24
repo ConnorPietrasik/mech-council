@@ -1,10 +1,10 @@
-"""§12.1.2 — stdin never blocks the loop and is never joined on the way out.
+"""Stdin never blocks the loop and is never joined on the way out.
 
-One daemon thread reading lines into a thread-safe queue.  The checkpoint awaits the
-queue, so an `explain` round-trip keeps the loop live and the run can leave while the
-reader is parked; nothing joins the thread at teardown, which is why a Ctrl-C during a
-checkpoint still leaves on the signal's exit code.
+One daemon thread reading lines into a thread-safe queue.  The checkpoint awaits the queue, so an `explain`
+round-trip keeps the loop live and the run can leave while the reader is parked; nothing joins the
+thread at teardown, which is why a Ctrl-C during a checkpoint still leaves on the signal's exit code.
 """
+
 from __future__ import annotations
 
 import queue
@@ -25,19 +25,18 @@ class LineReader:
 
     @property
     def interactive(self) -> bool:
-        """D16: EOF or not-a-tty means every checkpoint declines everything."""
+        """The non-interactive stdin choice: EOF or not-a-tty means every checkpoint declines everything."""
         if self.eof:
             return False
         try:
             return bool(self.stream.isatty())
-        except (AttributeError, ValueError):
+        except AttributeError, ValueError:
             return False
 
     def start(self) -> None:
         if self._thread is not None:
             return
-        self._thread = threading.Thread(target=self._pump, name="stdin-reader",
-                                        daemon=True)
+        self._thread = threading.Thread(target=self._pump, name="stdin-reader", daemon=True)
         self._thread.start()
 
     def _pump(self) -> None:
@@ -59,9 +58,9 @@ class LineReader:
             return None
 
     async def next_line(self):
-        """Await a line without blocking the loop (`add_reader` is the other shape; this
-        one keeps the queue and the thread, which is what §12.1.2 leaves to the plan)."""
+        """Await a line without blocking the loop (`add_reader` is the other shape; this one keeps the queue and the thread)."""
         import asyncio
+
         while True:
             item = self.read_nowait()
             if item is not None:

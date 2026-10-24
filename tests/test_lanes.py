@@ -1,20 +1,23 @@
-"""§12.1.8 / §9 / §13.6 — the two lanes, §4's restart, and the chair's digest.
+"""The two lanes, restart-and-re-ask, and the chair's digest.
 
-Fakes stand in for the *child process* only: the lanes, the repairs, the restart accounting
-and the watchdog's enforcement are the real ones, because those are what §9 and §12.1.8
-promise.  The process behaviour around them is `test_rpc.py` and `test_sandbox.py`.
+Fakes stand in for the *child process* only: the lanes, the repairs, the restart accounting and
+the watchdog's enforcement are the real ones, because those are what the chair and the two-lane
+rule promise.  The process behaviour around them is `test_rpc.py` and `test_sandbox.py`.
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
+from typing import cast
 
 import pytest
 
 from council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_repair
 from council.chairwork import Chair
 from council.config import Council, MemberSpec
-from council.deliberation import state
+from council.console import Console as RunConsole
+from council.members import Members
 from council.pi_rpc import Answer, ChildGone
 from council.prompts.brief import Brief
 from council.watchdog import Watchdog
@@ -42,14 +45,13 @@ class FakeRpc:
         if item.get("hang"):
             self.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
             try:
-                await asyncio.wait_for(self.inflight, item["hang"])
+                await asyncio.wait_for(self.inflight, float(item["hang"]))
             except TimeoutError:
                 pass
-        return Answer(text=item.get("text", ""), stop_reason=item.get("stop", "stop"),
-                      error_message=item.get("error", ""), settled=True)
+        return Answer(text=item.get("text", ""), stop_reason=item.get("stop", "stop"), error_message=item.get("error", ""), settled=True)
 
     async def abort(self):
-        """§4: the abort *settles* the ask in flight — that is how a restart ends one."""
+        """The abort *settles* the ask in flight — that is how a restart ends one."""
         self.aborts += 1
         inflight = getattr(self, "inflight", None)
         if inflight is not None and not inflight.done():
@@ -84,7 +86,7 @@ class FakeMember:
 
 class FakeMembers:
     def __init__(self, members: dict):
-        self.members = members          # keyed by file_base, exactly as the real one is
+        self.members = members  # keyed by file_base, exactly as the real one is
 
     def file_base_for(self, agent_id):
         # The real registry answers in either vocabulary; so does this one.
@@ -108,24 +110,34 @@ class FakeMembers:
 
 
 SPEC = {
-    "seat1-one": MemberSpec(name="one", slot=1, id="Agent1", file_base="seat1-one",
-                            provider="anthropic", model="claude-opus-4"),
+    "seat1-one": MemberSpec(name="one", slot=1, id="Agent1", file_base="seat1-one", provider="anthropic", model="claude-opus-4"),
     "seat2-two": MemberSpec(name="two", slot=2, id="Agent2", file_base="seat2-two"),
     "chair": MemberSpec(name="gavel", slot=0, file_base="chair"),
 }
 
 
 def council(n=2, *, concurrency=2, watchdog=0):
-    agents = [SPEC[f"seat{i}-{n}"] if False else
-              MemberSpec(name=name, slot=i, id=f"Agent{i}", file_base=fb,
-                         provider=SPEC[fb].provider, model=SPEC[fb].model)
-              for i, (fb, name) in enumerate(
-                  [("seat1-one", "one"), ("seat2-two", "two")][:n], start=1)]
-    return Council(name="t", mode="review", goal="g", agents=agents, chair=SPEC["chair"],
-                   max_rounds=3, watchdog_sec=watchdog, chair_timeout_sec=60,
-                   max_concurrency=concurrency, transcripts="errors", sandbox_mib=64,
-                   pi_cli="pi", pi_version="1.4.0", config_path="/proj/council.toml",
-                   project="/proj")
+    agents = [
+        MemberSpec(name=name, slot=i, id=f"Agent{i}", file_base=fb, provider=SPEC[fb].provider, model=SPEC[fb].model)
+        for i, (fb, name) in enumerate([("seat1-one", "one"), ("seat2-two", "two")][:n], start=1)
+    ]
+    return Council(
+        name="t",
+        mode="review",
+        goal="g",
+        agents=agents,
+        chair=SPEC["chair"],
+        max_rounds=3,
+        watchdog_sec=watchdog,
+        chair_timeout_sec=60,
+        max_concurrency=concurrency,
+        transcripts="errors",
+        sandbox_mib=64,
+        pi_cli="pi",
+        pi_version="1.4.0",
+        config_path="/proj/council.toml",
+        project="/proj",
+    )
 
 
 class Console:
@@ -143,61 +155,65 @@ class Console:
 def lanes(*, n=2, concurrency=2, script=None, watchdog=0, script_defaults=False):
     """script: file_base → list of replies for FakeRpc."""
     script = dict(script or {})
-    if script_defaults:      # a digest lane that has no scripted chair reply keeps everyone
-        script.setdefault("chair", [{"text": '{"decisions": [{"agent": "Agent1", '
-                                            '"action": "keep", "reason": "n"}]}'}])
+    if script_defaults:  # a digest lane that has no scripted chair reply keeps everyone
+        script.setdefault("chair", [{"text": '{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "n"}]}'}])
     roster = {"chair": FakeMember("chair", None, FakeRpc(script.get("chair", [])))}
     for i, fb in enumerate(("seat1-one", "seat2-two")[:n], start=1):
         roster[fb] = FakeMember(fb, f"Agent{i}", FakeRpc(script.get(fb, [])))
     members = FakeMembers(roster)
     board = council(n=n, concurrency=concurrency, watchdog=watchdog)
     console = Console()
-    return Lanes(board, members, console), members, console, board
+    # The fakes stand in for the registry and the console: the lanes themselves, which are the
+    # subject here, hold only what they call on them.
+    return Lanes(board, cast(Members, members), cast(RunConsole, console)), members, console, board
 
 
 def verdict(text="ok"):
     import json
-    return json.dumps({"positions": [], "new_items": [], "answers": [], "questions": [],
-                       "human_input": [], "signoff": True})
+
+    return json.dumps({"positions": [], "new_items": [], "answers": [], "questions": [], "human_input": [], "signoff": True})
 
 
 GONE = ChildGone("child stdout closed")
-"""§4's rule is *did a message arrive*: a child that says nothing is §4's restart path, and
-a message that arrives and is unreadable is §5.3's rejection.  So §4's road is scripted with
-a dead child, not with an empty reply — `test_a_message_that_arrives_and_is_unreadable_is_
-rejected_rather_than_restarted` covers the other half."""
+"""Restart-and-re-ask is *did a message arrive*: a child that says nothing takes the
+restart path, and a message that arrives and is unreadable is a rejection.  So the
+restart path is scripted with a dead child, not with an empty reply —
+`test_a_repairable_answer_gets_exactly_two_re_ask_and_then_is_rejected` covers the
+other half."""
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-# --------------------------------------------------------------------------- §12.1.8's lanes
+# ------------------------------------------------------------ The two-lane rule's lanes
+
 
 def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
-    """§12.1.8: with max_concurrency = 1 and one wedged seat, the chair still answers."""
+    """With max_concurrency = 1 and one wedged seat, the chair still answers."""
     order: list[str] = []
 
     async def main():
-        board, members, console, _ = lanes(concurrency=1, script={
-            "seat1-one": [{"hang": 5, "text": verdict()}],
-            "chair": [{"text": '{"decisions": [{"agent": "Agent1", "action": "keep",'
-                        ' "reason": "reading"}]}'}],
-        })
+        board, _members, _console, _ = lanes(
+            concurrency=1,
+            script={
+                "seat1-one": [{"hang": 5, "text": verdict()}],
+                "chair": [{"text": '{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "reading"}]}'}],
+            },
+        )
 
         async def seat():
             order.append("seat-start")
-            outcome = await board.ask_agent("Agent1", "go", round_=1, kind="verdict",
-                                            parse_kw={"known_items": [], "mode": "review"},
-                                            phase="round")
+            outcome = await board.ask_agent(
+                "Agent1", "go", round_=1, kind="verdict", parse_kw={"known_items": [], "mode": "review"}, phase="round"
+            )
             order.append("seat-end")
             return outcome
 
         async def chair():
-            await asyncio.sleep(0.1)               # let the seat take the only slot
+            await asyncio.sleep(0.1)  # let the seat take the only slot
             order.append("chair-start")
-            outcome = await board.ask_chair("digest?", round_=1, phase="digest",
-                                            kind="watchdog", timeout=5)
+            outcome = await board.ask_chair("digest?", round_=1, phase="digest", kind="watchdog", timeout=5)
             order.append("chair-end")
             return outcome
 
@@ -213,23 +229,30 @@ def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
 
 def test_the_agent_pool_caps_concurrency_but_never_serialises_the_chair():
     async def main():
-        board, members, console, _ = lanes(concurrency=2, script={
-            "seat1-one": [{"hang": 0.3, "text": verdict()}],
-            "seat2-two": [{"hang": 0.3, "text": verdict()}],
-        })
+        board, _members, _console, _ = lanes(
+            concurrency=2,
+            script={
+                "seat1-one": [{"hang": 0.3, "text": verdict()}],
+                "seat2-two": [{"hang": 0.3, "text": verdict()}],
+            },
+        )
         started = time.monotonic()
-        outcomes = await board.ask_seats([("Agent1", "go"), ("Agent2", "go")],
-                                         round_=1, kind="verdict", phase="round",
-                                         parse_for=lambda a: {"mode": "review",
-                                                              "me": a,
-                                                              "known_items": set()})
+        outcomes = await board.ask_seats(
+            [("Agent1", "go"), ("Agent2", "go")],
+            round_=1,
+            kind="verdict",
+            phase="round",
+            parse_for=lambda a: {"mode": "review", "me": a, "known_items": set()},
+        )
         elapsed = time.monotonic() - started
         assert len(outcomes) == 2 and elapsed < 0.55, "the two seats ran together"
-        serial = await board.ask_seats([("Agent1", "go"), ("Agent2", "go")],
-                                       round_=2, kind="verdict", phase="round",
-                                       parse_for=lambda a: {"mode": "review",
-                                                              "me": a,
-                                                              "known_items": set()})
+        serial = await board.ask_seats(
+            [("Agent1", "go"), ("Agent2", "go")],
+            round_=2,
+            kind="verdict",
+            phase="round",
+            parse_for=lambda a: {"mode": "review", "me": a, "known_items": set()},
+        )
         assert len(serial) == 2
 
     run(main())
@@ -237,12 +260,12 @@ def test_the_agent_pool_caps_concurrency_but_never_serialises_the_chair():
 
 def test_the_digest_rows_read_the_live_activity_not_a_snapshot():
     """A frozen digest would report every member at zero events: all wedged, none so."""
+
     async def main():
-        board, members, console, _ = lanes(concurrency=2, script={
-            "seat1-one": [{"hang": 5, "text": verdict()}]})
-        task = asyncio.create_task(board.ask_agent("Agent1", "go", round_=1,
-                                                   kind="verdict",
-                                                   parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}))
+        board, _members, _console, _ = lanes(concurrency=2, script={"seat1-one": [{"hang": 5, "text": verdict()}]})
+        task = asyncio.create_task(
+            board.ask_agent("Agent1", "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
+        )
         await asyncio.sleep(0.1)
         rows = board.digest()
         task.cancel()
@@ -253,29 +276,30 @@ def test_the_digest_rows_read_the_live_activity_not_a_snapshot():
     assert "elapsed" in rows[0] and rows[0]["events"] == 0
 
 
-# --------------------------------------------------------------------------- §5.3's repairs
+# --------------------------------------------------------- Lenient extraction's repairs
+
 
 def test_a_repairable_answer_gets_exactly_two_re_ask_and_then_is_rejected():
     async def main():
-        board, members, console, _ = lanes(script={
-            "seat1-one": [{"text": "prose, no JSON at all"}, {"text": "still prose"},
-                          {"text": "and still prose"}]})
-        return await board.ask_agent("Agent1", "go", round_=2, kind="verdict",
-                                     parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}, phase="round")
+        board, _members, _console, _ = lanes(
+            script={"seat1-one": [{"text": "prose, no JSON at all"}, {"text": "still prose"}, {"text": "and still prose"}]}
+        )
+        return await board.ask_agent(
+            "Agent1", "go", round_=2, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}, phase="round"
+        )
 
     outcome = run(main())
     assert outcome.repairs == REPAIR_ASKS and outcome.rejected
     assert outcome.prompts == REPAIR_ASKS + 1
-    rejected = [e for e in Console().events]        # nothing from the fresh console
-    assert outcome.failure is None, "a refused message is §6.2's gap, not §4's abort"
+    assert outcome.failure is None, "a refused message becomes a gap, never an abort"
 
 
 def test_a_repair_that_lands_is_not_a_rejection():
     async def main():
-        board, members, console, _ = lanes(script={
-            "seat1-one": [{"text": "prose"}, {"text": verdict()}]})
-        return await board.ask_agent("Agent1", "go", round_=1, kind="verdict",
-                                     parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
+        board, _members, _console, _ = lanes(script={"seat1-one": [{"text": "prose"}, {"text": verdict()}]})
+        return await board.ask_agent(
+            "Agent1", "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}
+        )
 
     outcome = run(main())
     assert outcome.repairs == 1 and not outcome.rejected and outcome.data is not None
@@ -291,34 +315,40 @@ def test_needs_repair_distinguishes_the_repairable_from_themerely_empty():
     assert not needs_repair(Parsed())
 
 
-# --------------------------------------------------------------------------- §4's restart path
+# -------------------------------------------------- The restart-and-re-ask path
+
 
 def ask_once(board):
-    """A first ask that came back with nothing — §4's restart-and-re-ask territory."""
-    return dict(round_=3, kind="verdict", phase="round",
-                parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()},
-                message="go")
+    """A first ask that came back with nothing — restart-and-re-ask's territory."""
+    return {
+        "round_": 3,
+        "kind": "verdict",
+        "phase": "round",
+        "parse_kw": {"mode": "review", "me": "seat1-one", "known_items": set()},
+        "message": "go",
+    }
 
 
 def test_a_failed_ask_restarts_once_and_re_asks_once():
     async def main():
-        board, members, console, _ = lanes(script={"seat1-one": [GONE,
-                                                                 {"text": verdict()}]})
-        outcome = await board.ask_agent("Agent1", "go", round_=3, kind="verdict",
-                                        parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
+        board, members, _console, _ = lanes(script={"seat1-one": [GONE, {"text": verdict()}]})
+        outcome = await board.ask_agent(
+            "Agent1", "go", round_=3, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}
+        )
         return outcome, members.members["seat1-one"].restarts
 
     outcome, restarts = run(main())
-    assert restarts == 1, "one restart, one re-ask, no more (§4)"
+    assert restarts == 1, "one restart, one re-ask, no more"
     assert outcome.data is not None and outcome.prompts == 2
 
 
 def test_the_second_failure_ends_the_run_naming_the_member_and_the_round():
     async def main():
-        board, members, console, _ = lanes(script={"seat1-one": [GONE, GONE]})
+        board, members, _console, _ = lanes(script={"seat1-one": [GONE, GONE]})
         with pytest.raises(AskLost) as raised:
-            await board.ask_agent("Agent1", "go", round_=4, kind="verdict",
-                                  parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
+            await board.ask_agent(
+                "Agent1", "go", round_=4, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}
+            )
         return raised.value, members.members["seat1-one"].restarts
 
     failure, restarts = run(main())
@@ -328,14 +358,20 @@ def test_the_second_failure_ends_the_run_naming_the_member_and_the_round():
 
 
 def test_an_errored_first_prompt_is_an_unusable_seat_naming_the_provider():
-    """§3.3 point 3, and *only* the first prompt: the same error later is §4's path."""
+    """The unusable-seat rule, and *only* the first prompt: the same error later is restart-and-re-ask's path."""
+
     async def main():
-        board, members, console, _ = lanes(script={
-            "seat1-one": [{"stop": "error", "error": "401 invalid api key"}]})
+        board, members, _console, _ = lanes(script={"seat1-one": [{"stop": "error", "error": "401 invalid api key"}]})
         with pytest.raises(AskUnusable) as raised:
-            await board.ask_agent("Agent1", "go", round_=0, kind="phase0",
-                                  parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()}, phase="phase0",
-                                  classify_unusable=True)
+            await board.ask_agent(
+                "Agent1",
+                "go",
+                round_=0,
+                kind="phase0",
+                parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()},
+                phase="phase0",
+                classify_unusable=True,
+            )
         return raised.value, members.members["seat1-one"].restarts
 
     failure, restarts = run(main())
@@ -348,11 +384,15 @@ def test_a_transport_failure_takes_the_restart_path_not_the_unusable_exit():
     from council.pi_rpc import ChildGone
 
     async def main():
-        board, members, console, _ = lanes(script={
-            "seat1-one": [ChildGone("child stdout closed"), {"text": verdict()}]})
-        outcome = await board.ask_agent("Agent1", "go", round_=1, kind="verdict",
-                                        parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()},
-                                        classify_unusable=True)
+        board, members, _console, _ = lanes(script={"seat1-one": [ChildGone("child stdout closed"), {"text": verdict()}]})
+        outcome = await board.ask_agent(
+            "Agent1",
+            "go",
+            round_=1,
+            kind="verdict",
+            parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()},
+            classify_unusable=True,
+        )
         return outcome, members.members["seat1-one"].restarts
 
     outcome, restarts = run(main())
@@ -361,13 +401,14 @@ def test_a_transport_failure_takes_the_restart_path_not_the_unusable_exit():
 
 def test_one_seat_dying_does_not_abandon_its_siblings():
     async def main():
-        board, members, console, _ = lanes(script={"seat1-one": [GONE, GONE],
-                                                   "seat2-two": [{"text": verdict()}]})
-        outcomes = await board.ask_seats([("Agent1", "go"), ("Agent2", "go")],
-                                         round_=1, kind="verdict", phase="round",
-                                         parse_for=lambda a: {"mode": "review",
-                                                              "me": a,
-                                                              "known_items": set()})
+        board, _members, _console, _ = lanes(script={"seat1-one": [GONE, GONE], "seat2-two": [{"text": verdict()}]})
+        outcomes = await board.ask_seats(
+            [("Agent1", "go"), ("Agent2", "go")],
+            round_=1,
+            kind="verdict",
+            phase="round",
+            parse_for=lambda a: {"mode": "review", "me": a, "known_items": set()},
+        )
         return outcomes
 
     outcomes = run(main())
@@ -375,12 +416,11 @@ def test_one_seat_dying_does_not_abandon_its_siblings():
     assert outcomes["Agent2"].data is not None
 
 
-# --------------------------------------------------------------------------- §9's watchdog
+# ----------------------------------------------------------------- The chair's watchdog
+
 
 def chair_board(script, *, watchdog=1):
-    board, members, console, council_ = lanes(watchdog=watchdog, script=script,
-                                              script_defaults=True)
-    docket = state.Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    board, members, console, council_ = lanes(watchdog=watchdog, script=script, script_defaults=True)
     brief = Brief(mode="review", project="/proj")
     chair = Chair(council_, board, console, brief)
     return board, members, console, Watchdog(council_, board, chair, console)
@@ -388,9 +428,9 @@ def chair_board(script, *, watchdog=1):
 
 def test_a_pass_in_flight_suppresses_the_next_tick_instead_of_queueing_one():
     async def main():
-        board, members, console, watchdog = chair_board(
-            {"chair": [{"hang": 5, "text": '{"decisions": [{"agent": "Agent1",'
-                        ' "action": "keep", "reason": "x"}]}'}]})
+        board, _members, console, watchdog = chair_board(
+            {"chair": [{"hang": 5, "text": '{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "x"}]}'}]}
+        )
         board.chair_busy = True
         assert await watchdog.pass_once() is None
         assert watchdog.deferred == 1
@@ -400,9 +440,10 @@ def test_a_pass_in_flight_suppresses_the_next_tick_instead_of_queueing_one():
 
 
 def test_nothing_in_flight_means_no_digest_at_all():
-    """§12.1.2: a parked checkpoint is not in-flight work, so no pass is asked for."""
+    """A parked checkpoint is not in-flight work, so no pass is asked for."""
+
     async def main():
-        board, members, console, watchdog = chair_board({"chair": []})
+        _board, _members, console, watchdog = chair_board({"chair": []})
         return await watchdog.pass_once(), console.events
 
     parsed, events = run(main())
@@ -412,11 +453,9 @@ def test_nothing_in_flight_means_no_digest_at_all():
 
 def test_an_unreadable_digest_keeps_everyone():
     async def main():
-        board, members, console, watchdog = chair_board(
-            {"chair": [{"text": "the chair wrote prose instead of JSON"}]})
+        board, members, _console, watchdog = chair_board({"chair": [{"text": "the chair wrote prose instead of JSON"}]})
         board.in_flight["seat1-one"] = "seat1-one"
-        members.members["seat1-one"].rpc.activity = _Activity(
-            started=time.monotonic(), last_event=time.monotonic())
+        members.members["seat1-one"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
         return await watchdog.pass_once(), members.members["seat1-one"].restarts
 
     parsed, restarts = run(main())
@@ -429,8 +468,7 @@ def test_a_restart_decision_aborts_then_restarts_that_one_member():
         decisions += '"reason": "no event for 400s"}]}'
         board, members, console, watchdog = chair_board({"chair": [{"text": decisions}]})
         board.in_flight["seat1-one"] = "seat1-one"
-        members.members["seat1-one"].rpc.activity = _Activity(
-            started=time.monotonic(), last_event=time.monotonic())
+        members.members["seat1-one"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
         parsed = await watchdog.pass_once()
         return parsed, members.members["seat1-one"], console
 
@@ -444,8 +482,7 @@ def test_a_pass_naming_an_id_that_is_not_on_the_roster_restarts_nobody():
         decisions = '{"decisions": [{"agent": "Agent9", "action": "restart", "reason": "?"}]}'
         board, members, console, watchdog = chair_board({"chair": [{"text": decisions}]})
         board.in_flight["seat1-one"] = "seat1-one"
-        members.members["seat1-one"].rpc.activity = _Activity(
-            started=time.monotonic(), last_event=time.monotonic())
+        members.members["seat1-one"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
         await watchdog.pass_once()
         return members.members["seat1-one"].restarts, console
 
@@ -456,7 +493,7 @@ def test_a_pass_naming_an_id_that_is_not_on_the_roster_restarts_nobody():
 
 def test_watchdog_sec_zero_disables_the_tick_and_says_so():
     async def main():
-        board, members, console, watchdog = chair_board({}, watchdog=0)
+        _board, _members, console, watchdog = chair_board({}, watchdog=0)
         watchdog.start()
         assert watchdog.task is None
         await watchdog.stop()
@@ -467,10 +504,10 @@ def test_watchdog_sec_zero_disables_the_tick_and_says_so():
 
 
 def test_stop_cancels_a_pass_in_flight_rather_than_awaiting_it():
-    """§3.2: awaiting the tick would hang the exit behind a chair that never answers."""
+    """Awaiting the tick would hang the exit behind a chair that never answers."""
+
     async def main():
-        board, members, console, watchdog = chair_board(
-            {"chair": [{"hang": 30, "text": ""}]})
+        board, _members, _console, watchdog = chair_board({"chair": [{"hang": 30, "text": ""}]})
         board.in_flight["seat1-one"] = "seat1-one"
         started = time.monotonic()
         watchdog.start()

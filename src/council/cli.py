@@ -1,14 +1,12 @@
-"""§3.1 — the CLI surface: a table-driven flag set, one-page help, two-line errors.
+"""The CLI surface: a table-driven flag set, one-page help, two-line errors.
 
-Everything here is about the *invocation*; what the invocation means is `config.py`'s
-call.  A usage error is exit 2, a config error is exit 1, and the two are different
-exceptions for exactly that reason.
+Everything here is about the *invocation*; what the invocation means is `config.py`'s call.  A usage
+error is exit 2, a config error is exit 1, and the two are different exceptions for exactly that reason.
 """
+
 from __future__ import annotations
 
-import dataclasses
 import os
-import shutil
 import sys
 from dataclasses import dataclass, field
 
@@ -16,20 +14,20 @@ from . import __version__, suggest
 
 
 class UsageError(Exception):
-    """§3.2 exit 2: the file is fine, the invocation is not."""
+    """Exit 2: the file is fine, the invocation is not."""
 
 
 class ConfigError(Exception):
-    """§3.2 exit 1: a config error, an unresolvable pi, a refused setup."""
+    """Exit 1: a config error, an unresolvable pi, a refused setup."""
 
 
 @dataclass(frozen=True)
 class Flag:
-    long: str                 # without the leading dashes
+    long: str  # without the leading dashes
     short: str | None = None
     takes_value: bool = True
     choices: tuple[str, ...] | None = None
-    note: str = ""            # the override note shown when a repeat changes a value
+    note: str = ""  # the override note shown when a repeat changes a value
 
 
 FLAGS: tuple[Flag, ...] = (
@@ -85,7 +83,7 @@ exit codes: 0 a result was written, 1 no result, 2 usage error, 130/143 signalle
 
 
 def _whole_number(raw: str, flag: Flag) -> int:
-    """§3.1: whole numbers only — `1e3`, `0x10`, `3.5` are refused, naming the long flag."""
+    """Whole numbers only — `1e3`, `0x10`, `3.5` are refused, naming the long flag."""
     text = raw.strip()
     if text and text[0] in "+-":
         digits, sign = text[1:], text[0]
@@ -154,9 +152,8 @@ def parse_args(argv: list[str]) -> Args:
     return args
 
 
-def _record_override(obj: object, attr: str, value: object, flag: Flag,
-                     notes: list[str]) -> None:
-    """§3.1: a repeat keeps its last value; a repeat that *changes* it is noted."""
+def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: list[str]) -> None:
+    """A repeat keeps its last value; a repeat that *changes* it is noted."""
     old = getattr(obj, attr)
     if old is not None and old != value:
         notes.append(f"--{flag.long} {value} overrides {old} (the last one wins)")
@@ -164,20 +161,20 @@ def _record_override(obj: object, attr: str, value: object, flag: Flag,
 
 
 def fail(message: str) -> int:
-    """§3.1's two-line complaint, never a 30-line usage dump."""
+    """The CLI contract's two-line complaint, never a 30-line usage dump."""
     sys.stderr.write(f"[council] {message}\n")
     sys.stderr.write("[council] run 'council --help'\n")
     return 2
 
 
 def resolve_project(raw: str | None) -> str:
-    """The project directory, canonicalized (§3.5 normalizes both sides of every test)."""
+    """The project directory, canonicalized — both sides of every containment test are resolved the same way."""
     path = os.path.abspath(raw) if raw else os.getcwd()
     return os.path.realpath(path)
 
 
 def _runs_root_from_env(environ: dict[str, str]) -> str:
-    """§3.5's three resolution rules; pure — nothing is created here."""
+    """The three `COUNCIL_RUNS_DIR` resolution rules; pure — nothing is created here."""
     raw = environ.get("COUNCIL_RUNS_DIR") or ""
     if raw:
         # Rule 2: a relative COUNCIL_RUNS_DIR is made absolute against the invoking cwd.
@@ -189,43 +186,44 @@ def _runs_root_from_env(environ: dict[str, str]) -> str:
             return os.path.realpath(os.path.join(cache, "council", "runs"))
     home = environ.get("HOME") or ""
     if not home:
-        raise ConfigError("no runs root: set COUNCIL_RUNS_DIR or HOME "
-                          "(XDG_CACHE_HOME is unset or empty and there is no $HOME)")
+        raise ConfigError("no runs root: set COUNCIL_RUNS_DIR or HOME (XDG_CACHE_HOME is unset or empty and there is no $HOME)")
     return os.path.realpath(os.path.join(home, ".cache", "council", "runs"))
 
 
 def is_within(path: str, parent: str) -> bool:
-    """Pure containment test (§3.5 rule 3), both sides already resolved."""
+    """Pure containment test, both sides already resolved."""
     return path == parent or path.startswith(parent.rstrip("/") + "/")
 
 
 def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | None:
-    """§3.5's nested guard.  `COUNCIL_RUN_DIR` is the only marker (§3.5, plan D26)."""
+    """The nested-council guard.  `COUNCIL_RUN_DIR` is the only marker."""
     marker = environ.get("COUNCIL_RUN_DIR") or ""
     if not marker or allow_nested:
         return None
     parent = environ.get("COUNCIL_RUN_PATH") or ""
     where = f"; parent run directory: {parent}" if parent else ""
-    return (f"refusing to start a nested council: COUNCIL_RUN_DIR={marker} is set{where}. "
-            "Pass --allow-nested to convene inside a running council.")
+    return (
+        f"refusing to start a nested council: COUNCIL_RUN_DIR={marker} is set{where}. "
+        "Pass --allow-nested to convene inside a running council."
+    )
 
 
-# --------------------------------------------------------------------------- §3.1/§3.2
-# `main()`, and the only place exit codes are chosen.  `python -m council` reaches it the
-# same way the console script does, so there is one entry and one contract.  The internal
-# `--setup-seat` dispatch comes first: §4's launcher form is this same entry point,
-# resolved by the spawner as `sys.executable -m council` and never as `sys.argv[0]`
-# (plan D21).
+# --------------------------------------------------------------------------- CLI contract, exit codes `main()`, and the only place
+# exit codes are chosen.  `python -m council` reaches it the same way the console script does, so there is one entry and one
+# contract. The internal `--setup-seat` dispatch comes first: the launcher form is this same entry point, resolved by the spawner
+# as `sys.executable -m council` and never as `sys.argv[0]`, so a member never runs whatever `sys.argv[0]` happened to be called.
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     from . import launcher
+
     if argv[:1] == ["--setup-seat"]:
         return launcher.setup_seat_main(argv[1:])
     from . import startup
+
     try:
-        args, launch = startup.convene(argv)
+        _args, launch = startup.convene(argv)
     except UsageError as failure:
         return fail(str(failure))
     except ConfigError as failure:
@@ -236,34 +234,38 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as failure:
         sys.stderr.write(f"[council] {failure}\n")
         return 1
-    for note in launch.notes:                       # §3.1 + D16: the override trio
+    for note in launch.notes:  # the override notes, each saying what it costs
         print(f"[council] note: {note}")
     from . import supervisor
-    return supervisor.spawn_orchestrator(lambda: _inside_namespace(launch),
-                                         name="orchestrator")
+
+    return supervisor.spawn_orchestrator(lambda: _inside_namespace(launch), name="orchestrator")
 
 
 def _inside_namespace(launch) -> int:
-    """§10 steps 4–7, then the run, then nothing left behind (§12.1.11's order).
+    """The sandbox steps — private remount, dumpability, the tmpfs cap, the per-member overlays, the
+    lower-layer fd — then the run, then nothing left behind, in the order `sandbox/setup.py` performs them.
 
-    A sandbox step that fails is fatal (§14.4): one line naming the syscall and its errno,
-    no fallback, no probe, and — because the run directory is created only after this
-    returns cleanly — nothing created anywhere.
+    A sandbox step that fails is fatal: one line naming the syscall and its errno, no fallback, no probe,
+    and — because the run directory is created only after this returns cleanly — nothing created anywhere.
     """
     import asyncio
 
     from . import startup
     from .sandbox import setup as sandbox_setup
+
     members = launch.council.member_file_bases
     try:
         sandbox = sandbox_setup.establish(
-            project=launch.council.project, runs_dir=launch.runs_dir,
-            sandbox_mib=launch.council.sandbox_mib, members=members,
-            scratch_cwd=launch.runs_dir, sandbox_dir=launch.sandbox_dir)
+            project=launch.council.project,
+            runs_dir=launch.runs_dir,
+            sandbox_mib=launch.council.sandbox_mib,
+            members=members,
+            scratch_cwd=launch.runs_dir,
+            sandbox_dir=launch.sandbox_dir,
+        )
     except OSError as failure:
         where = f"{failure.filename} " if failure.filename else ""
-        sys.stderr.write(f"[council] sandbox setup failed: {where}"
-                         f"{os.strerror(failure.errno or 0)} (errno {failure.errno})\n")
+        sys.stderr.write(f"[council] sandbox setup failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno})\n")
         return 1
     except Exception as failure:
         sys.stderr.write(f"[council] sandbox setup failed: {failure}\n")
@@ -274,6 +276,7 @@ def _inside_namespace(launch) -> int:
         sys.stderr.write(f"[council] {failure}\n")
         return 1
     from .run import orchestrate
+
     try:
         return asyncio.run(orchestrate(launch, sandbox))
     finally:

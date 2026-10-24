@@ -1,4 +1,5 @@
-"""§5.4 — review-mode prompt text (§12.1.6: text is data, and it all lives here)."""
+"""Review-mode prompt text.  Text is data, and it all lives here."""
+
 from __future__ import annotations
 
 PHASE0_TASK = """\
@@ -57,5 +58,4 @@ ROUND_SCHEMA = """\
 """
 
 EXTRA_BRIEFING = ""
-MERGE_TASK = ("Findings raised since the last merge are listed below. Say which describe "
-              "the same underlying defect.")
+MERGE_TASK = "Findings raised since the last merge are listed below. Say which describe the same underlying defect."

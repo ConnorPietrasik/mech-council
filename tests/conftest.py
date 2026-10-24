@@ -1,9 +1,9 @@
-"""§13's harness rules (PLAN §6), built once and used by every family.
+"""The harness rules, built once and used by every family.
 
-The suite must pass from inside a council member, so nothing here assumes `/tmp` is
-usable ground, nothing writes inside the project under test, and every CLI is spawned in
-its own process group so a timed-out case cannot leave a supervisor holding mounts.
+The suite must pass from inside a council member, so nothing here assumes `/tmp` is usable ground, nothing writes inside the
+project under test, and every CLI is spawned in its own process group so a timed-out case cannot leave a supervisor holding mounts.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,19 +17,16 @@ from dataclasses import dataclass, field
 
 import pytest
 
+# The fixture ground is chosen in tests/support/ground.py, and the sandbox family reads the
+# fstype under it once and skips the whole family on that answer.
+from tests.support.ground import FIXTURE_ROOT
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAKE_PI = os.path.join(HERE, "support", "fake_pi.py")
 
-# PLAN §6: plain-fs ground, chosen at run time.  Inside a member, `$TMPDIR` is that
-# ground; outside, a scratch dir beside the checkout, which is never the project under test.
-# PLAN §6: plain ground outside the project under test.  Inside a member `$TMPDIR` *is*
-# that ground (its own scratch); outside, a scratch dir beside the checkout.
-# `COUNCIL_TEST_FS` names plain ground when the operator knows where it is; `$TMPDIR` is
-# right inside a member, where it is that member's own scratch; the checkout's own
-# filesystem is the last resort.  §13.9's skip then decides honestly whether the chosen
-# ground can hold an overlay lower at all, rather than the family passing on `/tmp`
-# because the overlay under it happens to tolerate one mount.
-from tests.support.ground import FIXTURE_ROOT  # noqa: E402  (§13.9's rule)
+# The choice of ground belongs to `tests/support/ground.py`: `$COUNCIL_TEST_FS`, then `$TMPDIR` (which inside
+# a member *is* that member's own scratch), then a scratch dir beside the checkout — never the project under
+# test.  `tests/test_sandbox.py` reads the fstype under it once and skips the whole family on that answer.
 
 
 def _plain_ground(name: str) -> str:
@@ -63,8 +60,9 @@ def _try(func, *args) -> None:
 
 
 # ---------------------------------------------------------------------------
-# child environment (§13's harness rules, verbatim)
+# child environment (the harness rules, verbatim)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def child_env(ground):
@@ -148,8 +146,7 @@ def project(ground):
     return path
 
 
-def write_project_config(path: str, text: str | None = None, *,
-                         pi_cli: str = FAKE_PI) -> str:
+def write_project_config(path: str, text: str | None = None, *, pi_cli: str = FAKE_PI) -> str:
     config = os.path.join(path, "council.toml")
     with open(config, "w", encoding="utf-8") as handle:
         handle.write(text if text is not None else DEFAULT_CONFIG.format(pi_cli=pi_cli))
@@ -159,6 +156,7 @@ def write_project_config(path: str, text: str | None = None, *,
 # ---------------------------------------------------------------------------
 # the CLI, as a subprocess in its own process group
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Run:
@@ -194,22 +192,26 @@ def cli(child_env):
     """`run_cli(args, cwd=...)` — the real console script, in its own process group."""
     spawned: list[int] = []
 
-    def runner(args, *, cwd=None, env=None, stdin=None, timeout=90, extra_scrub=(),
-               scrub=True):
-        """Run the CLI.  `scrub=False` is how §13.5's nested-guard case sets the marker."""
+    def runner(args, *, cwd=None, env=None, stdin=None, timeout=90, extra_scrub=(), scrub=True):
+        """Run the CLI.  `scrub=False` is how the CLI suite's nested-guard case sets the marker."""
         full = dict(child_env)
         full.update(env or {})
         for key in extra_scrub:
             full.pop(key, None)
         if scrub:
-            # §13's harness rule: an inherited run marker would trip §3.5's guard.
+            # The harness rule: an inherited run marker would trip the guard.
             full.pop("COUNCIL_RUN_DIR", None)
             full.pop("COUNCIL_RUN_PATH", None)
         process = subprocess.Popen(
-            [sys.executable, "-m", "council", *args], cwd=cwd, env=full,
+            [sys.executable, "-m", "council", *args],
+            cwd=cwd,
+            env=full,
             stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            start_new_session=True)
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
         spawned.append(process.pid)
         try:
             out, err = process.communicate(stdin, timeout=timeout)
@@ -284,9 +286,10 @@ def _read_json(path: str) -> dict:
 # an offline council, convened in-process (no CLI, no namespace)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def council(project):
-    """The `review` council from the fixture config, convened for real (§3.3)."""
+    """The `review` council from the fixture config, convened for real."""
     from council import config as config_mod
     from council.cli import Args
 
@@ -297,7 +300,7 @@ def council(project):
 
 @pytest.fixture(scope="session")
 def console_script() -> str:
-    """The installed entry point — §13.9 asserts a member can exec it by absolute path."""
+    """The installed entry point — the sandbox family asserts a member can exec it by absolute path."""
     scripts = sysconfig.get_path("scripts")
     path = os.path.join(scripts, "council")
     return path if os.path.exists(path) else sys.executable

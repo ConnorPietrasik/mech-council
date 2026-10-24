@@ -1,16 +1,16 @@
-"""§11.1 — the `[council]` line and §3.4's `events.jsonl`, from one emitter.
+"""The `[council]` line and `events.jsonl`, from one emitter.
 
-Every event name is snake_case (§3.3's naming rule) and the file is append-only, so a
-consumer never breaks when a new event appears.  Console line and event record are
-emitted together: a fact never reaches the run directory without being said, or the
-reverse.
+Every event name is snake_case and the file is append-only, so a consumer never breaks when a new event appears.  Console
+line and event record are emitted together: a fact never reaches the run directory without being said, or the reverse.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 import time
+from typing import BinaryIO
 
 
 class Console:
@@ -30,7 +30,7 @@ class Console:
         print(line, file=self.stream, flush=True)
 
     def note(self, text: str) -> None:
-        """A plan §3.1 override note or any other non-event chatter, still `[council]`-tagged."""
+        """A CLI contract override note or any other non-event chatter, still `[council]`-tagged."""
         self.say(f"note: {text}")
 
     def event(self, name: str, **fields) -> None:
@@ -42,14 +42,14 @@ class Console:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def events(self) -> list[dict]:
-        """The records this console emitted, in order (§11.1's log, read back in tests)."""
+        """The records this console emitted, in order (the event stream's log, read back in tests)."""
         return list(self._events)
 
     def duration(self) -> float:
         return round(time.monotonic() - self.started, 1)
 
     def transcript_note(self) -> str:
-        """§11.2's honest note: with `off` there is nothing to point at but stderr."""
+        """The artifact tree's honest note: with `off` there is nothing to point at but stderr."""
         if self._written:
             return f"{self._written} bytes of raw protocol"
         return "stderr only, under `agents/`"
@@ -59,14 +59,14 @@ class Console:
 
 
 class Transcripts:
-    """§11.2's two levels and §3.4's sink rule, including the lazy `agents/` directory."""
+    """The two transcript levels and the console sink, with the lazy `agents/` dir."""
 
     def __init__(self, run_dir: str, level: str) -> None:
         self.run_dir = run_dir
         self.level = level
         self.agents_dir = os.path.join(run_dir, "agents")
-        self._raw: dict[str, object] = {}
-        self._err: dict[str, object] = {}
+        self._raw: dict[str, BinaryIO] = {}
+        self._err: dict[str, BinaryIO] = {}
         self.bytes_written = 0
 
     def transcript_path(self, file_base: str) -> str:
@@ -94,7 +94,7 @@ class Transcripts:
 
 
 class MemberSinks:
-    """One member's two sinks: the verbatim stdout stream and its stderr file (§3.4/D7)."""
+    """One member's two sinks: the verbatim stdout stream and its stderr file."""
 
     def __init__(self, manager: Transcripts, file_base: str) -> None:
         self.manager = manager

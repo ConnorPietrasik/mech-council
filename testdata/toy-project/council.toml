@@ -1,5 +1,5 @@
-# The §13.12 smoke config: two seats and a chair, two rounds, transcripts off.
-# `pi_cli` is left unset on purpose — §3.3's discovery finds the real pi, which is the
+# The smoke test's config: two seats and a chair, two rounds, transcripts off.
+# `pi_cli` is left unset on purpose — pi discovery finds the real pi, which is the
 # point of a smoke test that spends tokens.
 
 [defaults]

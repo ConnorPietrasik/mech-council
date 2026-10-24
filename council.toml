@@ -1,5 +1,5 @@
-# council.toml — the councils this project convenes (§3.3).
-# Knobs not stated here take their built-in defaults (§3.3).
+# council.toml — the councils this project convenes.
+# Knobs not stated here take their built-in defaults.
 
 [councils.review]                   # `council review` — the whole tree
 mode = "review"
@@ -50,7 +50,7 @@ mode = "review"
 goal = "Another agent made the staged changes; did they do a good job?"
 
 [[councils.review-staged.agents]]    # the roster is written down again on purpose —
-name = "Metic"                       # a roster is never inherited (§3.3)
+name = "Metic"                       # a roster is never inherited
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """

@@ -1,19 +1,19 @@
-"""§3.1/§3.3's one suggestion function — flags, config keys and council names alike.
+"""One suggestion function — flags, config keys and council names alike.
 
-Reached only for a name the parser has already refused, so there is no "it matched,
-so stay silent" case: a normalized match is the hint's best answer, never a reason to
-withhold one.  It **suggests, never accepts** (§3.3).
+Reached only for a name the parser has already refused, so there is no "it matched, so stay silent" case: a
+normalized match is the hint's best answer, never a reason to withhold one.  It **suggests, never accepts**.
 
-The ladder (plan D8), after normalizing both sides:
+The ladder, after normalizing both sides:
 
 1. exact normalized match → that name;
-2. prefix match either way round → that name, resolved against step 3 whenever a
-   near-miss is *closer* than the prefix: a hint that names a real but wrong council is
-   worse than no hint, because convening it is not harmless;
+2. prefix match either way round → that name, resolved against rule 3 below whenever a
+near-miss is *closer* than the prefix: a hint that names a real but wrong council is
+worse than no hint, because convening it is not harmless;
 3. Levenshtein over the normalized forms: ≤1 edit under 6 chars, ≤2 at 6 and above.
 
-No match at any step → no hint at all: §3.1's restraint is the point.
+No match at any step → no hint at all: the CLI contract's restraint is the point.
 """
+
 from __future__ import annotations
 
 
@@ -34,23 +34,32 @@ def distance(a: str, b: str) -> int:
     for i, ca in enumerate(a, 1):
         current = [i]
         for j, cb in enumerate(b, 1):
-            current.append(min(previous[j] + 1,          # deletion
-                               current[j - 1] + 1,       # insertion
-                               previous[j - 1] + (ca != cb)))  # substitution
+            current.append(
+                min(
+                    previous[j] + 1,  # deletion
+                    current[j - 1] + 1,  # insertion
+                    previous[j - 1] + (ca != cb),
+                )
+            )  # substitution
         previous = current
     return previous[-1]
 
 
 def threshold(form: str) -> int:
-    """≤1 edit for short tokens, ≤2 for ≥6 chars (§3.1)."""
+    """≤1 edit for short tokens, ≤2 for ≥6 chars."""
     return 2 if len(form) >= 6 else 1
 
 
-def _closest(forms: list[str], probe: str) -> str | None:
-    best, best_d = None, None
-    for form in forms:
+def _closest(forms: list[str], probe: str) -> str:
+    """The element of a non-empty `forms` nearest to `probe`.
+
+    Every caller reaches here out from under an `if hits:` / `if near:` guard, so the empty
+    list is not a case this answers with `None`; it answers with the first nearest name.
+    """
+    best, best_d = forms[0], distance(probe, forms[0])
+    for form in forms[1:]:
         d = distance(probe, form)
-        if best_d is None or d < best_d:
+        if d < best_d:
             best, best_d = form, d
     return best
 
@@ -58,9 +67,8 @@ def _closest(forms: list[str], probe: str) -> str | None:
 def suggest(refused: str, known: list[str] | tuple[str, ...]) -> str | None:
     """The canonical spelling of the closest known name, or ``None``.
 
-    Two *known* names that normalize alike both print, joined by ``/``, rather than
-    one being picked (possible for council names, which are user text; not for the
-    fixed flag and key sets).
+    Two *known* names that normalize alike both print, joined by ``/``, rather than one being
+    picked (possible for council names, which are user text; not for the fixed flag and key sets).
     """
     probe = normalize(refused)
     if not probe:
@@ -81,9 +89,8 @@ def suggest(refused: str, known: list[str] | tuple[str, ...]) -> str | None:
     if hits:
         near = [form for form in by_form if distance(probe, form) <= threshold(probe)]
         pick = _closest(hits, probe)
-        # A prefix is a weak signal when the refused name is a *near-miss* of something
-        # longer: `review-stagwd` is a prefix of nothing but one edit from `review-staged`,
-        # and a hint that sends someone to the wrong council is worse than no hint.
+        # A prefix is a weak signal when the refused name is a *near-miss* of something longer: `review-stagwd` is a prefix of
+        # nothing but one edit from `review-staged`, and a hint that sends someone to the wrong council is worse than no hint.
         if near:
             best = _closest(near, probe)
             if distance(probe, best) < distance(probe, pick):

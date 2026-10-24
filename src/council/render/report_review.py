@@ -1,10 +1,10 @@
-"""§6.3 — `report.md`.  A pure function of (state, context): §13.11 compares it byte-for-byte."""
+"""`report.md`.  A pure function of (state, context), and so byte-for-byte reproducible."""
+
 from __future__ import annotations
 
-from ..deliberation.dispositions import derive, support
+from ..deliberation.dispositions import derive
 from ..deliberation.escalations import effective_class
-from ..deliberation.state import (AGREED, DISPUTED, HUMAN, NEEDS_HUMAN, REJECTED,
-                                  UNHEARD, UNSEEN, Docket, Item, Question)
+from ..deliberation.state import AGREED, DISPUTED, HUMAN, REJECTED, UNHEARD, UNSEEN, Docket, Item, Question
 from .context import ReportContext
 from .text import caption, severity_key, wrap
 
@@ -15,8 +15,7 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
 
     buckets = _bucket(docket)
     lines += _consensus(docket, buckets["agreed"], context)
-    lines += _not_fully_vetted(docket, buckets["unheard"] + buckets["human"]
-                               + buckets["reopened"], context)
+    lines += _not_fully_vetted(docket, buckets["unheard"] + buckets["human"] + buckets["reopened"], context)
     lines += _disputed(docket, buckets["disputed"], context)
     lines += _rejected(docket, buckets["rejected"], context)
     lines += _never_vetted(docket, buckets["unseen"], context)
@@ -31,15 +30,13 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
 def _bucket(docket: Docket) -> dict[str, list[Item]]:
     """Where each item prints.  A reopened item that never re-closed is its own bucket,
     so it is never silently under either the consensus or the rejection section."""
-    out: dict[str, list[Item]] = {"agreed": [], "unheard": [], "disputed": [],
-                                  "rejected": [], "unseen": [], "human": [],
-                                  "reopened": []}
+    out: dict[str, list[Item]] = {"agreed": [], "unheard": [], "disputed": [], "rejected": [], "unseen": [], "human": [], "reopened": []}
     for item in docket.items.values():
         if item.closed:
             out["agreed" if item.disposition == AGREED else "rejected"].append(item)
             continue
         state = derive(docket, item.id)
-        if state in (AGREED, REJECTED):       # derived but not yet closed: report the state
+        if state in (AGREED, REJECTED):  # derived but not yet closed: report the state
             out["agreed" if state == AGREED else "rejected"].append(item)
             continue
         if item.history and not item.closed:
@@ -59,33 +56,31 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
         return out + ["Nothing reached the majority bar with no reasoned objection.", ""]
     for item in _sorted(items):
         bar = docket.bar()
-        acceptors = [a for a in docket.roster if docket.stance(item.id, a)
-                     and docket.stance(item.id, a).stance == "agree"]
-        declined = [a for a in docket.roster
-                    if (r := docket.stance(item.id, a)) and r.declined]
-        abstainers = [a for a in docket.roster
-                      if (r := docket.stance(item.id, a)) and not r.declined
-                      and r.stance in ("abstain", "needs_human")]
+        acceptors = [a for a in docket.roster if (r := docket.stance(item.id, a)) and r.stance == "agree"]
+        declined = [a for a in docket.roster if (r := docket.stance(item.id, a)) and r.declined]
+        abstainers = [
+            a for a in docket.roster if (r := docket.stance(item.id, a)) and not r.declined and r.stance in ("abstain", "needs_human")
+        ]
         out.append(f"### {item.id} · {item.severity} · {item.claim}")
-        if item.detail.strip():        # an empty detail must not print a stray line
+        if item.detail.strip():  # an empty detail must not print a stray line
             out += [f"  {line}" for line in wrap(item.detail)]
         if item.evidence:
             out.append(f"- evidence: {item.evidence}")
-        out.append(f"- raised by: {_names(item.raised_by, context)}"
-                   + (f" (also reported by {_names(item.also_reported_by, context)})"
-                      if item.also_reported_by else ""))
-        out.append(f"- accepted by ({len(acceptors)}/{docket.n}, bar {bar}): "
-                   f"{_names(acceptors, context) or '(nobody stated agree)'}")
+        out.append(
+            f"- raised by: {_names(item.raised_by, context)}"
+            + (f" (also reported by {_names(item.also_reported_by, context)})" if item.also_reported_by else "")
+        )
+        out.append(f"- accepted by ({len(acceptors)}/{docket.n}, bar {bar}): {_names(acceptors, context) or '(nobody stated agree)'}")
         if declined:
-            out.append(f"- **declined** — the run asked and was not answered: "
-                       f"{_names(declined, context)}")
+            out.append(f"- **declined** — the run asked and was not answered: {_names(declined, context)}")
         if abstainers:
             out.append(f"- not vetted by: {_names(abstainers, context)}")
         out.append(f"- closed: {item.disposition} in round {item.closed_round}")
         for question in _questions_on(docket, item, ("skipped", "unasked")):
-            out.append(f"- caveat — {question.id} was "
-                       f"{'**skipped** by the human' if question.state == 'skipped' else 'left '
-                            '**unasked**'}: {question.text}")
+            out.append(
+                f"- caveat — {question.id} was "
+                f"{'**skipped** by the human' if question.state == 'skipped' else 'left **unasked**'}: {question.text}"
+            )
         for note in item.history:
             out.append(f"- history: {note}")
         for marker in item.markers:
@@ -109,18 +104,20 @@ def _not_fully_vetted(docket: Docket, items: list[Item], context: ReportContext)
                 out.append(f"- {caption(agent, context.captions)}: (no stance yet)")
                 continue
             tag = " `declined`" if record.declined else ""
-            out.append(f"- {caption(agent, context.captions)}: {record.stance}"
-                       f" (round {record.round}){tag}"
-                       + (f" — {record.note}" if record.note else ""))
-        not_vetted = [a for a in docket.roster
-                      if (r := docket.stance(item.id, a)) is None or r.stance != "agree"]
+            out.append(
+                f"- {caption(agent, context.captions)}: {record.stance}"
+                f" (round {record.round}){tag}" + (f" — {record.note}" if record.note else "")
+            )
+        not_vetted = [a for a in docket.roster if (r := docket.stance(item.id, a)) is None or r.stance != "agree"]
         out.append(f"- not vetted by: {_names(not_vetted, context)}")
         for escalation in docket.standing_escalations(item.id):
             question = docket.questions.get(escalation.question_id)
             if question:
-                out.append(f"- standing question {question.id} from "
-                           f"{_names([escalation.asker], context)}: {question.text} "
-                           f"({'effective-blocking' if effective_class(docket, question) == 'blocking' else 'deferred'})")
+                out.append(
+                    f"- standing question {question.id} from "
+                    f"{_names([escalation.asker], context)}: {question.text} "
+                    f"({'effective-blocking' if effective_class(docket, question) == 'blocking' else 'deferred'})"
+                )
         for note in item.history:
             out.append(f"- history: {note}")
         out.append("")
@@ -139,9 +136,10 @@ def _disputed(docket: Docket, items: list[Item], context: ReportContext) -> list
             record = docket.stance(item.id, agent)
             if record is None:
                 continue
-            out.append(f"- {caption(agent, context.captions)} — **{record.stance}** "
-                       f"(round {record.round}): {record.note or '(no note)'}"
-                       + (f" | evidence: {record.evidence}" if record.evidence else ""))
+            out.append(
+                f"- {caption(agent, context.captions)} — **{record.stance}** "
+                f"(round {record.round}): {record.note or '(no note)'}" + (f" | evidence: {record.evidence}" if record.evidence else "")
+            )
         out.append("")
     return out
 
@@ -158,9 +156,10 @@ def _rejected(docket: Docket, items: list[Item], context: ReportContext) -> list
         for agent in docket.roster:
             record = docket.stance(item.id, agent)
             if record and record.stance == "disagree":
-                out.append(f"- killed by {caption(agent, context.captions)}: "
-                           f"{record.note or '(no note)'}"
-                           + (f" | evidence: {record.evidence}" if record.evidence else ""))
+                out.append(
+                    f"- killed by {caption(agent, context.captions)}: "
+                    f"{record.note or '(no note)'}" + (f" | evidence: {record.evidence}" if record.evidence else "")
+                )
         for note in item.history:
             out.append(f"- history: {note}")
         out.append("")
@@ -174,11 +173,12 @@ def _never_vetted(docket: Docket, items: list[Item], context: ReportContext) -> 
     for item in _sorted(items):
         records = {a: docket.stance(item.id, a) for a in docket.roster}
         missing = [a for a, record in records.items() if record is None]
-        declined = [a for a, record in records.items() if record is not None
-                    and record.declined]
-        why = f"never seen by {_names(missing, context)}" if missing else \
-            (f"every seat declined to engage (§6.2) — {_names(declined, context)}"
-             if declined else "no seat recorded a stance")
+        declined = [a for a, record in records.items() if record is not None and record.declined]
+        why = (
+            f"never seen by {_names(missing, context)}"
+            if missing
+            else (f"every seat declined to engage — {_names(declined, context)}" if declined else "no seat recorded a stance")
+        )
         marks = "".join(f"  `{m}`" for m in item.markers)
         out.append(f"- **{item.id}** ({item.severity}) {item.claim} — {why}{marks}")
     out.append("")
@@ -186,7 +186,7 @@ def _never_vetted(docket: Docket, items: list[Item], context: ReportContext) -> 
 
 
 def _sandbox_limits(docket: Docket) -> list[str]:
-    """§10/§6.3: an item whose evidence *is* an overlay refusal, never as consensus proof."""
+    """An item whose evidence *is* an overlay refusal, never as consensus proof."""
     hit = [item for item in docket.items.values() if "sandbox_limit" in item.markers]
     out = ["## Sandbox limits", ""]
     if not hit:
@@ -207,7 +207,7 @@ def _sandbox_writes(context: ReportContext) -> list[str]:
         head = f"- `{member.get('file_base', '?')}`"
         if member.get("id"):
             head += f" ({member['id']})"
-        head += (f" — {member.get('bytes', 0)} bytes of the {context.sandbox_mib} MiB cap")
+        head += f" — {member.get('bytes', 0)} bytes of the {context.sandbox_mib} MiB cap"
         out.append(head)
         for kind in ("created", "modified", "deleted"):
             paths = member.get(kind) or []
@@ -230,38 +230,39 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
             if item is not None:
                 state = item.disposition if item.closed else derive(docket, item.id)
                 section = _section_for(state)
-                out.append(f"- item: **{item.id}** {item.claim} → `{state}` "
-                           f"(reported under \"{section}\")")
+                out.append(f'- item: **{item.id}** {item.claim} → `{state}` (reported under "{section}")')
         else:
-            out.append("- stands on its own: no item (§5.2.8)")
-        out.append(f"- asked by: {_names(question.askers, context)}"
-                   + (" (chair)" if question.chair_raised else ""))
-        out.append(f"- raised: round {question.raised_round}"
-                   + (f", latest text update: round {question.updated_round}"
-                      if question.updated_round != question.raised_round else ""))
-        out.append(f"- effective class: **{effective_class(docket, question)}**"
-                   + (" (the asker asked for the bar)"
-                      if question.blocking_requested else ""))
+            out.append("- stands on its own: no item")
+        out.append(f"- asked by: {_names(question.askers, context)}" + (" (chair)" if question.chair_raised else ""))
+        out.append(
+            f"- raised: round {question.raised_round}"
+            + (f", latest text update: round {question.updated_round}" if question.updated_round != question.raised_round else "")
+        )
+        out.append(
+            f"- effective class: **{effective_class(docket, question)}**"
+            + (" (the asker asked for the bar)" if question.blocking_requested else "")
+        )
         out.append(f"- question as asked: {question.text}")
         for escalation in _escalations_for(docket, question):
             for challenge in escalation.challenges:
-                out.append(f"- challenge from {caption(challenge['by'], context.captions)} "
-                           f"(round {challenge['round']}): {challenge.get('note') or ''}"
-                           + (f" | evidence: {challenge['evidence']}"
-                              if challenge.get("evidence") else ""))
+                out.append(
+                    f"- challenge from {caption(challenge['by'], context.captions)} "
+                    f"(round {challenge['round']}): {challenge.get('note') or ''}"
+                    + (f" | evidence: {challenge['evidence']}" if challenge.get("evidence") else "")
+                )
             if escalation.asker in question.askers:
                 if escalation.defense:
-                    out.append(f"- defense from {caption(escalation.asker, context.captions)}: "
-                               f"{escalation.defense}")
+                    out.append(f"- defense from {caption(escalation.asker, context.captions)}: {escalation.defense}")
                 elif escalation.undefended:
-                    out.append(f"- no defense: {caption(escalation.asker, context.captions)} "
-                               "did not answer the challenge")
+                    out.append(f"- no defense: {caption(escalation.asker, context.captions)} did not answer the challenge")
         if question.recommendation:
             out.append(f"- asker's recommendation: {question.recommendation}")
         if question.answer:
             out.append(f"- **answer** (round {question.answer_round}): {question.answer}")
-        out.append(f"- end state: **{question.state if question.state != 'asked' else 'standing'}**"
-                   + (f" ({', '.join(markers)})" if markers else ""))
+        out.append(
+            f"- end state: **{question.state if question.state != 'asked' else 'standing'}**"
+            + (f" ({', '.join(markers)})" if markers else "")
+        )
         out.append("")
     return out
 
@@ -286,8 +287,7 @@ def _questions_on(docket: Docket, item: Item, states: tuple[str, ...]) -> list[Q
 
 
 def _escalations_for(docket: Docket, question: Question):
-    return [esc for esc in docket.escalations.values()
-            if esc.question_id == question.id or esc.item_id == question.item_id]
+    return [esc for esc in docket.escalations.values() if esc.question_id == question.id or esc.item_id == question.item_id]
 
 
 def _markers(docket: Docket, question: Question) -> list[str]:
@@ -305,9 +305,14 @@ def _markers(docket: Docket, question: Question) -> list[str]:
 
 
 def _section_for(state: str) -> str:
-    return {AGREED: "Consensus findings", REJECTED: "Rejected findings",
-            UNHEARD: "Not fully vetted", UNSEEN: "Never vetted",
-            DISPUTED: "Disputed findings", HUMAN: "Not fully vetted"}.get(state, state)
+    return {
+        AGREED: "Consensus findings",
+        REJECTED: "Rejected findings",
+        UNHEARD: "Not fully vetted",
+        UNSEEN: "Never vetted",
+        DISPUTED: "Disputed findings",
+        HUMAN: "Not fully vetted",
+    }.get(state, state)
 
 
 def _names(ids: list[str], context: ReportContext) -> str:

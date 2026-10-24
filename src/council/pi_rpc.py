@@ -1,27 +1,27 @@
-"""§4 / §12.1.7 — the one boundary where pi's dialect is spoken.
+"""The one boundary where pi's dialect is spoken.
 
-Framing, id correlation and the command set live here and nowhere else, so a protocol
-change is a one-file fix.  Nothing in this module matches sandbox text (§10's inference
-is handed to an injected callback) and nothing renames pi's names into ours: this is the
-only rename site in the design.
+Framing, id correlation and the command set live here and nowhere else, so a protocol change is
+a one-file fix.  Nothing in this module matches sandbox text (the sandbox inference is handed to
+an injected callback) and nothing renames pi's names into ours: this is the only rename site.
 """
+
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
-#: §4's command set, and only these.
+#: pi's RPC command set, and only these.
 COMMANDS = ("prompt", "abort", "clear_queue", "get_state")
 
-ABORT_TIMEOUT_S = 30          # plan D15: the abort response's own bound (§4)
+ABORT_TIMEOUT_S: float = 30  # the abort response's own bound, never a knob
 
 
 class ProtocolError(Exception):
-    """A child that does not speak the protocol we send.  Hard error, per §3.2."""
+    """A child that does not speak the protocol we send.  Hard error: no result, exit 1."""
 
 
 class ChildGone(ProtocolError):
@@ -30,7 +30,7 @@ class ChildGone(ProtocolError):
 
 @dataclass
 class Activity:
-    """What the watchdog needs about an in-flight ask (§9's digest inputs)."""
+    """What the watchdog needs about an in-flight ask (the chair's digest inputs)."""
 
     started: float
     last_event: float
@@ -45,7 +45,7 @@ class Activity:
 
 @dataclass
 class Answer:
-    """One ask's outcome: text, and the two fields §3.3's unusable-seat test reads."""
+    """One ask's outcome: text, and the two fields the unusable-seat test reads."""
 
     text: str = ""
     stop_reason: str = ""
@@ -62,13 +62,18 @@ class Answer:
 
 
 class PiRpc:
-    """One long-lived `pi --mode rpc` child, read continuously (§4's backpressure rule)."""
+    """One long-lived `pi --mode rpc` child, read continuously — which is what keeps backpressure honest."""
 
-    def __init__(self, *, label: str, stdout: asyncio.StreamReader,
-                 stdin: asyncio.StreamWriter,
-                 on_event: Callable[[dict], None] | None = None,
-                 on_tool_result: Callable[[dict], None] | None = None,
-                 transcript=None) -> None:
+    def __init__(
+        self,
+        *,
+        label: str,
+        stdout: asyncio.StreamReader,
+        stdin: asyncio.StreamWriter,
+        on_event: Callable[[dict], None] | None = None,
+        on_tool_result: Callable[[dict], None] | None = None,
+        transcript=None,
+    ) -> None:
         self.label = label
         self._out = stdout
         self._in = stdin
@@ -97,11 +102,10 @@ class PiRpc:
                 await self._reader_task
 
     async def _pump(self) -> None:
-        """Raw chunk reads split on `b"\\n"` only (§4, plan D22).
+        """Raw chunk reads split on `b"\\n"` only.
 
-        `str.splitlines()` would break on U+0085/U+2028/U+2029 — all legal inside a JSON
-        string — and asyncio's line limit would raise a plain `ValueError` and clear the
-        buffer on a multi-megabyte record.  There is no line-size cap here at all.
+        `str.splitlines()` would break on U+0085/U+2028/U+2029 — all legal inside a JSON string — and asyncio's line limit would
+        raise a plain `ValueError` and clear the buffer on a multi-megabyte record.  There is no line-size cap here at all.
         """
         buffer = b""
         try:
@@ -116,11 +120,11 @@ class PiRpc:
                     index = buffer.find(b"\n")
                     if index < 0:
                         break
-                    line, buffer = buffer[:index], buffer[index + 1:]
+                    line, buffer = buffer[:index], buffer[index + 1 :]
                     self._dispatch(line)
-        except (asyncio.CancelledError, ChildGone):
+        except asyncio.CancelledError, ChildGone:
             raise
-        except Exception:                      # a broken pipe is a dead child, not a crash
+        except Exception:  # a broken pipe is a dead child, not a crash
             pass
         finally:
             self.alive = False
@@ -133,7 +137,7 @@ class PiRpc:
         try:
             record = json.loads(line.decode("utf-8", "replace"))
         except json.JSONDecodeError:
-            return                             # stderr-shaped noise never reaches us anyway
+            return  # stderr-shaped noise never reaches us anyway
         if not isinstance(record, dict):
             return
         self._note_activity(record)
@@ -172,14 +176,18 @@ class PiRpc:
             if self._answer is not None:
                 self._answer.tool_calls += 1
             if self._on_tool_result is not None:
-                self._on_tool_result({"toolName": record.get("toolName"),
-                                      "result": record.get("result"),
-                                      "isError": bool(record.get("isError"))})
+                self._on_tool_result(
+                    {"toolName": record.get("toolName"), "result": record.get("result"), "isError": bool(record.get("isError"))}
+                )
         elif kind == "auto_retry_start":
             if self._answer is not None:
-                self._answer.retries.append({"attempt": record.get("attempt"),
-                                             "max_attempts": record.get("maxAttempts"),
-                                             "error_message": record.get("errorMessage")})
+                self._answer.retries.append(
+                    {
+                        "attempt": record.get("attempt"),
+                        "max_attempts": record.get("maxAttempts"),
+                        "error_message": record.get("errorMessage"),
+                    }
+                )
         elif kind == "agent_settled":
             future, self._ask = self._ask, None
             answer, self._answer = self._answer, None
@@ -202,8 +210,7 @@ class PiRpc:
             error = str(record.get("error") or "")
             if _names_unknown_command(error):
                 self.unknown_command = error
-                future.set_exception(ProtocolError(f"{self.label}: pi refused a command "
-                                                   f"this tool sends: {error}"))
+                future.set_exception(ProtocolError(f"{self.label}: pi refused a command this tool sends: {error}"))
                 return
             future.set_exception(ProtocolError(error or "command failed"))
             return
@@ -213,18 +220,16 @@ class PiRpc:
         for future in list(self._pending.values()):
             if not future.done():
                 future.set_exception(error)
-                # A caller that already timed out or was aborted has no awaiter left; an
-                # unretrieved exception on such a future is printed by asyncio when the
-                # loop closes, which is noise that reads like a hidden bug.  Marking it
-                # seen changes nothing for a future someone *is* awaiting: it still raises.
+                # A caller that already timed out or was aborted has no awaiter left; an unretrieved exception on
+                # such a future is printed by asyncio when the loop closes, which is noise that reads like a
+                # hidden bug.  Marking it seen changes nothing for a future someone *is* awaiting: it still raises.
                 future.exception()
         self._pending.clear()
         if self._ask is not None and not self._ask.done():
             self._ask.set_exception(error)
-            # The waiting `ask()` learns of the death from its own command future, so this
-            # one is left unawaited by design.  An exception nobody retrieves is reported
-            # by asyncio when the loop closes — noise that reads like a swallowed bug, so
-            # it is marked seen here while still carrying the error for any other awaiter.
+            # The waiting `ask()` learns of the death from its own command future, so this one is left unawaited by
+            # design.  An exception nobody retrieves is reported by asyncio when the loop closes — noise that reads
+            # like a swallowed bug, so it is marked seen here while still carrying the error for any other awaiter.
             self._ask.exception()
         self._ask = None
 
@@ -233,13 +238,12 @@ class PiRpc:
         method = record.get("method")
         if method in ("notify", "setStatus", "setWidget", "setTitle", "set_editor_text"):
             return
-        self._send({"type": "extension_ui_response", "id": record.get("id"),
-                    "cancelled": True})
+        self._send({"type": "extension_ui_response", "id": record.get("id"), "cancelled": True})
 
     def _send(self, payload: dict) -> None:
         try:
             self._in.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
-        except Exception as exc:                        # a dead child, said plainly
+        except Exception as exc:  # a dead child, said plainly
             raise ChildGone(f"{self.label}: {exc}") from exc
 
     async def _request(self, command: dict, timeout: float | None = None) -> dict:
@@ -259,25 +263,23 @@ class PiRpc:
                 return await future
         except TimeoutError as exc:
             self._pending.pop(request_id, None)
-            raise TimeoutError(f"{self.label}: {command.get('type')} timed out "
-                               f"after {timeout}s") from exc
+            raise TimeoutError(f"{self.label}: {command.get('type')} timed out after {timeout}s") from exc
         finally:
             self._pending.pop(request_id, None)
 
-    # -- the commands (§4) -----------------------------------------------------
+    # -- the commands -----------------------------------------------------
 
     async def get_state(self) -> dict:
-        """Every child's first RPC call (§3.3 point 2): it proves the child speaks JSONL."""
+        """Every child's first RPC call — the real spawn *is* the probe: it proves the child speaks JSONL."""
         return await self._request({"type": "get_state"}, timeout=60)
 
     async def ask(self, message: str, *, timeout: float | None = None) -> Answer:
-        """Prompt and wait for `agent_settled` — never merely `agent_end` (§4).
+        """Prompt and wait for `agent_settled` — never merely `agent_end`.
 
-        The read pump is already subscribed from `start()`, so a fast completion cannot be
-        missed: that is how "subscribe before prompt" holds here.  It also means a quick
-        member can settle *while this coroutine is still parked on the prompt's own "ok*"
-        response — one event-loop turn serves both — so the answer is held in a local: the
-        settle handler owns `self._answer`, and this one must not reach for it afterwards.
+        The read pump is already subscribed from `start()`, so a fast completion cannot be missed: that is how
+        "subscribe before prompt" holds here.  It also means a quick member can settle *while this coroutine is
+        still parked on the prompt's own "ok*" response — one event-loop turn serves both — so the answer is
+        held in a local: the settle handler owns `self._answer`, and this one must not reach for it afterwards.
         """
         if self._ask is not None:
             raise ProtocolError(f"{self.label}: asked while an ask is in flight")
@@ -293,13 +295,14 @@ class PiRpc:
         if disposition == "handled":
             # An extension consumed the prompt: no run starts, so nothing to wait for.
             self._release(answer, settled)
-            raise ProtocolError(f"{self.label}: pi handled the prompt itself "
-                                "(disposition: handled) — no run started")
+            raise ProtocolError(f"{self.label}: pi handled the prompt itself (disposition: handled) — no run started")
         if disposition == "queued":
             self._release(answer, settled)
-            raise ProtocolError(f"{self.label}: pi queued the prompt behind an in-flight "
-                                "run (disposition: queued) — the settled event would "
-                                "belong to the previous run")
+            raise ProtocolError(
+                f"{self.label}: pi queued the prompt behind an in-flight "
+                "run (disposition: queued) — the settled event would "
+                "belong to the previous run"
+            )
         try:
             if timeout is None:
                 return await settled
@@ -319,9 +322,8 @@ class PiRpc:
     async def abort(self) -> bool:
         """`clear_queue` first, then `abort`; the response *is* the synchronization point.
 
-        Waiting additionally for `agent_settled` risks burning the grace period and then
-        tree-killing a child that had stopped cleanly (§4) — and the abort request needs
-        **its own** bounded timeout, because an abort to a wedged child never returns.
+        Waiting additionally for `agent_settled` risks burning the grace period and then tree-killing a child that had stopped
+        cleanly — and the abort request needs **its own** bounded timeout, because an abort to a wedged child never returns.
         """
         ok = True
         try:
@@ -329,13 +331,12 @@ class PiRpc:
                 with contextlib.suppress(Exception):
                     await self._request({"type": "clear_queue"})
                 await self._request({"type": "abort"})
-        except (TimeoutError, Exception):
+        except TimeoutError, Exception:
             ok = False
         return ok
 
     async def close_stdin(self) -> None:
-        """§4: an orderly shutdown starts here — pi disposes its runtime, and that dispose
-        aborts every in-flight tool call."""
+        """An orderly shutdown starts here — pi disposes its runtime, and that dispose aborts every in-flight tool call."""
         with contextlib.suppress(Exception):
             if self._in.can_write_eof():
                 self._in.write_eof()
@@ -357,5 +358,4 @@ def _text_of(message: dict) -> str:
 
 def _names_unknown_command(error: str) -> bool:
     lowered = error.casefold()
-    return "unknown command" in lowered or "unknown request" in lowered \
-        or "unsupported command" in lowered
+    return "unknown command" in lowered or "unknown request" in lowered or "unsupported command" in lowered

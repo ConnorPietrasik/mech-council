@@ -1,11 +1,11 @@
-"""§10/§3.4 — the upper layer is the write journal.
+"""The upper layer is the write journal.
 
-One fixed name is skipped: `.council-scratch`, step 6b(2)'s mount point, which is not a
-write.  Entries are read by **inode type, not name**: a deletion is a 0:0 character
-device recorded under the deleted file's own name on this kernel, and a file created and
-then deleted leaves no entry at all.  `up/` alone cannot tell created from modified, so
-the question is asked through step 7's lower-layer fd.
+One fixed name is skipped: `.council-scratch`, the scratch bind's mount point, which is not a write.  Entries
+are read by **inode type, not name**: a deletion is a 0:0 character device recorded under the deleted
+file's own name on this kernel, and a file created and then deleted leaves no entry at all.  `up/` alone
+cannot tell created from modified, so the question is asked through the lower-layer fd the sandbox keeps.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,8 +30,7 @@ def listing(upper: str, *, skip: str = SCRATCH_NAME) -> dict[str, str]:
                 info = os.lstat(path)
             except OSError:
                 continue
-            if stat.S_ISCHR(info.st_mode) and os.major(info.st_rdev) == 0 \
-                    and os.minor(info.st_rdev) == 0:
+            if stat.S_ISCHR(info.st_mode) and os.major(info.st_rdev) == 0 and os.minor(info.st_rdev) == 0:
                 out[relative] = "deleted"
             elif stat.S_ISDIR(info.st_mode):
                 out[relative] = "dir"
@@ -68,9 +67,9 @@ def journal(upper: str, lower_fd: int, *, skip: str = SCRATCH_NAME) -> dict[str,
 def evidence_paths(text: str) -> list[str]:
     """Candidate file paths inside a finding's prose, conservatively.
 
-    §6.3's `sandbox_artifact` test needs the *paths* an item names, and members write them
-    in every shape: `cache.py:12`, `/project/src/x.py`, `` `src/y.py` ``.  Anything that
-    looks like a path is a candidate; the check against the uppers is what decides.
+    The review report's `sandbox_artifact` test needs the *paths* an item names, and members
+    write them in every shape: `cache.py:12`, `/project/src/x.py`, `` `src/y.py` ``. Anything
+    that looks like a path is a candidate; the check against the uppers is what decides.
     """
     out: list[str] = []
     for token in re.split(r"[\s,;()\"'`\[\]{}<>|]+", text or ""):
@@ -88,14 +87,12 @@ def evidence_paths(text: str) -> list[str]:
 def _artifact_owners(journal: list[dict], project: str) -> dict[str, str | None]:
     """Journal paths that exist only in a member's upper, each with its owner or None.
 
-    Only a **created** path qualifies.  A modified or deleted one exists in the lower by
-    definition — the project's own file, edited or hidden in one seat's view — so a finding
-    that names it is naming *project evidence*, and stamping it `sandbox_artifact` would
-    quietly demote a real finding.  And a created path that the lower also holds is the
-    project's file recreated, not an invention.
+    Only a **created** path qualifies.  A modified or deleted one exists in the lower by definition — the project's own file, edited
+    or hidden in one seat's view — so a finding that names it is naming *project evidence*, and stamping it `sandbox_artifact` would
+    quietly demote a real finding.  And a created path that the lower also holds is the project's file recreated, not an invention.
 
-    A path two seats both created is still nobody's confirmation, so it keeps the marker
-    with no owner named: guessing which member wrote it would be the worse lie.
+    A path two seats both created is still nobody's confirmation, so it keeps the
+    marker with no owner named: guessing which member wrote it would be the worse lie.
     """
     holders: dict[str, set[str]] = {}
     for entry in journal:
@@ -104,19 +101,17 @@ def _artifact_owners(journal: list[dict], project: str) -> dict[str, str | None]
             holders.setdefault(relative, set()).add(base)
     owners: dict[str, str | None] = {}
     for relative, who in holders.items():
-        if project and (os.path.lexists(os.path.join(project, relative))
-                        or relative.startswith("../")):
+        if project and (os.path.lexists(os.path.join(project, relative)) or relative.startswith("../")):
             continue
         owners[relative] = next(iter(who)) if len(who) == 1 else None
     return owners
 
 
 def mark_sandbox_items(docket, journal: list[dict], *, project: str = "") -> list[str]:
-    """§6.3's two markers, stamped on the items whose evidence earned them.
+    """The review report's two markers, stamped on the items whose evidence earned them.
 
-    The renderer stays pure (§12.1.10) and the docket carries the fact, so the marker is
-    computed once here — where the run's own write journal and the lower layer both exist —
-    and read everywhere else.
+    The renderer stays pure and the docket carries the fact, so the marker is computed once
+    here — where the run's own write journal and the lower layer both exist — and read everywhere else.
     """
     from .infer import evidence_is_limit
 
@@ -131,12 +126,11 @@ def mark_sandbox_items(docket, journal: list[dict], *, project: str = "") -> lis
             for path in evidence_paths(prose):
                 relative = path
                 if project and relative.startswith(project.rstrip("/") + "/"):
-                    relative = relative[len(project) + 1:]
+                    relative = relative[len(project) + 1 :]
                 relative = relative.lstrip("/")
                 if "#" in relative:
                     relative = relative.split("#")[0]
-                relative = relative.rsplit(":", 1)[0] if relative.count(":") == 1 \
-                    and relative.rsplit(":", 1)[1].isdigit() else relative
+                relative = relative.rsplit(":", 1)[0] if relative.count(":") == 1 and relative.rsplit(":", 1)[1].isdigit() else relative
                 if relative in owners:
                     item.markers.append("sandbox_artifact")
                     item.artifact_by = owners[relative] or ""
@@ -146,11 +140,10 @@ def mark_sandbox_items(docket, journal: list[dict], *, project: str = "") -> lis
 
 
 def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
-    """Per-member bytes for `run.json` and the console's sandbox line (§10, §11.1)."""
+    """Per-member bytes for `run.json` and the console's sandbox line."""
     total = 0
     for root, dirs, files in os.walk(upper, followlinks=False):
-        dirs[:] = [d for d in dirs if os.path.relpath(os.path.join(root, d), upper)
-                   != skip]
+        dirs[:] = [d for d in dirs if os.path.relpath(os.path.join(root, d), upper) != skip]
         for name in files:
             try:
                 total += os.lstat(os.path.join(root, name)).st_size
@@ -160,15 +153,14 @@ def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
 
 
 def exists_only_in_uppers(relative: str, uppers: list[str], lower_fd: int) -> str | None:
-    """§6.3's `sandbox_artifact`: a path that exists only in some member's upper.
+    """The review report's `sandbox_artifact`: a path that exists only in some member's upper.
 
-    That file is that member's own artifact — no other member can create a file in your
-    view — and is never independent confirmation of anything.
+    That file is that member's own artifact — no other member can create a
+    file in your view — and is never independent confirmation of anything.
     """
     if _exists_in_lower(lower_fd, relative):
         return None
-    held = [upper for upper in uppers
-            if upper and os.path.lexists(os.path.join(upper, relative))]
-    # Attribution needs uniqueness: with two uppers holding it, naming either would be a
-    # lie, and §6.3 marks the artifact without owning it to a member.
+    held = [upper for upper in uppers if upper and os.path.lexists(os.path.join(upper, relative))]
+    # Attribution needs uniqueness: with two uppers holding it, naming either would be
+    # a lie, and the review report marks the artifact without owning it to a member.
     return held[0] if len(held) == 1 else None

@@ -1,8 +1,9 @@
-"""§3.4 — `run.json`: created with the run directory, finalized on the way out (§12.1.11).
+"""`run.json`: created with the run directory, finalized on the way out.
 
-Wire names are the field names (§12.2), and it is plain JSON on disk, readable without the
-tool (§12.1.12).  Reports read **this**, not regex-scraped log lines.
+Wire names are the field names, and it is plain JSON on disk, readable
+without the tool.  Reports read **this**, not regex-scraped log lines.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,6 @@ import time
 from dataclasses import dataclass, field
 
 from .config import Council
-from .naming import chair_file_base
 
 
 @dataclass
@@ -19,7 +19,7 @@ class MemberRecord:
     file_base: str
     id: str | None
     name: str
-    kind: str                       # seat | chair
+    kind: str  # seat | chair
     provider: str | None
     model: str | None
     model_warning: str | None = None
@@ -27,18 +27,25 @@ class MemberRecord:
     prompts: int = 0
 
     def as_dict(self) -> dict:
-        return {"file_base": self.file_base, "id": self.id, "name": self.name,
-                "kind": self.kind, "provider": self.provider, "model": self.model,
-                "model_warning": self.model_warning, "namespace": self.namespaces[-1]
-                if self.namespaces else None, "namespaces": list(self.namespaces),
-                # §13.6: "exactly one prompt each" is the operational meaning of "spends
-                # no tokens", so the count belongs in the machine-readable record.
-                "prompts": self.prompts}
+        return {
+            "file_base": self.file_base,
+            "id": self.id,
+            "name": self.name,
+            "kind": self.kind,
+            "provider": self.provider,
+            "model": self.model,
+            "model_warning": self.model_warning,
+            "namespace": self.namespaces[-1] if self.namespaces else None,
+            "namespaces": list(self.namespaces),
+            # "exactly one prompt each" is the operational meaning of "spends
+            # no tokens", so the count belongs in the machine-readable record.
+            "prompts": self.prompts,
+        }
 
 
 @dataclass
 class RunManifest:
-    """The manifest, in the two phases §3.4 names: at creation and at finalize."""
+    """The manifest, in its two phases: at creation and at finalize."""
 
     path: str
     data: dict = field(default_factory=dict)
@@ -49,7 +56,7 @@ class RunManifest:
         return self.members
 
     def record_prompts(self, counts: dict[str, int]) -> None:
-        """§13.6's prompt count, per member, as finalized (§13.10 derivable from here)."""
+        """The prompt count, per member, as finalized (the human-input record is derivable from here)."""
         for file_base, count in (counts or {}).items():
             record = self.members.get(file_base)
             if record is not None:
@@ -57,8 +64,7 @@ class RunManifest:
                 self.data.setdefault("members", {})[file_base] = record.as_dict()
 
     def record_namespace(self, file_base: str, namespace: int) -> None:
-        """§3.4: **every** spawn's namespace, one per spawn — a restart adds one, and every
-        one of them is in the sweep set (§4)."""
+        """**Every** spawn's namespace, one per spawn — a restart adds one, and every one of them is in the sweep set."""
         record = self.members.get(file_base)
         if record is not None and namespace not in record.namespaces:
             record.namespaces.append(namespace)
@@ -71,22 +77,28 @@ class RunManifest:
             self.data.setdefault("members", {})[file_base] = record.as_dict()
 
 
-def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str,
-           orchestrator_pid: int) -> RunManifest:
+def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str, orchestrator_pid: int) -> RunManifest:
     """At creation: config, council, mode, goal, roster with IDs, settings, pi, pids, members."""
     members: dict[str, MemberRecord] = {}
     roster = []
     for spec in council.agents:
-        members[spec.file_base] = MemberRecord(file_base=spec.file_base, id=spec.id,
-                                               name=spec.name, kind="seat",
-                                               provider=spec.provider, model=spec.model)
-        roster.append({"slot": spec.slot, "id": spec.id, "name": spec.name,
-                       "file_base": spec.file_base,
-                       "model": spec.model or "pi default", "provider": spec.provider})
+        members[spec.file_base] = MemberRecord(
+            file_base=spec.file_base, id=spec.id, name=spec.name, kind="seat", provider=spec.provider, model=spec.model
+        )
+        roster.append(
+            {
+                "slot": spec.slot,
+                "id": spec.id,
+                "name": spec.name,
+                "file_base": spec.file_base,
+                "model": spec.model or "pi default",
+                "provider": spec.provider,
+            }
+        )
     chair = council.chair
-    members[chair.file_base] = MemberRecord(file_base=chair.file_base, id=None,
-                                            name=chair.name, kind="chair",
-                                            provider=chair.provider, model=chair.model)
+    members[chair.file_base] = MemberRecord(
+        file_base=chair.file_base, id=None, name=chair.name, kind="chair", provider=chair.provider, model=chair.model
+    )
     data = {
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "config_path": council.config_path,
@@ -97,8 +109,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
         "run_dir": run_dir,
         "runs_dir": runs_dir,
         "roster": roster,
-        "chair": {"name": chair.name, "file_base": chair.file_base,
-                  "model": chair.model or "pi default", "provider": chair.provider},
+        "chair": {"name": chair.name, "file_base": chair.file_base, "model": chair.model or "pi default", "provider": chair.provider},
         "settings": {
             "max_rounds": council.max_rounds,
             "watchdog_sec": council.watchdog_sec,
@@ -119,19 +130,29 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
     return manifest
 
 
-def finalize(manifest: RunManifest, *, outcome: str, journal: list[dict],
-             survivor_pids: list[int], survivor_ns: list[int],
-             rounds: int, report: str | None, **extra) -> None:
-    """§3.4's finalize: outcome + write journal + the sweep's honest pair, **every** time."""
-    manifest.data.update({
-        "outcome": outcome,
-        "rounds": rounds,
-        "report": report,
-        "write_journal": journal,
-        "survivor_pids": list(survivor_pids),
-        "survivor_ns": list(survivor_ns),
-        "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    })
+def finalize(
+    manifest: RunManifest,
+    *,
+    outcome: str,
+    journal: list[dict],
+    survivor_pids: list[int],
+    survivor_ns: list[int],
+    rounds: int,
+    report: str | None,
+    **extra,
+) -> None:
+    """The finalize: outcome + write journal + the sweep's honest pair, **every** time."""
+    manifest.data.update(
+        {
+            "outcome": outcome,
+            "rounds": rounds,
+            "report": report,
+            "write_journal": journal,
+            "survivor_pids": list(survivor_pids),
+            "survivor_ns": list(survivor_ns),
+            "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+    )
     manifest.data.update(extra)
     _write(manifest)
 
@@ -145,6 +166,6 @@ def _write(manifest: RunManifest) -> None:
 
 
 def read(path: str) -> dict:
-    """§12.1.12: readable without the tool."""
+    """Readable without the tool."""
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)

@@ -1,4 +1,5 @@
-"""Chair prompts (§9).  Text only (§12.1.6)."""
+"""Chair prompts.  Text only."""
+
 from __future__ import annotations
 
 MERGE = """\
@@ -77,12 +78,13 @@ WATCHDOG_SCHEMA = """\
 `action` is `keep` or `restart`, exactly once per agent listed.
 """
 
-MERGE_TASK_REVIEW = ("Findings raised since the last merge are listed below. Say which "
-                     "describe the same underlying defect.")
-MERGE_TASK_PLAN = ("Decision points raised since the last merge are listed below. Say "
-                   "which are the same decision asked twice. Merging wording or scope is "
-                   "not merging.")
-COMPARISON_TASK = ("The plans are below, one per seat, in their own words. Map them.")
+MERGE_TASK_REVIEW = "Findings raised since the last merge are listed below. Say which describe the same underlying defect."
+MERGE_TASK_PLAN = (
+    "Decision points raised since the last merge are listed below. Say "
+    "which are the same decision asked twice. Merging wording or scope is "
+    "not merging."
+)
+COMPARISON_TASK = "The plans are below, one per seat, in their own words. Map them."
 
 
 def digest_header(elapsed_note: str) -> str:

@@ -1,4 +1,5 @@
-"""§5.4/§7.1 — plan-mode prompt text (§12.1.6)."""
+"""Plan-mode prompt text.  Text is data, and it all lives here."""
+
 from __future__ import annotations
 
 PHASE0_TASK = """\
@@ -67,6 +68,8 @@ ROUND_SCHEMA = """\
 """
 
 EXTRA_BRIEFING = ""
-MERGE_TASK = ("Decision points raised since the last merge are listed below. Say which "
-              "are the same decision asked twice — merging wording or scope is not "
-              "merging.")
+MERGE_TASK = (
+    "Decision points raised since the last merge are listed below. Say which "
+    "are the same decision asked twice — merging wording or scope is not "
+    "merging."
+)

@@ -1,10 +1,10 @@
-"""§9's one shared tool-call preview formatter — previews and nothing else.
+"""The chair's one shared tool-call preview formatter — previews and nothing else.
 
-Middle-out truncation (a long `npm test` tail matters more than its head),
-project-relative paths, and collapsed `cd … && …` prefixes.  §10's
-`sandbox_full`/`sandbox_limit_hit` inference never runs here: it lives in the RPC pump,
-so a watchdog that is off or between ticks cannot blind the run (§10, §13.9).
+Middle-out truncation (a long `npm test` tail matters more than its head), project-relative paths, and
+collapsed `cd … && …` prefixes.  The sandbox's `sandbox_full`/`sandbox_limit_hit` inference never
+runs here: it lives in the RPC pump, so a watchdog that is off or between ticks cannot blind the run.
 """
+
 from __future__ import annotations
 
 import re
@@ -23,8 +23,7 @@ def project_relative(text: str, project: str) -> str:
 def collapse_cd(command: str) -> str:
     """`cd /x/y && make` → `make` (the cwd is the project; the prefix is noise)."""
     match = _CD.match(command.strip())
-    return command.strip() if not match else match.group(0)[match.end() - match.end():] or \
-        command.strip()[match.end():]
+    return command.strip() if not match else match.group(0)[match.end() - match.end() :] or command.strip()[match.end() :]
 
 
 def middle_out(text: str, limit: int = _MAX) -> str:

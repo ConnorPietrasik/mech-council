@@ -1,8 +1,9 @@
-"""§13.4 — the config loader and selection.
+"""The config loader and selection.
 
-§3.3's validation list is the case list, one assertion per rule with the message it
-owes; precedence and comments are the only additions.
+The config loader's validation list is the case list, one assertion per rule
+with the message it owes; precedence and comments are the only additions.
 """
+
 from __future__ import annotations
 
 import os
@@ -10,9 +11,9 @@ import os
 import pytest
 
 from council import config as config_mod
-from council.cli import ConfigError, UsageError
+from council.cli import Args, ConfigError, UsageError
 
-SPEC_EXAMPLE = '''# council.toml — the §3.3 example, normative: the loader must take it verbatim.
+REFERENCE_CONFIG = '''# council.toml — the reference config, taken verbatim by the loader.
 
 [defaults]
 max_rounds = 6
@@ -95,24 +96,11 @@ def write(tmp_path, text: str) -> str:
     return path
 
 
-class _Args:
-    def __init__(self, **kw):
-        self.council = kw.get("council")
-        self.project = None
-        self.config = None
-        self.rounds = kw.get("rounds")
-        self.goal = kw.get("goal")
-        self.transcripts = kw.get("transcripts")
-        self.allow_nested = False
-        self.untrusted = False
-        self.notes = []
-
-
 def convene(tmp_path, text: str, name: str = "review", **kw):
     path = write(tmp_path, text)
     loaded = config_mod.load_config(path)
     chosen = config_mod.select_council(loaded, name)
-    return config_mod.convene(loaded, chosen, _Args(**kw), str(tmp_path))
+    return config_mod.convene(loaded, chosen, Args(**kw), str(tmp_path))
 
 
 BODY = """\
@@ -135,27 +123,27 @@ name = "B"
 
 def body(**replacements) -> str:
     """The smallest convenable council, with one line added or edited per case."""
-    text = BODY.format(pi=os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                       "support", "fake_pi.py")))
+    text = BODY.format(pi=os.path.abspath(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py")))
     for find, with_ in replacements.items():
         assert find in text, find
         text = text.replace(find, with_)
     return text
 
 
-# --------------------------------------------------------------------------- the normative example
+# --------------------------------------------------------------------------- the reference config
 
-def test_the_spec_example_loads_and_convenes_every_council(tmp_path):
-    path = write(tmp_path, SPEC_EXAMPLE)
+
+def test_the_reference_config_loads_and_convenes_every_council(tmp_path):
+    path = write(tmp_path, REFERENCE_CONFIG)
     loaded = config_mod.load_config(path)
     assert loaded.names() == ["review", "review-staged", "plan"]
-    review = config_mod.convene(loaded, "review", _Args(), str(tmp_path))
+    review = config_mod.convene(loaded, "review", Args(), str(tmp_path))
     assert [a.name for a in review.agents] == ["Metic", "Senior", "Coworker"]
     assert review.chair.provider == "omnissiah"
     assert review.max_rounds == 6 and review.max_concurrency == 3
-    staged = config_mod.convene(loaded, "review-staged", _Args(), str(tmp_path))
+    staged = config_mod.convene(loaded, "review-staged", Args(), str(tmp_path))
     assert staged.max_rounds == 6, "[defaults] reaches a council stating nothing"
-    plan = config_mod.convene(loaded, "plan", _Args(), str(tmp_path))
+    plan = config_mod.convene(loaded, "plan", Args(), str(tmp_path))
     assert plan.max_rounds == 3, "a council key beats [defaults]"
     assert plan.mode == "plan" and plan.agents[1].persona is None
 
@@ -170,39 +158,34 @@ def test_convening_assigns_ids_slots_and_file_bases(tmp_path):
     assert council.adapter.item_noun_plural == "findings"
 
 
-# --------------------------------------------------------------------------- §3.3's validation list
+# -------------------------------------------------- The config loader's validation list
 
-@pytest.mark.parametrize("text, wanted", [
-    (body().replace("[[councils.review.agents]]\nname = \"B\"\n", ""),
-     "convenes 1 agent(s)"),
-    (body().replace('name = "A"', 'name = "B"', 1), "lists the agent name 'B' twice"),
-    (body().replace('name = "B"', 'name = "Chair"', 1),
-     "for both a seat and the chair"),
-    (body().replace('[councils.review.chair]', '[[councils.review.chair]]'),
-     "the chair is the single table"),
-    (body().replace('[councils.review.chair]\nname = "Chair"\n', ''),
-     "has no [councils.review.chair]"),
-    (body().replace('goal = "g"', 'goal = "g"\nmode = "planning"', 1),
-     "did you mean 'plan'"),
-    (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = 0', 1), "must be ≥ 1"),
-    (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = "10"', 1),
-     "wants an integer, got str"),
-    (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
-    (body().replace('goal = "g"', 'goal = "g"\ntranscripts = "everything"', 1),
-     "'off' or 'full'"),
-    (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),
-    (body().replace('name = "A"', 'name = "A"\nprovider = "p"', 1),
-     "states 'provider' without 'model'"),
-    (body().replace('name = "A"', 'name = ""', 1), "needs a non-empty 'name'"),
-    (body().replace('name = "A"', 'name = "A"\nnickname = "x"', 1),
-     "unknown config key 'nickname'"),
-    (body().replace('goal = "g"', 'goal = "g"\nmaxRounds = 4', 1),
-     "'maxRounds' in [councils.review] (did you mean max_rounds?"),
-    (body().replace('goal = "g"', 'goal = "g"\nchairTimeoutSec = 4', 1),
-     "'chairTimeoutSec' in [councils.review] (did you mean chair_timeout_sec?"),
-    (body().replace('[defaults]', '[defaults]\nmaxrounds = 4'),
-     "unknown config key 'maxrounds'"),
-])
+
+@pytest.mark.parametrize(
+    "text, wanted",
+    [
+        (body().replace('[[councils.review.agents]]\nname = "B"\n', ""), "convenes 1 agent(s)"),
+        (body().replace('name = "A"', 'name = "B"', 1), "lists the agent name 'B' twice"),
+        (body().replace('name = "B"', 'name = "Chair"', 1), "for both a seat and the chair"),
+        (body().replace("[councils.review.chair]", "[[councils.review.chair]]"), "the chair is the single table"),
+        (body().replace('[councils.review.chair]\nname = "Chair"\n', ""), "has no [councils.review.chair]"),
+        (body().replace('goal = "g"', 'goal = "g"\nmode = "planning"', 1), "did you mean 'plan'"),
+        (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = 0', 1), "must be ≥ 1"),
+        (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = "10"', 1), "wants an integer, got str"),
+        (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
+        (body().replace('goal = "g"', 'goal = "g"\ntranscripts = "everything"', 1), "'off' or 'full'"),
+        (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),
+        (body().replace('name = "A"', 'name = "A"\nprovider = "p"', 1), "states 'provider' without 'model'"),
+        (body().replace('name = "A"', 'name = ""', 1), "needs a non-empty 'name'"),
+        (body().replace('name = "A"', 'name = "A"\nnickname = "x"', 1), "unknown config key 'nickname'"),
+        (body().replace('goal = "g"', 'goal = "g"\nmaxRounds = 4', 1), "'maxRounds' in [councils.review] (did you mean max_rounds?"),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nchairTimeoutSec = 4', 1),
+            "'chairTimeoutSec' in [councils.review] (did you mean chair_timeout_sec?",
+        ),
+        (body().replace("[defaults]", "[defaults]\nmaxrounds = 4"), "unknown config key 'maxrounds'"),
+    ],
+)
 def test_each_validation_rule_says_so(tmp_path, text, wanted):
     with pytest.raises(ConfigError) as raised:
         convene(tmp_path, text)
@@ -238,7 +221,7 @@ def test_syntax_errors_keep_line_and_column(tmp_path):
 
 
 def test_duplicate_council_is_a_parse_error_not_last_wins(tmp_path):
-    text = SPEC_EXAMPLE + "\n[councils.plan]\ngoal = \"again\"\n"
+    text = REFERENCE_CONFIG + '\n[councils.plan]\ngoal = "again"\n'
     with pytest.raises(ConfigError, match="not valid TOML"):
         config_mod.load_config(write(tmp_path, text))
 
@@ -249,10 +232,11 @@ def test_comments_are_comments(tmp_path):
     assert council.goal == "a # keeps working"
 
 
-# --------------------------------------------------------------------------- selection (§3.3)
+# --------------------------------------------------------------------------- selection
+
 
 def test_selection_is_exact_or_the_only_one(tmp_path):
-    path = write(tmp_path, SPEC_EXAMPLE)
+    path = write(tmp_path, REFERENCE_CONFIG)
     loaded = config_mod.load_config(path)
     assert config_mod.select_council(loaded, "review-staged") == "review-staged"
     with pytest.raises(UsageError, match="did you mean review-staged"):
@@ -263,7 +247,8 @@ def test_selection_is_exact_or_the_only_one(tmp_path):
     assert config_mod.select_council(single, None) == "review"
 
 
-# --------------------------------------------------------------------------- pi discovery (§3.3)
+# --------------------------------------------------------------------------- pi discovery
+
 
 def test_pi_cli_resolution(tmp_path):
     fake = os.path.join(os.path.dirname(__file__), "support", "fake_pi.py")
@@ -276,9 +261,8 @@ def test_pi_cli_resolution(tmp_path):
 
 
 def test_an_unresolvable_pi_leaves_nothing_behind(tmp_path, canary):
-    """§12.1.11's ordering: a config-stage failure creates no run directory anywhere."""
-    text = body().replace(os.path.join(os.path.dirname(__file__), "support",
-                                       "fake_pi.py"), "no-such-pi-cli")
+    """The startup ordering: a config-stage failure creates no run directory anywhere."""
+    text = body().replace(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py"), "no-such-pi-cli")
     with pytest.raises(ConfigError):
         convene(tmp_path, text)
     assert os.listdir(canary) == []

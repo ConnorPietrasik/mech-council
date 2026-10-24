@@ -1,4 +1,5 @@
-"""§6.3's caption and ordering helpers — pure, shared by every renderer."""
+"""The review report's caption and ordering helpers — pure, shared by every renderer."""
+
 from __future__ import annotations
 
 SEVERITY_ORDER = {"blocker": 0, "major": 1, "minor": 2, "trivial": 3}
@@ -9,7 +10,7 @@ def severity_key(severity: str) -> tuple[int, str]:
 
 
 def caption(agent_id: str, names: dict[str, str]) -> str:
-    """§6.3: 'Senior (Agent2)'; an unknown ID renders as-is."""
+    """'Senior (Agent2)'; an unknown ID renders as-is."""
     name = names.get(agent_id)
     return f"{name} ({agent_id})" if name else agent_id
 

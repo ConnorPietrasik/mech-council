@@ -1,8 +1,9 @@
-"""§13.7 / §13.8 — pi's dialect over real pipes, and what happens when a member dies.
+"""pi's dialect over real pipes, and what happens when a member dies.
 
-The fake pi is a real child process speaking real JSONL; nothing here is mocked, because
-§13's rule is that process behaviour is tested with processes.
+The fake pi is a real child process speaking real JSONL; nothing here is
+mocked, because the point is that process behaviour is tested with processes.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,7 @@ import json
 import os
 import signal
 import sys
+from typing import cast
 
 import pytest
 
@@ -17,6 +19,7 @@ from council.config import MemberSpec
 from council.pi_rpc import ChildGone, PiRpc, ProtocolError
 from council.process import lifecycle
 from council.process.spawn import pi_argv
+from council.sandbox import infer
 
 from .conftest import FAKE_PI
 
@@ -29,26 +32,35 @@ async def start(script=None, *, extra_env=None, argv_extra=()):
         env["FAKE_PI_SCRIPT"] = script if isinstance(script, str) else json.dumps(script)
     env.update(extra_env or {})
     child = await asyncio.create_subprocess_exec(
-        sys.executable, FAKE_PI, "--mode", "rpc", "--no-session", "--approve",
-        *argv_extra, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, env=env)
+        sys.executable,
+        FAKE_PI,
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--approve",
+        *argv_extra,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
     events: list[dict] = []
-    rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin,
-                on_event=events.append)
+    assert child.stdout is not None and child.stdin is not None, "both halves were PIPEd above"
+    rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin, on_event=events.append)
     rpc.start()
-    child.council_events = events          # what the spawner would hand to the transcript
-    return child, rpc
+    return child, rpc, events  # the list is the transcript sink the spawner would hand over
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-# --------------------------------------------------------------------------- §4's handshake
+# ----------------------------------------------------- The handshake
+
 
 def test_get_state_comes_first_and_the_answer_is_correlated_by_id():
     async def main():
-        child, rpc = await start()
+        child, rpc, _events = await start()
         try:
             state = await rpc.get_state()
             assert state.get("sessionId"), "pi answers get_state before anything else"
@@ -59,16 +71,16 @@ def test_get_state_comes_first_and_the_answer_is_correlated_by_id():
             child.terminate()
             await child.wait()
 
-    state, text = run(main())
+    _state, text = run(main())
     assert "Agent1" in text or text, "the reply came back on the same session"
 
 
 def test_the_answer_waits_for_agent_settled_not_the_first_agent_end():
-    """§13.7: a sub-agent's `agent_end` must not end the ask."""
+    """A sub-agent's `agent_end` must not end the ask."""
     script = [{"wait": 0.4, "reply": "the whole answer"}]
 
     async def main():
-        child, rpc = await start(script)
+        child, rpc, _events = await start(script)
         try:
             return await rpc.ask("go")
         finally:
@@ -85,7 +97,7 @@ def test_an_error_stop_reason_and_its_message_survive_to_the_unusable_test():
     script = [{"contains": "", "stop_reason": "error", "error_message": "429 rate limited"}]
 
     async def main():
-        child, rpc = await start(script)
+        child, rpc, _events = await start(script)
         try:
             return await rpc.ask("go")
         finally:
@@ -98,20 +110,28 @@ def test_an_error_stop_reason_and_its_message_survive_to_the_unusable_test():
 
 
 def test_tool_events_are_counted_and_their_results_reach_the_sandbox_inference():
-    """§10.1's inference hook is fed by pi's own tool events, not by parsing prose."""
+    """The sandbox inference hook is fed by pi's own tool events, not by parsing prose."""
     seen: list[dict] = []
 
     async def main():
         child = await asyncio.create_subprocess_exec(
-            sys.executable, FAKE_PI, "--mode", "rpc", "--no-session", "--approve",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            sys.executable,
+            FAKE_PI,
+            "--mode",
+            "rpc",
+            "--no-session",
+            "--approve",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=dict(os.environ, FAKE_PI_QUIET="1",
-                     FAKE_PI_SCRIPT=json.dumps([{"contains": "", "reply": "done",
-                                                 "tools": [{"name": "bash",
-                                                            "args": {"path": "src/x.py"}}]}])))
-        rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin,
-                    on_tool_result=seen.append)
+            env=dict(
+                os.environ,
+                FAKE_PI_QUIET="1",
+                FAKE_PI_SCRIPT=json.dumps([{"contains": "", "reply": "done", "tools": [{"name": "bash", "args": {"path": "src/x.py"}}]}]),
+            ),
+        )
+        assert child.stdout is not None and child.stdin is not None, "both halves were PIPEd above"
+        rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin, on_tool_result=seen.append)
         rpc.start()
         try:
             return await rpc.ask("go")
@@ -125,11 +145,79 @@ def test_tool_events_are_counted_and_their_results_reach_the_sandbox_inference()
     assert seen == [{"toolName": "bash", "result": "", "isError": False}]
 
 
+def test_the_inference_pass_reads_erroring_tool_results_and_nothing_else():
+    """`sandbox_full` / `sandbox_limit_hit` come from an *erroring* tool result, from its tail, and never from a successful one.
+
+    The patterns are the measured errno text, so this is the pass's whole contract:
+    what it fires on, what it must never fire on, and where its table
+    stops short of the report's.
+    """
+
+    def record(text: str, *, error: bool = True) -> dict:
+        return {"toolName": "bash", "result": text, "isError": error}
+
+    assert infer.scan(record("cp: write failed: no space left on device")) == infer.FULL
+    assert infer.scan(record("rename 'a': Invalid cross-device link")) == infer.LIMIT
+    assert infer.scan(record("rm -rf src: Input/output error")) == infer.LIMIT
+    # A successful result that merely *mentions* the errno proves nothing: the cap is not spent because a member quoted the words.
+    assert infer.scan(record("no space left on device", error=False)) is None
+    # Only the tail is scanned, so a transcript that recited the message thousands of characters ago is not a spent cap.
+    assert infer.scan(record("no space left on device" + " " * 4096)) is None
+    assert infer.scan({}) is None
+    # `EROFS` — writing into a mask — is the one errno the report marks and the pump does not infer: a mask the seat was
+    # briefed about is not the run's cap running out.  Pinned so the two tables' difference stays a choice, not an oversight.
+    assert infer.scan(record("rm: cannot remove 'x': Read-only file system")) is None
+    assert infer.evidence_is_limit("Read-only file system")
+
+
+def test_the_pump_hands_the_inference_a_record_it_can_act_on():
+    """The end of the wiring: what the pump delivers is what the pass reads."""
+    seen: list[dict] = []
+
+    async def main():
+        child = await asyncio.create_subprocess_exec(
+            sys.executable,
+            FAKE_PI,
+            "--mode",
+            "rpc",
+            "--no-session",
+            "--approve",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=dict(
+                os.environ,
+                FAKE_PI_QUIET="1",
+                FAKE_PI_SCRIPT=json.dumps(
+                    [
+                        {
+                            "contains": "",
+                            "reply": "could not write",
+                            "tools": [{"name": "bash", "result": "dd: error writing: No space left on device", "is_error": True}],
+                        }
+                    ]
+                ),
+            ),
+        )
+        assert child.stdout is not None and child.stdin is not None, "both halves were PIPEd above"
+        rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin, on_tool_result=seen.append)
+        rpc.start()
+        try:
+            return await rpc.ask("go")
+        finally:
+            await rpc.stop()
+            child.terminate()
+            await child.wait()
+
+    run(main())
+    assert [infer.scan(record) for record in seen] == [infer.FULL], "the pump's record is the shape the pass is written against"
+
+
 def test_an_auto_retry_is_recorded_on_the_answer():
     script = [{"contains": "", "retry": "overloaded", "reply": "recovered"}]
 
     async def main():
-        child, rpc = await start(script)
+        child, rpc, _events = await start(script)
         try:
             return await rpc.ask("go")
         finally:
@@ -142,12 +230,13 @@ def test_an_auto_retry_is_recorded_on_the_answer():
 
 
 def test_an_unknown_event_is_data_and_the_stream_keeps_reading():
-    """§4: an unknown *event* is passed on; an unknown *command* is fatal."""
+    """An unknown *event* is passed on; an unknown *command* is fatal."""
+
     async def main():
-        child, rpc = await start(extra_env={"FAKE_PI_UNKNOWN_EVENT": "1"})
+        child, rpc, events = await start(extra_env={"FAKE_PI_UNKNOWN_EVENT": "1"})
         try:
             answer = await rpc.ask("still answering?")
-            return answer.text, list(child.council_events)
+            return answer.text, list(events)
         finally:
             await rpc.stop()
             child.terminate()
@@ -162,10 +251,10 @@ def test_a_sidechains_agent_end_does_not_end_the_ask():
     script = [{"contains": "", "sidechain": True, "reply": "the real answer"}]
 
     async def main():
-        child, rpc = await start(script)
+        child, rpc, events = await start(script)
         try:
             answer = await rpc.ask("go")
-            return answer, list(child.council_events)
+            return answer, list(events)
         finally:
             await rpc.stop()
             child.terminate()
@@ -178,7 +267,7 @@ def test_a_sidechains_agent_end_does_not_end_the_ask():
 
 def test_a_child_that_closes_its_stdout_ends_every_wait():
     async def main():
-        child, rpc = await start()
+        child, rpc, _events = await start()
         try:
             child.terminate()
             await child.wait()
@@ -191,9 +280,10 @@ def test_a_child_that_closes_its_stdout_ends_every_wait():
 
 
 def test_a_child_that_refuses_our_commands_is_a_protocol_error_not_a_retry():
-    """§4: protocol drift is fatal.  A member that answers nothing is not retried."""
+    """Protocol drift is fatal.  A member that answers nothing is not retried."""
+
     async def main():
-        child, rpc = await start(extra_env={"FAKE_PI_REJECT_COMMANDS": "1"})
+        child, rpc, _events = await start(extra_env={"FAKE_PI_REJECT_COMMANDS": "1"})
         try:
             with pytest.raises(ProtocolError) as raised:
                 await rpc.get_state()
@@ -212,13 +302,14 @@ def rpc_unsupported_is_recorded(message: str) -> bool:
     return bool(message)
 
 
-# --------------------------------------------------------------------------- §4's abort
+# --------------------------------------------------------- The abort
+
 
 def test_abort_replies_and_reports_what_was_cleared():
     script = [{"contains": "", "sleep": 30}]
 
     async def main():
-        child, rpc = await start(script)
+        child, rpc, _events = await start(script)
         try:
             task = asyncio.create_task(rpc.ask("go"))
             await asyncio.sleep(0.4)
@@ -236,12 +327,14 @@ def test_abort_replies_and_reports_what_was_cleared():
 
 
 def test_an_abort_that_gets_nothing_comes_back_false_within_its_own_bound():
-    """D15: 30 s bounds the abort response, and a hang is a false, not a hang."""
+    """The constants-not-knobs choice: 30 s bounds the abort response, and a hang is a false, not a hang."""
+
     async def main():
-        child, rpc = await start(extra_env={"FAKE_PI_SILENT_ABORT": "1"})
+        child, rpc, _events = await start(extra_env={"FAKE_PI_SILENT_ABORT": "1"})
         try:
             from council import pi_rpc
-            pi_rpc.ABORT_TIMEOUT_S = 1.0       # the bound itself, not a 30 s wait
+
+            pi_rpc.ABORT_TIMEOUT_S = 1.0  # the bound itself, not a 30 s wait
             return await rpc.abort()
         finally:
             await rpc.stop()
@@ -251,27 +344,39 @@ def test_an_abort_that_gets_nothing_comes_back_false_within_its_own_bound():
     assert run(main()) is False
 
 
-# --------------------------------------------------------------------------- §4's argv
+# ---------------------------------------------------------- pi's argv
 
-def test_the_spawn_argv_is_the_one_the_spec_states():
-    spec = MemberSpec(name="Metic", persona="be picky", provider="anthropic",
-                      model="claude-opus-4")
+
+def test_the_spawn_argv_is_pi_plus_exactly_the_flags_we_add():
+    spec = MemberSpec(name="Metic", persona="be picky", provider="anthropic", model="claude-opus-4")
     argv = pi_argv(spec, "/usr/sbin/pi", file_base="seat1-metic", untrusted=False)
-    # §4's spawn configuration, in the order §4 states it: nothing else is added.
-    assert argv == ["/usr/sbin/pi", "--mode", "rpc", "--no-session", "--approve",
-                    "--name", "council-seat1-metic", "--provider", "anthropic",
-                    "--model", "claude-opus-4", "--append-system-prompt", "be picky"]
+    # pi's spawn configuration, in the order `pi_argv` builds it: nothing else is added.
+    assert argv == [
+        "/usr/sbin/pi",
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--approve",
+        "--name",
+        "council-seat1-metic",
+        "--provider",
+        "anthropic",
+        "--model",
+        "claude-opus-4",
+        "--append-system-prompt",
+        "be picky",
+    ]
     untrusted = pi_argv(spec, "/usr/sbin/pi", file_base="seat1-metic", untrusted=True)
     assert "--no-approve" in untrusted and "--approve" not in untrusted
 
 
 def test_a_chair_carries_no_id_in_its_name():
-    argv = pi_argv(MemberSpec(name="Chair"), "/usr/sbin/pi", file_base="chair",
-                   untrusted=False)
+    argv = pi_argv(MemberSpec(name="Chair"), "/usr/sbin/pi", file_base="chair", untrusted=False)
     assert "council-chair" in argv
 
 
-# --------------------------------------------------------------------------- §3.2 / §4 teardown
+# ------------------------------- The exit-code table / the dispose path on teardown
+
 
 class FakeProc:
     def __init__(self, pid, alive=True):
@@ -285,7 +390,7 @@ class FakeProc:
 
 
 def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
-    """§4: the *group*, because pi detaches its tool shells; KILL if TERM is ignored."""
+    """The *group*, because pi detaches its tool shells; KILL if TERM is ignored."""
     sent: list[tuple[int, int]] = []
     real_killpg = os.killpg
 
@@ -305,7 +410,7 @@ def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
 
 
 def test_dispose_never_signals_our_own_group():
-    """§8's stdin reader shares our pgid; signalling it would be signalling the run."""
+    """The human checkpoint's stdin reader shares our pgid; signalling it would be signalling the run."""
     own = os.getpgid(0)
     sent = []
     real_killpg = os.killpg
@@ -338,7 +443,7 @@ def _member(pgid=None, pid=999_991, stubborn=False):
 
         async def wait(self):
             if stubborn:
-                await asyncio.sleep(30)       # it is not going to exit on its own
+                await asyncio.sleep(30)  # it is not going to exit on its own
             return self.returncode
 
     class Rpc:
@@ -348,9 +453,18 @@ def _member(pgid=None, pid=999_991, stubborn=False):
         async def stop(self):
             pass
 
-    return Member(file_base="seat1-x", id="Agent1", pid=pid,
-                  pgid=pgid if pgid is not None else pid, namespace=7, ns_fd=-1,
-                  proc=Proc(), rpc=Rpc())
+    # The doubles stand in for a child and its session: `dispose` is the subject, and neither the
+    # process nor the RPC object is inspected beyond the few members these fakes carry.
+    return Member(
+        file_base="seat1-x",
+        id="Agent1",
+        pid=pid,
+        pgid=pgid if pgid is not None else pid,
+        namespace=7,
+        ns_fd=-1,
+        proc=cast(asyncio.subprocess.Process, Proc()),
+        rpc=cast(PiRpc, Rpc()),
+    )
 
 
 def test_a_dead_child_is_not_reaped_twice():
@@ -361,7 +475,7 @@ def test_a_dead_child_is_not_reaped_twice():
 
 def test_close_stdin_is_how_a_clean_exit_is_asked_for():
     async def main():
-        child, rpc = await start()
+        child, rpc, _events = await start()
         try:
             await rpc.close_stdin()
             return await asyncio.wait_for(child.wait(), 20)

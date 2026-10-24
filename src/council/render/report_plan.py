@@ -1,11 +1,15 @@
-"""§7.2 — `plan.md`.  Pure, byte-for-byte comparable, and never invents a synthesis."""
+"""`plan.md`.  Pure, byte-for-byte comparable, and never invents a synthesis."""
+
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import effective_class
-from ..deliberation.state import (AGREED, CHAIR_ID, DECLINED, DISPUTED, Docket, HUMAN,
-                                  Item, NO_PREFERENCE, Question, REJECTED, UNHEARD,
-                                  UNSEEN)
+from ..deliberation.state import (
+    NO_PREFERENCE,
+    REJECTED,
+    Docket,
+    Question,
+)
 from .context import ReportContext
 from .text import caption, wrap
 
@@ -19,8 +23,7 @@ RULES = """\
 """
 
 
-def render(docket: Docket, context: ReportContext, *, run_dir: str = "",
-           converged: str | None = None) -> str:
+def render(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> str:
     lines = context.header("Implementation plan") + [""]
     lines += [RULES, ""]
     lines += ["## Roster", ""] + context.roster_table(extra="backing") + [""]
@@ -70,8 +73,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
 
 
 def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
-    """§7.2 + plan D14: the token resolves to a real artifact, or to the fullest backer's
-    plan **labeled as what it is** — never a synthesis, never a title match."""
+    """The token resolves to a real artifact, or to the fullest backer's plan
+    **labeled as what it is** — never a synthesis, never a title match."""
     if token.startswith("merged:"):
         label = token.split(":", 1)[1].strip()
         for agent in docket.roster:
@@ -85,9 +88,11 @@ def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
         if best is None:
             return None, "the merge was never written down and no seat backs it"
         agent, artifact = best
-        return artifact, (f"the merge was never written down — this is "
-                          f"{caption(agent, docket_captions(docket))}'s own plan, the "
-                          "fullest one backing that token")
+        return artifact, (
+            f"the merge was never written down — this is "
+            f"{caption(agent, docket_captions(docket))}'s own plan, the "
+            "fullest one backing that token"
+        )
     agent = token
     approach = docket.approaches.get(agent)
     if approach is not None:
@@ -97,7 +102,7 @@ def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
 
 
 def _fullest_backer(docket: Docket, token: str):
-    """Among seats backing `token`: most stages; tie → lowest slot (plan D14)."""
+    """Among seats backing `token`: most stages; tie → lowest slot."""
     best = None
     for agent in docket.roster:
         if docket.backing.get(agent) != token:
@@ -139,27 +144,32 @@ def _constraints_and_risks(docket: Docket, converged: str | None) -> dict[str, l
     agent = docket.approaches.get(converged or "")
     if agent and not source:
         source = agent.artifact()
-    return {"constraints": list(source.get("constraints") or []),
-            "risks": list(source.get("risks") or []),
-            "assumptions": list(source.get("assumptions") or [])}
+    return {
+        "constraints": list(source.get("constraints") or []),
+        "risks": list(source.get("risks") or []),
+        "assumptions": list(source.get("assumptions") or []),
+    }
 
 
 def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
-    """§7.2: every deferred / skipped / unasked / undefended question touching the
+    """Every deferred / skipped / unasked / undefended question touching the
     direction is a named assumption spelling the guess it stands for."""
     out = ["## Assumptions", ""]
-    questions = [docket.questions[i] for i in docket.question_order
-                 if _touches_direction(docket, docket.questions[i])]
+    questions = [docket.questions[i] for i in docket.question_order if _touches_direction(docket, docket.questions[i])]
     if not questions:
         out.append("None the council had to make: every open question was answered.")
         return out + [""]
     for question in questions:
-        kind = "unasked" if "unasked" in question.markers else \
-            "skipped" if question.state == "skipped" else \
-            "undefended" if any(e.undefended for e in _escalations(docket, question)) else \
-            "deferred"
-        out.append(f"- **{kind}** ({question.id}, {effective_class(docket, question)}): "
-                   f"{question.text}")
+        kind = (
+            "unasked"
+            if "unasked" in question.markers
+            else "skipped"
+            if question.state == "skipped"
+            else "undefended"
+            if any(e.undefended for e in _escalations(docket, question))
+            else "deferred"
+        )
+        out.append(f"- **{kind}** ({question.id}, {effective_class(docket, question)}): {question.text}")
         out.append(f"  assumed: {question.answer or 'whatever the seats did in its place'}")
     out.append("")
     return out
@@ -189,16 +199,17 @@ def _decision_points(docket: Docket, context: ReportContext) -> list[str]:
         if item.closed:
             out.append(f"- closed {item.disposition} in round {item.closed_round}")
         out.append(f"- raised by: {_names(item.raised_by, context)}")
-        if item.detail.strip():        # an empty detail must not print a stray line
+        if item.detail.strip():  # an empty detail must not print a stray line
             out += [f"  {line}" for line in wrap(item.detail)]
         for agent in docket.roster:
             record = docket.stance(item.id, agent)
             if record is None:
                 continue
             tag = " `declined`" if record.declined else ""
-            out.append(f"- {caption(agent, context.captions)}: {record.stance}"
-                       f" (round {record.round}){tag}"
-                       + (f" — {record.note}" if record.note else ""))
+            out.append(
+                f"- {caption(agent, context.captions)}: {record.stance}"
+                f" (round {record.round}){tag}" + (f" — {record.note}" if record.note else "")
+            )
         for note in item.history:
             out.append(f"- history: {note}")
         out.append("")
@@ -212,14 +223,11 @@ def _human_input(docket: Docket, context: ReportContext) -> list[str]:
         return out + ["None was asked for.", ""]
     for question in questions:
         state = question.state if question.state != "asked" else "standing"
-        out.append(f"- {question.id} ({state}) {_names(question.askers, context)}: "
-                   f"{question.text}")
+        out.append(f"- {question.id} ({state}) {_names(question.askers, context)}: {question.text}")
         if question.answer:
-            out.append(f"  - authoritative answer (round {question.answer_round}): "
-                       f"{question.answer}")
+            out.append(f"  - authoritative answer (round {question.answer_round}): {question.answer}")
         else:
-            out.append(f"  - assumed in its place: whatever the council did with it — "
-                       f"never settled")
+            out.append("  - assumed in its place: whatever the council did with it — never settled")
     out.append("")
     return out
 
@@ -230,8 +238,7 @@ def _qa(docket: Docket, context: ReportContext) -> list[str]:
         return out + ["None asked.", ""]
     for qid in docket.qa_order:
         qa = docket.qa[qid]
-        out.append(f"- {qa.id} {_names([qa.asker], context)} → {_names([qa.to], context)}: "
-                   f"{qa.text}")
+        out.append(f"- {qa.id} {_names([qa.asker], context)} → {_names([qa.to], context)}: {qa.text}")
         if qa.answer:
             out.append(f"  - answer: {qa.answer}")
     out.append("")
@@ -253,9 +260,9 @@ def _alternatives(docket: Docket, context: ReportContext) -> list[str]:
         for alternative in approach.rejected_alternatives:
             out.append(f"  - rejected: {alternative}")
         for revision in approach.revisions:
-            out.append(f"  - revision `{revision.get('name') or '?'}` "
-                       f"(round {revision.get('round')}): "
-                       f"{len(revision.get('stages') or [])} stages")
+            out.append(
+                f"  - revision `{revision.get('name') or '?'}` (round {revision.get('round')}): {len(revision.get('stages') or [])} stages"
+            )
     out.append("")
     return out
 
@@ -272,8 +279,8 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
 
 
 def _touches_direction(docket: Docket, question: Question) -> bool:
-    """A question touches the chosen direction when it names no item (so it frames the
-    whole plan) or names one that is not closed rejected."""
+    """A question touches the chosen direction when it names no item (so
+    it frames the whole plan) or names one that is not closed rejected."""
     if question.state == "answered":
         return False
     if question.item_id is None:

@@ -1,9 +1,9 @@
-"""§5.3 — lenient extraction of structured verdicts from model prose.
+"""Lenient extraction of structured verdicts from model prose.
 
-Leniency is scoped to model output and goes nowhere near the config loader (§14.3).
-Case and separators are not identity; only *different words* need the synonym tables,
-which are data here so a mode can add to them (§4.2).
+Leniency is scoped to model output and goes nowhere near the config loader.  Case and separators are not
+identity; only *different words* need the synonym tables, which are data here so a mode can add to them.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from .deliberation.state import ABSTAIN, AGREE, DISAGREE, NEEDS_HUMAN, STANCES
+
 
 #: fold case and drop `_`/`-`: `validationGate`/`VALIDATION_GATE` → `validation_gate`.
 def fold(name: object) -> str:
@@ -22,18 +23,15 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "detail": ("detail", "body", "explanation", "context", "notes"),
     "evidence": ("evidence", "proof", "basis", "citation", "citations", "references"),
     "severity": ("severity", "impact", "priority", "importance"),
-    "id": ("id", "item", "finding", "item_id", "finding_id", "topic", "topic_id",
-           "ref", "key"),
+    "id": ("id", "item", "finding", "item_id", "finding_id", "topic", "topic_id", "ref", "key"),
     "stance": ("stance", "position", "vote", "opinion", "call", "assessment"),
     "note": ("note", "comment", "reason", "why", "justification", "remark"),
     "severity_": (),
     "positions": ("positions", "stances", "verdicts", "items", "calls", "reviews"),
-    "new_items": ("new_items", "new_findings", "findings", "new", "additions",
-                  "new_topics", "topics"),
+    "new_items": ("new_items", "new_findings", "findings", "new", "additions", "new_topics", "topics"),
     "answers": ("answers", "replies", "responses", "qa_answers", "q_a"),
     "questions": ("questions", "agent_questions", "asks", "queries"),
-    "human_input": ("human_input", "human", "needs_human", "questions_for_human",
-                    "human_questions", "escalations"),
+    "human_input": ("human_input", "human", "needs_human", "questions_for_human", "human_questions", "escalations"),
     "signoff": ("signoff", "sign_off", "signed_off", "approve", "approval", "done"),
     "summary": ("summary", "overview", "wrap_up"),
     "open_questions": ("open_questions", "questions_open", "unresolved", "queries"),
@@ -46,8 +44,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "constraints": ("constraints", "constraints_across_stages", "cross_stage"),
     "risks": ("risks", "risk", "danger"),
     "assumptions": ("assumptions", "assumption"),
-    "rejected_alternatives": ("rejected_alternatives", "alternatives", "rejected",
-                              "alternatives_rejected"),
+    "rejected_alternatives": ("rejected_alternatives", "alternatives", "rejected", "alternatives_rejected"),
     "agreed": ("agreed", "agreed_points", "common", "consensus_points"),
     "conflicts": ("conflicts", "disagreements", "conflict"),
     "uncovered": ("uncovered", "gaps", "missing", "coverage_gaps", "not_covered"),
@@ -71,28 +68,62 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
 
 #: keys are folded at import, so `ask_human` and `ASK-HUMAN` reach the same row.
 STANCE_WORDS: dict[str, str] = {
-    "agree": AGREE, "agreed": AGREE, "yes": AGREE, "confirm": AGREE, "confirmed": AGREE,
-    "support": AGREE, "valid": AGREE, "correct": AGREE, "accept": AGREE,
-    "disagree": DISAGREE, "disagreed": DISAGREE, "no": DISAGREE, "reject": DISAGREE,
-    "refuted": DISAGREE, "object": DISAGREE, "objection": DISAGREE, "false": DISAGREE,
-    "wrong": DISAGREE, "contradict": DISAGREE,
-    "needs_human": NEEDS_HUMAN, "human": NEEDS_HUMAN, "ask_human": NEEDS_HUMAN,
-    "ask_user": NEEDS_HUMAN, "ask_the_user": NEEDS_HUMAN, "needs_clarification": NEEDS_HUMAN,
-    "needshuman": NEEDS_HUMAN, "escalate": NEEDS_HUMAN, "blocked": NEEDS_HUMAN,
-    "abstain": ABSTAIN, "neutral": ABSTAIN, "skip": ABSTAIN, "none": ABSTAIN,
-    "no_opinion": ABSTAIN, "noposition": ABSTAIN, "withdaw": ABSTAIN,
-    "withdraw": ABSTAIN, "withdraw_human": ABSTAIN, "no_human_needed": ABSTAIN,
-    "drop_escalation": ABSTAIN, "no_longer_needs_human": ABSTAIN,
+    "agree": AGREE,
+    "agreed": AGREE,
+    "yes": AGREE,
+    "confirm": AGREE,
+    "confirmed": AGREE,
+    "support": AGREE,
+    "valid": AGREE,
+    "correct": AGREE,
+    "accept": AGREE,
+    "disagree": DISAGREE,
+    "disagreed": DISAGREE,
+    "no": DISAGREE,
+    "reject": DISAGREE,
+    "refuted": DISAGREE,
+    "object": DISAGREE,
+    "objection": DISAGREE,
+    "false": DISAGREE,
+    "wrong": DISAGREE,
+    "contradict": DISAGREE,
+    "needs_human": NEEDS_HUMAN,
+    "human": NEEDS_HUMAN,
+    "ask_human": NEEDS_HUMAN,
+    "ask_user": NEEDS_HUMAN,
+    "ask_the_user": NEEDS_HUMAN,
+    "needs_clarification": NEEDS_HUMAN,
+    "needshuman": NEEDS_HUMAN,
+    "escalate": NEEDS_HUMAN,
+    "blocked": NEEDS_HUMAN,
+    "abstain": ABSTAIN,
+    "neutral": ABSTAIN,
+    "skip": ABSTAIN,
+    "none": ABSTAIN,
+    "no_opinion": ABSTAIN,
+    "noposition": ABSTAIN,
+    "withdaw": ABSTAIN,
+    "withdraw": ABSTAIN,
+    "withdraw_human": ABSTAIN,
+    "no_human_needed": ABSTAIN,
+    "drop_escalation": ABSTAIN,
+    "no_longer_needs_human": ABSTAIN,
     "declined": ABSTAIN,
 }
 STANCE_WORDS = {fold(word): value for word, value in STANCE_WORDS.items()}
 
-#: §5.3's backing paraphrase table: three literals and nowhere else.
+#: Lenient extraction's backing paraphrase table: three literals and nowhere else.
 BACKING_WORDS: dict[str, str] = {
-    "defer": "no_preference", "either": "no_preference", "any": "no_preference",
-    "none": "no_preference", "whatever": "no_preference", "no_preference": "no_preference",
-    "nopreference": "no_preference", "noweakpreferences": "no_preference",
-    "no": "no_preference", "neutral": "no_preference",
+    "defer": "no_preference",
+    "either": "no_preference",
+    "any": "no_preference",
+    "none": "no_preference",
+    "whatever": "no_preference",
+    "no_preference": "no_preference",
+    "nopreference": "no_preference",
+    "noweakpreferences": "no_preference",
+    "no": "no_preference",
+    "neutral": "no_preference",
 }
 BACKING_WORDS = {fold(word): value for word, value in BACKING_WORDS.items()}
 
@@ -103,19 +134,19 @@ SEVERITIES = ("blocker", "major", "minor", "trivial")
 
 @dataclass
 class Extraction:
-    """One parsed message plus the classification §6.2's cause table and §5.3 need."""
+    """One parsed message plus the classification the cause table and lenient extraction need."""
 
     data: dict = field(default_factory=dict)
     repaired: bool = False
-    errors: list[str] = field(default_factory=list)      # repairable problems
-    invalid: bool = False                                 # no JSON at all / not an object
+    errors: list[str] = field(default_factory=list)  # repairable problems
+    invalid: bool = False  # no JSON at all / not an object
     summary: str = ""
 
 
 def find_json(text: str) -> tuple[dict | None, str | None]:
     """The first balanced JSON object in the text, tolerating fences and prose.
 
-    Tries every `{` until one parses (§5.3) — a model that opens with prose still lands.
+    Tries every `{` until one parses — a model that opens with prose still lands.
     """
     if not text:
         return None, "empty answer"
@@ -127,7 +158,7 @@ def find_json(text: str) -> tuple[dict | None, str | None]:
         if end is None:
             return None, "unbalanced JSON object in the answer"
         try:
-            value = json.loads(cleaned[start:end + 1])
+            value = json.loads(cleaned[start : end + 1])
         except json.JSONDecodeError as exc:
             last_error = f"unparseable JSON: {exc}"
         else:
@@ -162,8 +193,12 @@ def _balanced_end(text: str, start: int) -> int | None:
     return None
 
 
-def pick(mapping: dict, canonical: str, extra: tuple[str,] = ()) -> object:
-    """Fetch `canonical` from a dict through folding and the synonym table."""
+def pick(mapping: object, canonical: str, extra: tuple[str, ...] = ()) -> object:
+    """Fetch `canonical` from a dict through folding and the synonym table.
+
+    `mapping` is `object` because every caller here holds whatever a member's JSON parsed to,
+    and the guard below is what turns that into a dict or into no value at all.
+    """
     if not isinstance(mapping, dict):
         return None
     forms = {fold(k): k for k in mapping}
@@ -190,7 +225,7 @@ def text_of(value: object) -> str:
 
 
 def map_stance(value: object) -> str | None:
-    """§5.3: a stance paraphrase is mapped, never dropped; an unknown one invalidates the entry."""
+    """A stance paraphrase is mapped, never dropped; an unknown one invalidates the entry."""
     word = fold(value)
     if word in STANCES:
         return word
@@ -200,8 +235,8 @@ def map_stance(value: object) -> str | None:
 def map_backing(value: object, me: str) -> tuple[str | None, bool]:
     """`(token, invalidated)` — an unmappable token invalidates `backing` **only**.
 
-    Never defaulted to `no_preference`: a value the parser invented is not a shrug (§5.3).
-    `abstain` arriving here is the invalid case, not a synonym (§7.1).
+    Never defaulted to `no_preference`: a value the parser invented is not
+    a shrug. `abstain` arriving here is the invalid case, not a synonym.
     """
     word = fold(value)
     if not word:
@@ -215,15 +250,15 @@ def map_backing(value: object, me: str) -> tuple[str | None, bool]:
     compact = word.replace("agent", "").replace(":", "")
     if compact.isdigit():
         return f"Agent{int(compact)}", False
-    if word.startswith("merged") or word.startswith("merge"):
+    if word.startswith(("merged", "merge")):
         label = text_of(value).split(":", 1)[-1].strip() if ":" in text_of(value) else ""
-        label = label or text_of(value)[len("merged"):].strip()
+        label = label or text_of(value)[len("merged") :].strip()
         return (f"merged: {label}", False) if label else (None, True)
     return None, True
 
 
 def map_severity(value: object) -> str:
-    """§5.3: unknown severities degrade to `minor`."""
+    """Unknown severities degrade to `minor`."""
     word = fold(value)
     if word in ("blocker", "critical", "fatal", "severe", "high"):
         return "blocker"
@@ -236,9 +271,15 @@ def map_severity(value: object) -> str:
     return "minor"
 
 
-def parse_verdict(payload: str, *, mode: str, me: str, extra_synonyms: dict | None = None,
-                  known_items: set[str] | None = None,
-                  closed_items: set[str] | None = None) -> Extraction:
+def parse_verdict(
+    payload: str,
+    *,
+    mode: str,
+    me: str,
+    extra_synonyms: dict | None = None,
+    known_items: set[str] | None = None,
+    closed_items: set[str] | None = None,
+) -> Extraction:
     """One seat's round verdict: positions, new items, Q&A, human_input, signoff (+ plan)."""
     data, error = find_json(payload)
     if data is None:
@@ -264,17 +305,20 @@ def parse_verdict(payload: str, *, mode: str, me: str, extra_synonyms: dict | No
         raw_id = text_of(pick(entry, "id")).strip()
         stance = map_stance(pick(entry, "stance"))
         if stance is None:
-            dropped += 1                     # §5.3: an unknown stance invalidates the entry
+            dropped += 1  # an unknown stance invalidates the entry
             continue
         if not raw_id:
             dropped += 1
             continue
         if raw_id not in known:
-            unknown.append(raw_id)           # §5.2.4: must not vanish
+            unknown.append(raw_id)  # a stance for an unknown item must not vanish
             continue
-        item = {"item": raw_id, "stance": stance,
-                "note": text_of(pick(entry, "note")),
-                "evidence": text_of(pick(entry, "evidence"))}
+        item: dict[str, object] = {
+            "item": raw_id,
+            "stance": stance,
+            "note": text_of(pick(entry, "note")),
+            "evidence": text_of(pick(entry, "evidence")),
+        }
         if raw_id in closed:
             item["on_closed"] = True
         clean_positions.append(item)
@@ -296,15 +340,18 @@ def parse_verdict(payload: str, *, mode: str, me: str, extra_synonyms: dict | No
         claim = text_of(pick(entry, "claim"))
         if not claim:
             continue
-        clean_new.append({"claim": claim, "detail": text_of(pick(entry, "detail")),
-                          "evidence": text_of(pick(entry, "evidence")),
-                          "severity": map_severity(pick(entry, "severity"))})
+        clean_new.append(
+            {
+                "claim": claim,
+                "detail": text_of(pick(entry, "detail")),
+                "evidence": text_of(pick(entry, "evidence")),
+                "severity": map_severity(pick(entry, "severity")),
+            }
+        )
     out.data["new_items"] = clean_new
 
-    out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"),
-                                   text=("answer", "text", "reply"))
-    out.data["questions"] = _entries(pick(data, "questions"), ("to",),
-                                     text=("question", "text", "ask"))
+    out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"), text=("answer", "text", "reply"))
+    out.data["questions"] = _entries(pick(data, "questions"), ("to",), text=("question", "text", "ask"))
     out.data["human_input"] = _human_input(data)
     signoff = pick(data, "signoff")
     out.data["signoff"] = bool(signoff) if signoff is not None else False
@@ -319,23 +366,20 @@ def parse_verdict(payload: str, *, mode: str, me: str, extra_synonyms: dict | No
         else:
             token, invalidated = map_backing(raw_backing, me)
             if invalidated:
-                out.errors.append(f"`backing` {text_of(raw_backing)!r} is not one of "
-                                  "AgentN / merged: <label> / no_preference")
+                out.errors.append(f"`backing` {text_of(raw_backing)!r} is not one of AgentN / merged: <label> / no_preference")
             out.data["backing"] = token
     if out.errors and not clean_positions:
-        out.repaired = True       # the caller owes §5.3's repair re-ask for this message
+        out.repaired = True  # the caller owes the repair re-ask for this message
     return out
 
 
-def _entries(value: object, need: tuple[str, ...], *,
-             text: tuple[str, ...] = ("text",)) -> list[dict]:
+def _entries(value: object, need: tuple[str, ...], *, text: tuple[str, ...] = ("text",)) -> list[dict]:
     """`answers`/`questions` rows: the fields the engine routes on, plus the prose.
 
-    The text key is passed in because the two schemas differ: an answer carries
-    `answer`, a question carries `question` — and the `question` field of an *answer* is
-    its `Q<n>` id, which must never be mistaken for the answer's text.
+    The text key is passed in because the two schemas differ: an answer carries `answer`, a question carries `question` — and
+    the `question` field of an *answer* is its `Q<n>` id, which must never be mistaken for the answer's text.
     """
-    out = []
+    out: list[dict] = []
     if not isinstance(value, list):
         return out
     for entry in value:
@@ -362,7 +406,7 @@ def _strings(value: object) -> list[str]:
 
 
 def _human_input(data: dict) -> list[dict]:
-    """§5.2.8: an entry naming an item is an escalation request, one naming none is a question."""
+    """An entry naming an item is an escalation request, one naming none is a question."""
     raw = pick(data, "human_input")
     if isinstance(raw, str):
         raw = [{"question": raw}]
@@ -378,11 +422,15 @@ def _human_input(data: dict) -> list[dict]:
         if not question or question == "{}":
             continue
         blocking = pick(entry, "blocking")
-        out.append({"question": question,
-                    "item": text_of(pick(entry, "item")).strip() or None,
-                    "blocking": bool(blocking) if blocking is not None else False,
-                    "context": text_of(pick(entry, "context")),
-                    "options": _strings(pick(entry, "options"))})
+        out.append(
+            {
+                "question": question,
+                "item": text_of(pick(entry, "item")).strip() or None,
+                "blocking": bool(blocking) if blocking is not None else False,
+                "context": text_of(pick(entry, "context")),
+                "options": _strings(pick(entry, "options")),
+            }
+        )
     return out
 
 
@@ -400,17 +448,18 @@ def _revised_plan(value: object) -> dict | None:
             if isinstance(stage, str):
                 clean.append({"state": stage, "gate": "", "scope": "", "exceptions": []})
             elif isinstance(stage, dict):
-                clean.append({"state": text_of(pick(stage, "state")),
-                              "gate": text_of(pick(stage, "gate")),
-                              "scope": text_of(pick(stage, "scope")),
-                              "exceptions": _strings(pick(stage, "exceptions"))})
-    return {"name": text_of(pick(value, "name")),
-            "text": text_of(pick(value, "claim")) or text_of(value)[:0],
-            "stages": clean}
+                clean.append(
+                    {
+                        "state": text_of(pick(stage, "state")),
+                        "gate": text_of(pick(stage, "gate")),
+                        "scope": text_of(pick(stage, "scope")),
+                        "exceptions": _strings(pick(stage, "exceptions")),
+                    }
+                )
+    return {"name": text_of(pick(value, "name")), "text": text_of(pick(value, "claim")) or text_of(value)[:0], "stages": clean}
 
 
-def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None
-                 ) -> Extraction:
+def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None) -> Extraction:
     """Phase 0: findings (review) or plans (plan), plus summary and open_questions."""
     data, error = find_json(payload)
     if data is None:
@@ -425,13 +474,16 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None
         if isinstance(stages, list):
             for stage in stages:
                 if isinstance(stage, dict):
-                    clean_stages.append({"state": text_of(pick(stage, "state")),
-                                         "gate": text_of(pick(stage, "gate")),
-                                         "scope": text_of(pick(stage, "scope")),
-                                         "exceptions": _strings(pick(stage, "exceptions"))})
+                    clean_stages.append(
+                        {
+                            "state": text_of(pick(stage, "state")),
+                            "gate": text_of(pick(stage, "gate")),
+                            "scope": text_of(pick(stage, "scope")),
+                            "exceptions": _strings(pick(stage, "exceptions")),
+                        }
+                    )
                 elif isinstance(stage, str):
-                    clean_stages.append({"state": stage, "gate": "", "scope": "",
-                                         "exceptions": []})
+                    clean_stages.append({"state": stage, "gate": "", "scope": "", "exceptions": []})
         out.data["plan"] = {
             "text": text_of(pick(approach, "claim")) if isinstance(approach, dict) else "",
             "stages": clean_stages,
@@ -456,9 +508,14 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None
             claim = text_of(pick(entry, "claim"))
             if not claim:
                 continue
-            clean.append({"claim": claim, "detail": text_of(pick(entry, "detail")),
-                          "evidence": text_of(pick(entry, "evidence")),
-                          "severity": map_severity(pick(entry, "severity"))})
+            clean.append(
+                {
+                    "claim": claim,
+                    "detail": text_of(pick(entry, "detail")),
+                    "evidence": text_of(pick(entry, "evidence")),
+                    "severity": map_severity(pick(entry, "severity")),
+                }
+            )
         out.data["findings"] = clean
         if findings and not clean:
             out.errors.append("`findings` was present but no entry carried a claim")
@@ -471,16 +528,15 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None
 def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
     """The chair's merge plan: groups of duplicate IDs plus any questions it raises.
 
-    Structural validation is §6.1's and lives with the engine; this only extracts.
+    Structural validation lives with the engine's `_apply_merge`, which both modes reach; this only extracts.
     """
     data, error = find_json(payload)
     if data is None:
         return None, [], [error or "no JSON object found"]
-    groups = pick(data, "groups")
-    if not isinstance(groups, list):
-        groups = pick(data, "merges") if isinstance(pick(data, "merges"), list) else []
+    groups, merges = pick(data, "groups"), pick(data, "merges")
+    rows = groups if isinstance(groups, list) else merges if isinstance(merges, list) else []
     clean = []
-    for group in groups:
+    for group in rows:
         if not isinstance(group, dict):
             continue
         canonical = text_of(pick(group, "canonical")).strip()
@@ -489,8 +545,7 @@ def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
             dups = [d for d in re.split(r"[,\s]+", dups) if d]
         if not canonical or not isinstance(dups, list):
             continue
-        clean.append({"canonical": canonical,
-                      "duplicates": [text_of(d).strip() for d in dups if text_of(d).strip()]})
+        clean.append({"canonical": canonical, "duplicates": [text_of(d).strip() for d in dups if text_of(d).strip()]})
     questions = _human_input(data)
     return {"groups": clean}, questions, []
 
@@ -511,7 +566,7 @@ def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
 
 
 def _agreed(value: object) -> list[dict]:
-    out = []
+    out: list[dict] = []
     if not isinstance(value, list):
         return out
     for entry in value:
@@ -519,14 +574,17 @@ def _agreed(value: object) -> list[dict]:
             out.append({"point": entry, "agents": []})
         elif isinstance(entry, dict):
             agents = pick(entry, "agents") or pick(entry, "agent") or []
-            out.append({"point": text_of(pick(entry, "point"))
-                                  or text_of(pick(entry, "claim")) or text_of(entry),
-                        "agents": _strings(agents) if isinstance(agents, list) else _strings([agents])})
+            out.append(
+                {
+                    "point": text_of(pick(entry, "point")) or text_of(pick(entry, "claim")) or text_of(entry),
+                    "agents": _strings(agents) if isinstance(agents, list) else _strings([agents]),
+                }
+            )
     return out
 
 
 def _conflicts(value: object) -> list[dict]:
-    out = []
+    out: list[dict] = []
     if not isinstance(value, list):
         return out
     for entry in value:
@@ -537,18 +595,14 @@ def _conflicts(value: object) -> list[dict]:
         if isinstance(positions, list):
             for row in positions:
                 if isinstance(row, dict):
-                    # §7.1's schema is `{"agent", "claim"}`; `position`/`note` are synonyms.
-                    rows.append({"agent": text_of(pick(row, "agent")),
-                                 "claim": text_of(pick(row, "claim"))
-                                     or text_of(pick(row, "note"))})
-        out.append({"claim": text_of(pick(entry, "claim"))
-                             or text_of(pick(entry, "question")),
-                    "positions": rows})
+                    # The plan phase machine's schema is `{"agent", "claim"}`; `position`/`note` are synonyms.
+                    rows.append({"agent": text_of(pick(row, "agent")), "claim": text_of(pick(row, "claim")) or text_of(pick(row, "note"))})
+        out.append({"claim": text_of(pick(entry, "claim")) or text_of(pick(entry, "question")), "positions": rows})
     return out
 
 
 def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
-    """§9's watchdog decisions: per-agent keep/restart plus any questions."""
+    """The chair's watchdog decisions: per-agent keep/restart plus any questions."""
     data, error = find_json(payload)
     if data is None:
         return [], [], [error or "no JSON object found"]
@@ -569,14 +623,14 @@ def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
             action = "keep" if pick(entry, "keep") else "restart"
         else:
             continue
-        out.append({"agent": agent, "action": action,
-                    "reason": text_of(pick(entry, "reason"))})
+        out.append({"agent": agent, "action": action, "reason": text_of(pick(entry, "reason"))})
     return out, _human_input(data), []
 
 
 def schema_hint(mode: str, *, phase: str) -> str:
-    """§5.3's repair re-ask carries the schema hint; the text lives in `prompts/` (§12.1.6)."""
+    """Lenient extraction's repair re-ask carries the schema hint; the text lives in `prompts/`."""
     from .prompts import common
+
     return common.schema_hint(mode, phase=phase)
 
 
@@ -588,14 +642,11 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
         return parse_verdict(text, **kwargs)
     if kind == "merge":
         plan, questions, errors = parse_merge_plan(text)
-        return Extraction(data={"groups": (plan or {}).get("groups", []),
-                                "questions": questions},
-                          invalid=plan is None, errors=errors)
+        return Extraction(data={"groups": (plan or {}).get("groups", []), "questions": questions}, invalid=plan is None, errors=errors)
     if kind == "compare":
         comparison, errors = parse_comparison(text)
         return Extraction(data=comparison or {}, invalid=comparison is None, errors=errors)
     if kind == "watchdog":
         decisions, questions, errors = parse_watchdog(text)
-        return Extraction(data={"decisions": decisions, "questions": questions},
-                          invalid=not decisions, errors=errors)
+        return Extraction(data={"decisions": decisions, "questions": questions}, invalid=not decisions, errors=errors)
     raise KeyError(kind)
