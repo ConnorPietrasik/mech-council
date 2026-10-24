@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mech-council"
+version = "0.1.0"
+description = "A council of coding agents that review a project or plan a task together."
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Connor Pietrasik", email = "connorgpietrasik@gmail.com" }]
+requires-python = ">=3.14"
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3.14"]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-timeout"]
+
+[project.scripts]
+council = "council.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow' -p no:cacheprovider"
+cache_dir = "/tmp/.council-pytest-cache"
+timeout = 120
+timeout_method = "signal"
+markers = [
+    "slow: real-pi smoke test that spends tokens (deselected by default)",
+    "sandbox: the §13.9 family, needs plain-fs fixture ground",
+]

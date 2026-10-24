@@ -1,0 +1,19 @@
+# Tooling and build artifacts
+.venv/
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Test scratch. `.council-test-fs` is the §13.9 fixture ground `tests/support/ground.py`
+# creates beside the checkout when neither $COUNCIL_TEST_FS nor $TMPDIR names a plain
+# filesystem; it holds overlay lowers and work dirs, never anything you want.
+.council-test-fs/
+
+# What a council leaves when it reviews this project: §10's per-project member scratch, and
+# a runs root if one is pointed inside the tree. Both hold members' half-written work.
+.council-scratch/
+/runs/

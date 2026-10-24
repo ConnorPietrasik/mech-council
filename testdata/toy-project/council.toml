@@ -1,0 +1,34 @@
+# The §13.12 smoke config: two seats and a chair, two rounds, transcripts off.
+# `pi_cli` is left unset on purpose — §3.3's discovery finds the real pi, which is the
+# point of a smoke test that spends tokens.
+
+[defaults]
+max_rounds = 2
+watchdog_sec = 120
+transcripts = "off"
+
+[councils.review]
+goal = "Review src/cache.py for defects a caller would actually hit."
+mode = "review"
+
+[councils.review.chair]
+name = "Chair"
+
+[[councils.review.agents]]
+name = "Metic"
+
+[[councils.review.agents]]
+name = "Senior"
+
+[councils.plan]
+goal = "Plan the fix for the tenancy defect in src/cache.py."
+mode = "plan"
+
+[councils.plan.chair]
+name = "Chair"
+
+[[councils.plan.agents]]
+name = "Metic"
+
+[[councils.plan.agents]]
+name = "Senior"

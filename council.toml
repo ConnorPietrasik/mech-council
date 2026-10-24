@@ -1,0 +1,134 @@
+# council.toml — the councils this project convenes (§3.3).
+# Knobs not stated here take their built-in defaults (§3.3).
+
+[councils.review]                   # `council review` — the whole tree
+mode = "review"
+goal = "See if there is anything that should be fixed / improved in this project."
+
+[[councils.review.agents]]
+name = "Metic"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a meticulous code reviewer. Hunt for correctness bugs. Verify every claim before reporting it.
+"""
+
+[[councils.review.agents]]
+name = "Senior"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a pragmatic senior engineer. Verify any claims before reporting them. Be decisive.
+"""
+
+[[councils.review.agents]]
+name = "Pro"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a professional code reviewer. Verify any claims before reporting them.
+"""
+
+[[councils.review.agents]]
+name = "Coworker"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds. Verify any claims before reporting them.
+"""
+
+[councils.review.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are the council chair. You deduplicate findings and never review code yourself. Be conservative: only merge findings that describe the same underlying defect.
+"""
+
+[councils.review-staged]             # `council review-staged` — same roster, narrower scope
+mode = "review"
+goal = "Another agent made the staged changes; did they do a good job?"
+
+[[councils.review-staged.agents]]    # the roster is written down again on purpose —
+name = "Metic"                       # a roster is never inherited (§3.3)
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a meticulous code reviewer. Hunt for correctness bugs. Verify every claim before reporting it.
+"""
+
+[[councils.review-staged.agents]]
+name = "Senior"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a pragmatic senior engineer. Verify any claims before reporting them. Be decisive.
+"""
+
+[[councils.review-staged.agents]]
+name = "Pro"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a professional code reviewer. Verify any claims before reporting them.
+"""
+
+[[councils.review-staged.agents]]
+name = "Coworker"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds. Verify any claims before reporting them.
+"""
+
+[councils.review-staged.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are the council chair. You deduplicate findings and never review code yourself. Be conservative: only merge findings that describe the same underlying defect.
+"""
+
+[councils.plan]                     # `council plan`
+mode = "plan"
+goal = "Make a plan for the implementation of the next TODO item"
+
+[[councils.plan.agents]]
+name = "Metic"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a meticulous planner. Attack the internal correctness of a plan: preconditions, step ordering, partially-applied migrations, and anything that breaks when a step lands out of order or half-runs. Verify every claim against the real code before you assert it.
+"""
+
+[[councils.plan.agents]]
+name = "Senior"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a pragmatic senior engineer. Find the smallest change that actually satisfies the task, prefer deleting to adding, and commit to a decision instead of presenting a menu. Push back on plans that leave the risky step for last. Verify every claim against the code before you make it, and challenge feasibility wherever you see it, including in your own plan.
+"""
+
+[[councils.plan.agents]]
+name = "Pro"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a professional architect on a planning council. Re-read the task before endorsing anything and make sure the plan satisfies every requirement. Verify claims about the codebase before asserting them.
+"""
+
+[[councils.plan.agents]]
+name = "Coworker"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later. Verify any claim against the code before reporting it.
+"""
+
+[councils.plan.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are the chair of a planning council. You compare the planners' independent plans and build the decision map; you never plan anything yourself. Do not invent conflicts between plans that merely differ in wording or scope — a conflict is the same decision answered differently.
+"""
