@@ -100,7 +100,10 @@ class Question:
     id: str
     text: str
     context: str = ""
-    options: list[str] = field(default_factory=list)
+    # The menu, with provenance: option key (the question's own dedup key) → (wording, the asker that offered it).
+    # An option is one seat's candidate, so provenance is what lets *that seat* retire it when it revises its own
+    # answer — a flat list cannot tell "nobody offers this any more" from "somebody else still does".
+    menu: dict[str, tuple[str, str]] = field(default_factory=dict)
     item_id: str | None = None
     askers: list[str] = field(default_factory=list)
     chair_raised: bool = False
@@ -110,6 +113,8 @@ class Question:
     state: str = ASKED  # asked / answered / skipped
     answer: str = ""
     answer_round: int = 0
+    answer_option: int = 0  # the number the human typed to take an offered option; 0 means their own words
+    answer_option_text: str = ""  # that option verbatim, so a terse `2` in the transcript proves what it meant
     recommendation: str = ""  # an `explain` reply: advice, never authority
     recommendation_round: int = 0
     markers: list[str] = field(default_factory=list)  # undefended / skipped / unasked …
@@ -117,6 +122,11 @@ class Question:
     @property
     def key(self) -> str:
         return normalize_text(self.text)
+
+    @property
+    def options(self) -> list[str]:
+        """The menu as the human reads it, numbered: each wording in the order it was first offered."""
+        return [wording for wording, _asker in self.menu.values()]
 
 
 @dataclass

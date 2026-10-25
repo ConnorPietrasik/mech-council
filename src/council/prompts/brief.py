@@ -2,6 +2,10 @@
 
 The engine never builds a string: it asks for a briefing and gets one.  Keeping the vocabulary here means
 `modes/` stays data, the engine stays pure, and every word a member reads is greppable in `prompts/`.
+
+**No agent reads a name through here.**  `Brief` holds no roster names at all — it takes none in its constructor
+and passes none down — so a seat reads a peer as `AgentN` and cannot weight a seat called "Senior" over one called
+"Newbie".  Names are the human's: `report_*`, the checkpoint and the console caption IDs from their own tables.
 """
 
 from __future__ import annotations
@@ -13,10 +17,9 @@ from . import common
 class Brief:
     """Every message a member reads is built here, and only here."""
 
-    def __init__(self, *, mode: str, project: str, names: dict[str, str] | None = None, max_items: int = 12) -> None:
+    def __init__(self, *, mode: str, project: str, max_items: int = 12) -> None:
         self.mode = mode
         self.project = project
-        self.names = names or {}
         self.max_items = max_items
 
     # -- member asks -----------------------------------------------------------
@@ -30,8 +33,9 @@ class Brief:
             mode=mode or self.mode, goal=goal, project=project or self.project, me=me, docket=docket, phase0_summary=summary
         )
 
-    def docket(self, docket, viewer: str, *, names: dict[str, str] | None = None) -> str:
-        return docket_render.render(docket, viewer, names=names if names is not None else self.names)
+    def docket(self, docket, viewer: str) -> str:
+        """The docket for one seat: IDs, never names."""
+        return docket_render.render(docket, viewer)
 
     def gap(self, chunk: list[str], *, deliberate: bool, reason: str) -> str:
         return common.gap_ask(chunk, reason=reason, deliberate=deliberate)

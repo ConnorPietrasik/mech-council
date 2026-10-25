@@ -196,6 +196,20 @@ def test_phase0_findings_carry_severity_evidence_and_detail():
     assert out.data["open_questions"] == ["is a tenant fixed?"]
 
 
+def test_phase_0_reads_human_input_with_its_context_and_options():
+    """The phase-0 brief asks the seat for the human's menu; extraction is what keeps that brief from being a lie."""
+    payload = json.dumps(
+        {
+            "findings": [],
+            "human_input": [{"question": "which way?", "item": "F1", "context": "no caller passes a tenant", "options": ["a", "b", "a"]}],
+        }
+    )
+    out = parse_phase0(payload, mode="review")
+    assert out.data["human_input"] == [
+        {"question": "which way?", "item": "F1", "blocking": False, "context": "no caller passes a tenant", "options": ["a", "b", "a"]}
+    ]
+
+
 def test_phase0_plan_mode_reads_the_approach_schema():
     text = json.dumps(
         {

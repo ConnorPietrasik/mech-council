@@ -41,6 +41,7 @@ class ScriptPort:
     answers: dict = field(default_factory=dict)  # H-id → the human's answer
     skip: list[str] = field(default_factory=list)
     recommendations: dict = field(default_factory=dict)
+    selections: dict = field(default_factory=dict)  # H-id → the option number the answer took (what the Checkpoint records)
 
     asks: list[Ask] = field(default_factory=list)
     checkpoints: list[dict] = field(default_factory=list)
@@ -119,7 +120,8 @@ class ScriptPort:
         answered = {qid: text for qid, text in self.answers.items() if qid in ids}
         skipped = [qid for qid in ids if qid in self.skip]
         recommended = {qid: text for qid, text in self.recommendations.items() if qid in ids}
-        return CheckpointOutcome(answers=answered, skipped=skipped, waited=waiting, recommendations=recommended)
+        options = {qid: number for qid, number in self.selections.items() if qid in answered}
+        return CheckpointOutcome(answers=answered, answer_options=options, skipped=skipped, waited=waiting, recommendations=recommended)
 
     # -- convenience for assertions --------------------------------------------
 

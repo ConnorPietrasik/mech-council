@@ -19,17 +19,16 @@ from .support.harness import RawAsk, ScriptPort, events_collector, payload
 NAMES = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
 
 
-def engine(n=3, *, mode="review", max_rounds=4, reply=None, answers=None, skip=None):
+def engine(n=3, *, mode="review", max_rounds=4, reply=None, answers=None, skip=None, selections=None):
     docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)])
-    port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [])
+    port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [], selections=selections or {})
     records, emit = events_collector()
     built = Engine(
         docket,
         port,
         goal="g",
         project="/project",
-        names=dict(NAMES),
-        brief=Brief(mode=mode, project="/project", names=dict(NAMES)),
+        brief=Brief(mode=mode, project="/project"),
         max_rounds=max_rounds,
         emit=emit,
     )
@@ -84,6 +83,375 @@ def test_phase_0_briefing_is_byte_identical_and_names_no_one():
     for text in briefings:
         for leak in ("Agent1", "Agent2", "Agent3", "Metic", "Senior", "Coworker"):
             assert leak not in text, f"the briefing carries no roster IDs, but {leak} leaked in"
+
+
+def test_no_agent_ever_reads_a_name():
+    """The numeric ID is the bias control: a seat weighs a claim's evidence, never its reporter's reputation.
+
+    `Brief` holds no roster names and `docket.render` takes none, so this only fails if a name finds a way back in — which is
+    why it reads **every** ask of the run, seats and chair alike.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache key ignores the tenant")
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply)
+        outcome = await built.run()
+        return outcome, port
+
+    outcome, port = asyncio.run(main())
+    assert outcome == "consensus"
+    assert port.asks, "the council actually asked"
+    for ask in port.asks:
+        for name in NAMES.values():
+            assert name not in ask.text, f"{name} reached {ask.who} in a {ask.phase} ask"
+        if ask.who.startswith("Agent"):
+            assert "Agent" in ask.text, "a peer is still addressable — by number"
+
+
+def test_the_merge_listing_carries_the_detail_the_chair_judges_causes_on():
+    """Claim and evidence alone invite merging two causes that share a symptom, so the listing prints the detail too."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(
+                findings=[
+                    {
+                        "claim": "the cache returns another tenant's rows",
+                        "detail": "the key omits the tenant id",
+                        "evidence": "cache.py:12",
+                    },
+                    {
+                        "claim": "the cache returns another tenant's rows",
+                        "detail": "eviction drops the whole table",
+                        "evidence": "cache.py:40",
+                    },
+                ],
+                open_questions=[],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply)
+        await built.run()
+        return port
+
+    port = asyncio.run(main())
+    listings = [ask.text for ask in port.asks if ask.kind == "merge"]
+    assert listings, "new items arrived, so a merge pass ran"
+    assert "the key omits the tenant id" in listings[0] and "eviction drops the whole table" in listings[0]
+    assert "cache.py:12" in listings[0], "the evidence still rides along"
+
+
+def test_a_phase_0_human_input_request_arrives_with_its_context_and_options():
+    """The phase-0 brief asks for `human_input` with `context` and `options`, so the run must not quietly drop them.
+
+    Phase 0 raises **requests**, never escalations: the entry's item is dropped (the finding it names may not exist
+    yet) and the request arrives item-less, deferred, with everything the seat offered the human to choose from.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(
+                findings=[{"claim": "the cache ignores tenants"}],
+                human_input=[
+                    {
+                        "question": "is the tenant fixed?",
+                        "item": "F1",
+                        "context": "no caller passes a tenant id",
+                        "options": ["fixed by contract", "one tenant forever"],
+                    }
+                ],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply)
+        await built.run()
+        return built
+
+    built = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert question.item_id is None, "phase 0 raises no escalation over an item it may not have yet"
+    assert question.context == "no caller passes a tenant id"
+    assert question.options == ["fixed by contract", "one tenant forever"]
+    assert question.state == "asked", "asked at the checkpoint, never a way to hold the run"
+
+
+def test_a_phase_0_one_liner_the_seat_later_escalates_still_stops_the_run():
+    """Phase 0 raises the request item-less; the escalation that re-sends those words brings the item with it.
+
+    `QUESTION_SHAPE` tells a seat to put the decision in one line, and a seat re-sends its own line when it escalates it.
+    Dedup makes those one question, so the question has to take the item: `effective_class` answers `deferred` for an
+    item-less question **before it counts a single stance**, and an escalation that can never be effective-blocking never
+    stops the run — the council would grind to the round limit with two of three seats holding `needs_human` and the
+    human never once asked.
+    """
+    import asyncio
+
+    from council.deliberation.escalations import effective_class
+
+    decision = "is the tenant fixed by contract?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[{"claim": "the cache ignores tenants"}])
+            return payload(
+                findings=[{"claim": "the cache ignores tenants"}],
+                human_input=[{"question": decision, "options": ["fixed by contract", "one tenant forever"]}],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who in ("Agent1", "Agent2"):
+            return payload(positions=[{"item": "F1", "stance": "needs_human", "note": decision}], signoff=False)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, max_rounds=3)
+        await built.run()
+        return built, port
+
+    built, port = asyncio.run(main())
+    assert built.docket.question_order == ["H1"], "the phase-0 request and the escalation are one question"
+    question = built.docket.questions["H1"]
+    assert question.item_id == "F1", "the entry that named the item gave the question its item"
+    assert effective_class(built.docket, question) == "blocking", f"{built.docket.bar()} of 3 seats hold the escalation"
+    waited = {c["round"]: c["waiting"] for c in port.checkpoints}
+    assert waited[0] is False, "at phase 0 it is a request over no item, and holds nothing"
+    assert waited[1] and waited[2], "once a majority escalates it on the item, the run stops and asks"
+
+
+def test_an_answer_that_took_an_option_records_the_line_it_took():
+    """`H1: 2` is expanded by the Checkpoint into the option's own words; the engine records which one it was."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(
+                findings=[{"claim": "the cache ignores tenants"}],
+                human_input=[{"question": "is the tenant fixed?", "options": ["fixed by contract", "one tenant forever"]}],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply, answers={"H1": "one tenant forever"}, selections={"H1": 2})
+        outcome = await built.run()
+        return outcome, built
+
+    outcome, built = asyncio.run(main())
+    assert outcome == "consensus"
+    question = built.docket.questions["H1"]
+    assert question.answer == "one tenant forever" and question.answer_option == 2
+    assert question.answer_option_text == "one tenant forever", "the record proves which offered line was chosen"
+
+
+def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stands():
+    """A selection the menu could not have produced is a bug in the port, and the run says which bug — and carries on.
+
+    The number was never shown to the human, so it records nothing: `human_input.json` says the answer came in the
+    human's own words, which is true.  The **answer** is the human's own line and keeps its authority, so the run does
+    not end over a bad integer — it would have spent every token the deliberation cost and contradicted the console line
+    the human already read.  The event names the question, the number and the menu's size, because `internal error:
+    IndexError` tells the operator nothing.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], human_input=[{"question": "which way?", "options": ["the only way"]}])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 9})
+        outcome = await built.run()
+        return outcome, built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus", "the run finishes with the answer it was given"
+    question = built.docket.questions["H1"]
+    assert question.state == "answered" and question.answer == "the only way"
+    assert (question.answer_option, question.answer_option_text) == (0, ""), "no menu line is claimed for a number never shown"
+    refused = [record for record in records if record["event"] == "answer_option_rejected"]
+    assert len(refused) == 1
+    assert refused[0]["id"] == "H1" and refused[0]["option"] == 9 and refused[0]["menu"] == 1
+
+
+def test_a_negative_option_number_names_no_line_and_costs_the_run_nothing():
+    """`options[-2]` would otherwise record the wrong line as the human's choice, silently — and still end no run.
+
+    The answer here (`b`) is the very line `options[-2]` points at, so a silent clamp would look correct in this run and
+    be wrong in the next one: what is recorded is that the human wrote their own answer, which is what actually happened.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], human_input=[{"question": "which way?", "options": ["a", "b", "c"]}])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, answers={"H1": "b"}, selections={"H1": -2})
+        outcome = await built.run()
+        return outcome, built, records
+
+    outcome, built, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert outcome == "consensus" and question.state == "answered" and question.answer == "b"
+    assert (question.answer_option, question.answer_option_text) == (0, ""), "a negative index proves nothing about the menu"
+    assert [record["event"] for record in records].count("answer_option_rejected") == 1
+
+
+def test_a_selection_whose_line_is_not_the_answer_records_no_line():
+    """`answer_option` claims the human chose a particular line, so that line had to **be** the answer.
+
+    A port that pairs `"the only way"` with option 2 would otherwise write a menu line the human never read into
+    `human_input.json` — and the bounds check alone cannot see it, because 2 is a legal index.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], human_input=[{"question": "which way?", "options": ["the only way", "another"]}])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 2})
+        outcome = await built.run()
+        return outcome, built, records
+
+    outcome, built, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert outcome == "consensus" and question.answer == "the only way"
+    assert (question.answer_option, question.answer_option_text) == (0, ""), "option 2 is another, and the human did not say that"
+    refused = [record for record in records if record["event"] == "answer_option_rejected"]
+    assert len(refused) == 1 and "not those words" in refused[0]["reason"]
+
+
+def test_a_seat_standing_by_its_ask_moves_nothing_on_the_docket():
+    """A seat re-sending its entry verbatim is standing by the ask, not updating it.
+
+    `question_updated` is the machine channel's word for the ask set having moved; filing the same words, context and
+    menu again moves nothing, so it must say nothing.
+    """
+    import asyncio
+
+    decision = "does policy allow this?"
+    entry = {
+        "question": decision,
+        "item": "F1",
+        "blocking": True,
+        "context": "the policy predates the tenant work",
+        "options": ["yes", "no"],
+    }
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent1":
+                return payload(findings=[{"claim": "the cache ignores tenants"}])
+            return payload(findings=[])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": item, "stance": "needs_human", "note": decision} for item in shown_items(ask.text)],
+                human_input=[entry],
+                signoff=False,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=3)
+        outcome = await built.run()
+        return outcome, built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "round_limit_reached" and built.docket.question_order == ["H1"], "one ask, re-filed three times"
+    rounds = [record["round"] for record in records if record["event"] == "question_updated"]
+    assert rounds == [1], f"round 1 gave the entry its context and menu; rounds 2 and 3 changed nothing, and said {rounds}"
+
+
+def test_answered_words_do_not_silence_a_new_escalation():
+    """A majority escalation reaches the human even when its exact words were answered about another item.
+
+    Round 1: two of three seats escalate F1 with a one-liner, the run waits, the human answers.  Round 2: F1 is agreed and
+    the same two words escalate a new item.  Dedup used to chain that escalation onto the answered question, which took it
+    out of the ask set for good (`unsettled_questions` reads `ASKED`) and judged it against the answered question's item —
+    so the run closed `consensus` over two seats holding `needs_human` nobody had ever been asked about.
+    """
+    import asyncio
+
+    decision = "which tenant key?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent1":
+                return payload(findings=[{"claim": "the cache ignores tenants"}])
+            return payload(findings=[])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent3":
+            return payload(positions=[{"item": item, "stance": "agree"} for item in shown_items(ask.text)], signoff=True)
+        if ask.round == 1:
+            return payload(
+                positions=[{"item": item, "stance": "needs_human", "note": decision} for item in shown_items(ask.text)],
+                human_input=[{"question": decision, "item": "F1", "blocking": True}],
+                signoff=False,
+            )
+        return payload(
+            new_items=[{"claim": "the retry loop ignores the tenant too"}] if ask.who == "Agent1" else [],
+            positions=[{"item": "F1", "stance": "agree", "note": "the answer settles it"}],
+            human_input=[{"question": decision, "item": "F2", "blocking": True}],
+            signoff=True,
+        )
+
+    async def main():
+        built, port, _records = engine(reply=reply, max_rounds=3, answers={"H1": "put the tenant id in the key"})
+        outcome = await built.run()
+        return outcome, built, port
+
+    outcome, built, port = asyncio.run(main())
+    assert outcome == "needs_human", "two seats hold F2, and the human has never been asked about F2"
+    first, second = built.docket.questions["H1"], built.docket.questions["H2"]
+    assert (first.state, first.item_id) == ("answered", "F1") and (second.state, second.item_id) == ("asked", "F2")
+    for (item_id, _asker), escalation in built.docket.escalations.items():
+        if item_id == "F2":
+            assert escalation.state == STANDING and escalation.question_id == "H2", "the new escalation owns a question that gets asked"
+    asked = [checkpoint for checkpoint in port.checkpoints if checkpoint["waiting"]]
+    assert asked[-1]["ask_set"] == ["H2"], f"the terminal checkpoint asked {asked[-1]['ask_set']}, not the new escalation"
+    assert asked[0]["ask_set"] == ["H1"]
 
 
 def test_phase0_fewer_than_two_valid_answers_aborts():
@@ -584,8 +952,8 @@ def test_an_answer_naming_nobody_is_logged_and_kept_out_of_the_docket():
 # --------------------------------------------------- Escalation defenses
 
 
-def _escalation_and_defense(**defend):
-    """A challenged escalation, with the asker's defense scripted by `defend`."""
+def _escalation_and_defense(asked=None, **defend):
+    """A challenged escalation, with the asker's defense scripted by `defend` (`asked` is its `human_input`)."""
     import asyncio
 
     def reply(ask):
@@ -594,7 +962,7 @@ def _escalation_and_defense(**defend):
         if ask.kind == "merge":
             return {"groups": []}
         if ask.phase == "defense":
-            return payload(positions=[{"item": "F1", **defend}], signoff=True)
+            return payload(positions=[{"item": "F1", **defend}], human_input=asked or [], signoff=True)
         if ask.who == "Agent1":
             return payload(
                 positions=[{"item": i, "stance": "needs_human", "note": "does policy allow this"} for i in shown_items(ask.text)],
@@ -640,3 +1008,94 @@ def test_a_defense_that_answers_in_other_words_keeps_the_escalation_standing():
     escalation = built.docket.escalations[("F1", "Agent1")]
     assert escalation.state == STANDING
     assert "escalation_demoted" not in [r["event"] for r in records]
+
+
+def test_a_defense_offering_the_human_a_menu_keeps_it():
+    """A defense is a verdict, and the round schema asks every verdict for `context` and `options`.
+
+    The defense is the one ask where a seat argues *for* its own escalation, so it is the likeliest place to name the
+    candidates — and the checkpoint is where the human reads them.
+    """
+    built, _records = _escalation_and_defense(
+        asked=[
+            {
+                "question": "does policy allow this?",
+                "item": "F1",
+                "blocking": True,
+                "context": "the policy predates the tenant work",
+                "options": ["key it on the tenant", "drop the cache"],
+            }
+        ],
+        stance="needs_human",
+        note="that document predates the tenant work, so a person must decide",
+    )
+    escalation = built.docket.escalations[("F1", "Agent1")]
+    question = built.docket.questions[escalation.question_id]
+    assert question.context == "the policy predates the tenant work"
+    assert question.options == ["key it on the tenant", "drop the cache"], "the menu the seat offered reaches the checkpoint"
+
+
+def test_a_defense_that_rephrases_updates_its_own_question_and_never_opens_a_second():
+    """One escalation is one question, however many times its asker rewords it.
+
+    The defense prompt invites refreshed question text, and a refreshed line no longer matches the one the escalation was
+    raised with, so raising a *new* entry here would ask the human the same thing twice — the bare copy and the copy
+    carrying the menu — with nothing on either line saying they are one decision.  Answering either retires the
+    escalation, which drops the other out of the ask set and leaves a question nobody answered recorded as asked.
+    """
+    from council.deliberation.termination import unsettled_questions
+
+    built, _records = _escalation_and_defense(
+        asked=[
+            {
+                "question": "does the policy permit a 30-day window?",
+                "item": "F1",
+                "blocking": True,
+                "context": "the policy predates the tenant work",
+                "options": ["keep it 30 days", "tie it to the job"],
+            }
+        ],
+        stance="needs_human",
+        note="that document predates the tenant work, so a person must decide",
+    )
+    escalation = built.docket.escalations[("F1", "Agent1")]
+    assert built.docket.question_order == [escalation.question_id], "the docket holds one question for one escalation"
+    question = built.docket.questions[escalation.question_id]
+    assert question.text == "does the policy permit a 30-day window?", "the rephrasing is what the human is asked"
+    assert question.options == ["keep it 30 days", "tie it to the job"] and question.context == "the policy predates the tenant work"
+    assert [q.id for q in unsettled_questions(built.docket)] == [question.id], "the checkpoint asks it once"
+
+
+def test_a_rephrased_reask_that_is_not_a_defense_also_updates_rather_than_forks():
+    """The same rule on the round path: a seat standing by its escalation with new words moves its own question.
+
+    A seat may phrase the escalation in its `needs_human` note and phrase the `human_input` entry differently in the same
+    verdict; those are one act, and the ledger keys escalations by (item, asker) — it cannot represent two open questions
+    for one seat's standing escalation anyway.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            first = ask.round == 1
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant key?" if first else "which key, then?"}],
+                human_input=[{"question": "which tenant key?" if first else "which key, then?", "item": "F1", "blocking": True}],
+                signoff=False,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply, max_rounds=2)
+        await built.run()
+        return built
+
+    built = asyncio.run(main())
+    escalation = built.docket.escalations[("F1", "Agent1")]
+    assert built.docket.question_order == [escalation.question_id], "two rounds, one question"
+    question = built.docket.questions[escalation.question_id]
+    assert question.text == "which key, then?" and question.item_id == "F1"

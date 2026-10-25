@@ -181,7 +181,7 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
     roster = council.seat_ids
     names = {**council.seat_names, "chair": council.chair.name}
     docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name)
-    brief = Brief(mode=council.mode, project=council.project, names=names)
+    brief = Brief(mode=council.mode, project=council.project)
     chair = Chair(council, lanes, console, brief)
     reader = LineReader()
     reader.start()
@@ -195,7 +195,6 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
         port,
         goal=council.goal,
         project=council.project,
-        names=names,
         brief=brief,
         max_rounds=council.max_rounds,
         emit=_emitter(console, names),
@@ -283,6 +282,8 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"merge plan refused ({fields['reason']}) — the docket is printed as raised"
     if name == "answer_buys_a_round":
         return f"{fields['answered']} answer(s) settled: round {fields['round']} is a full one"
+    if name == "answer_option_rejected":
+        return f"the checkpoint reported option {fields['option']} for {fields['id']}: {fields['reason']}"
     if name == "gap_declined":
         return f"{caption(_who(fields.get('member', '')), names)} declined {len(fields.get('items') or [])} item(s) after its ladder"
     return ""
@@ -444,6 +445,10 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
                 "state": q.state,
                 "answer": q.answer,
                 "answer_round": q.answer_round,
+                # A terse `2` at the checkpoint is expanded into the option's own words; the pair below is the proof
+                # of which offered line that answer came from, and it is empty when the human wrote their own.
+                "answer_option": q.answer_option,
+                "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
                 "markers": list(q.markers),  # unasked / skipped / deferred: the report's words
                 "chair_raised": q.chair_raised,
@@ -474,8 +479,7 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
 
 
 def _print_report(path: str) -> None:
-    """The report is printed to stdout at exit — the one exit exempt from the
-    `[council]` prefix rule, so a terminal pager sees a document, not a log."""
+    """The report is printed to stdout at exit: verbatim, after a blank line, so a terminal pager sees a document."""
     try:
         with open(path, encoding="utf-8") as handle:
             sys.stdout.write("\n" + handle.read())

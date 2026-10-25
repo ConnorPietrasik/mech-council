@@ -56,7 +56,7 @@ def _child(ack_write: int, go_read: int, body) -> int:
     try:
         mount.unshare(mount.CLONE_NEWUSER | mount.CLONE_NEWNS)
     except OSError as failure:
-        sys.stderr.write(f"[council] unshare(CLONE_NEWUSER|CLONE_NEWNS): {os.strerror(failure.errno or 0)}\n")
+        sys.stderr.write(f"unshare(CLONE_NEWUSER|CLONE_NEWNS): {os.strerror(failure.errno or 0)}\n")
         os.close(ack_write)
         os.close(go_read)
         return 1
@@ -65,7 +65,7 @@ def _child(ack_write: int, go_read: int, body) -> int:
     released = os.read(go_read, 1)
     os.close(go_read)
     if released != b"m":
-        sys.stderr.write("[council] released without a uid/gid map\n")
+        sys.stderr.write("released without a uid/gid map\n")
         return 1
     try:
         return int(body())
@@ -81,13 +81,13 @@ def _supervisor(pid: int, ack_read: int, go_write: int, name: str) -> int:
     if os.read(ack_read, 1) != b"r":
         os.close(ack_read)
         os.close(go_write)
-        sys.stderr.write(f"[council] {name} never reported entering its namespace\n")
+        sys.stderr.write(f"{name} never reported entering its namespace\n")
         return 1
     os.close(ack_read)
     try:
         _write_map(pid)
     except OSError as failure:
-        sys.stderr.write(f"[council] the uid/gid map: {os.strerror(failure.errno or 0)}\n")
+        sys.stderr.write(f"the uid/gid map for {name}: {os.strerror(failure.errno or 0)}\n")
         os.close(go_write)
         _relay(pid)
         return 1

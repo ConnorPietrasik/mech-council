@@ -24,7 +24,9 @@ PHASE0_SCHEMA = """\
      "severity": "blocker|major|minor|trivial"}
   ],
   "open_questions": ["a question only the human can answer"],
-  "human_input": [{"question": "…", "item": null, "blocking": false}]
+  "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
+                   "context": "what you saw that leaves it open, and the cost of guessing",
+                   "options": ["an answer you would accept", "another you would accept"]}]
 }
 ```
 """
@@ -50,7 +52,9 @@ ROUND_SCHEMA = """\
   "new_items": [{"claim": "…", "detail": "…", "evidence": "…", "severity": "minor"}],
   "questions": [{"to": "Agent2", "question": "…"}],
   "answers": [{"to": "Agent3", "question": "Q2", "answer": "…"}],
-  "human_input": [{"question": "…", "item": "F1", "blocking": true}],
+  "human_input": [{"question": "the decision, one line", "item": "F1", "blocking": true,
+                   "context": "what you saw that leaves it open, and the cost of guessing",
+                   "options": ["an answer you would accept", "another you would accept"]}],
   "open_questions": ["…"],
   "signoff": false
 }

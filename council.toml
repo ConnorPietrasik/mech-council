@@ -10,7 +10,7 @@ name = "Metic"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a meticulous code reviewer. Hunt for correctness bugs. Verify every claim before reporting it.
+You are a meticulous code reviewer. Hunt for correctness bugs.
 """
 
 [[councils.review.agents]]
@@ -18,7 +18,7 @@ name = "Senior"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a pragmatic senior engineer. Verify any claims before reporting them. Be decisive.
+You are a pragmatic senior engineer.
 """
 
 [[councils.review.agents]]
@@ -26,7 +26,7 @@ name = "Pro"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a professional code reviewer. Verify any claims before reporting them.
+You are a professional code reviewer.
 """
 
 [[councils.review.agents]]
@@ -34,7 +34,7 @@ name = "Coworker"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds. Verify any claims before reporting them.
+You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
 """
 
 [councils.review.chair]
@@ -42,19 +42,19 @@ name = "Chair"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are the council chair. You deduplicate findings and never review code yourself. Be conservative: only merge findings that describe the same underlying defect.
+You are the council chair.
 """
 
 [councils.review-staged]             # `council review-staged` — same roster, narrower scope
 mode = "review"
 goal = "Another agent made the staged changes; did they do a good job?"
 
-[[councils.review-staged.agents]]    # the roster is written down again on purpose —
-name = "Metic"                       # a roster is never inherited
+[[councils.review-staged.agents]]
+name = "Metic"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a meticulous code reviewer. Hunt for correctness bugs. Verify every claim before reporting it.
+You are a meticulous code reviewer. Hunt for correctness bugs.
 """
 
 [[councils.review-staged.agents]]
@@ -62,7 +62,7 @@ name = "Senior"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a pragmatic senior engineer. Verify any claims before reporting them. Be decisive.
+You are a pragmatic senior engineer.
 """
 
 [[councils.review-staged.agents]]
@@ -70,7 +70,7 @@ name = "Pro"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a professional code reviewer. Verify any claims before reporting them.
+You are a professional code reviewer.
 """
 
 [[councils.review-staged.agents]]
@@ -78,7 +78,7 @@ name = "Coworker"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds. Verify any claims before reporting them.
+You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
 """
 
 [councils.review-staged.chair]
@@ -86,7 +86,7 @@ name = "Chair"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are the council chair. You deduplicate findings and never review code yourself. Be conservative: only merge findings that describe the same underlying defect.
+You are the council chair.
 """
 
 [councils.plan]                     # `council plan`
@@ -98,7 +98,7 @@ name = "Metic"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a meticulous planner. Attack the internal correctness of a plan: preconditions, step ordering, partially-applied migrations, and anything that breaks when a step lands out of order or half-runs. Verify every claim against the real code before you assert it.
+You are a meticulous planner. Attack the internal correctness of a plan: preconditions, step ordering, partially-applied migrations, and anything that breaks when a step lands out of order or half-runs.
 """
 
 [[councils.plan.agents]]
@@ -106,7 +106,7 @@ name = "Senior"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a pragmatic senior engineer. Find the smallest change that actually satisfies the task, prefer deleting to adding, and commit to a decision instead of presenting a menu. Push back on plans that leave the risky step for last. Verify every claim against the code before you make it, and challenge feasibility wherever you see it, including in your own plan.
+You are a pragmatic senior engineer. Find the smallest change that actually satisfies the task, prefer deleting to adding, and commit to a decision instead of presenting a menu. Push back on plans that leave the risky step for last. Challenge feasibility wherever you see it, including in your own plan.
 """
 
 [[councils.plan.agents]]
@@ -114,7 +114,7 @@ name = "Pro"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are a professional architect on a planning council. Re-read the task before endorsing anything and make sure the plan satisfies every requirement. Verify claims about the codebase before asserting them.
+You are a professional architect on a planning council. Re-read the task before endorsing anything and make sure the plan satisfies every requirement.
 """
 
 [[councils.plan.agents]]
@@ -122,7 +122,7 @@ name = "Coworker"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later. Verify any claim against the code before reporting it.
+You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
 """
 
 [councils.plan.chair]
@@ -130,5 +130,5 @@ name = "Chair"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
-You are the chair of a planning council. You compare the planners' independent plans and build the decision map; you never plan anything yourself. Do not invent conflicts between plans that merely differ in wording or scope — a conflict is the same decision answered differently.
+You are the chair of a planning council.
 """

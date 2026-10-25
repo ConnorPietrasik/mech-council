@@ -2,7 +2,7 @@
 
 The body is `cli.main()`: `council`'s console script and this module must not be two programs.  The only
 thing added here is what a module entry owes that a script does not: stdout is flushed on the way out,
-because the `[council]` lines are the story of the run and a buffered tail would lose the last chapter.
+because the narration is the story of the run and a buffered tail would lose the last chapter.
 """
 
 from __future__ import annotations

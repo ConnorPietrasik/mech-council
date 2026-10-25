@@ -68,9 +68,10 @@ council review            # or: council -g "focus on the parser" review
 You'll see the run narrate itself — what it's about to let the members touch before it
 starts them, each seat coming up in its own namespace, asks landing with their durations,
 the checkpoint when the council wants a human, and the sweep at the end that proves nothing
-was left running. Those lines are prefixed `[council]` and go to **stdout**; usage errors go
-to stderr. The report is printed last and unprefixed, so a pager shows a document rather
-than a log.
+was left running. Narration goes to **stdout**, usage errors to stderr, and the report is
+printed last after a blank line, so a pager shows a document rather than a log. Nothing on
+stdout is prefixed: the machine channel is `events.jsonl` and `run.json`, so stdout says
+prose and the terminal is not a log file.
 
 ## What a run does
 
@@ -97,11 +98,26 @@ It merges, compares, and judges the watchdog digest — that's all.
 
 ```
 H1: keep it 30 days          # an answer is authoritative, and buys a round
+H1: 2                        # an option's number and nothing else takes it verbatim, in the asker's
+                             # own words; to take one with a qualifier, answer in your own words
 explain H2: what breaks?     # routes your question to the seat that asked; its reply is
                              # a recommendation, not an answer
 skip                         # decline everything on the table
+skip H1 H2                   # decline these two and answer the rest
                              # a blank line ends the checkpoint
 ```
+
+A number beyond the end of a menu (`H1: 30` where four options were offered) is you answering `30`, and a number with
+any word after it is your own answer too. A line that *opens* like `skip` or `explain` but doesn't parse gets the
+grammar said back rather than becoming an answer: an answer retires escalations and buys a round, so the checkpoint
+records only what it recognized. The last line you type about a question is your word on it — answering a question you
+declined takes it back, and declining one you answered withdraws the answer — because a decline is otherwise final for
+the run, and a council that cannot hear you change your mind is wasting everyone's time.
+
+Each seat owns the candidates it offered: when one re-asks with a fresh menu, its own retired answers come off and a
+peer's stay, so the numbered choice in front of you is one somebody still stands behind. And nothing you settled is
+reused as an answer you never gave — ask the same words about a different decision and the council asks you again, rather
+than closing the run on an answer you gave somewhere else.
 
 ## What you get
 

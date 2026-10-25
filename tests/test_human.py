@@ -30,22 +30,26 @@ def item(docket, id_, claim="a call", severity="major"):
 
 
 @pytest.mark.parametrize(
-    "text, kind, qid, body",
+    "text, kind, qid, body, ids",
     [
-        ("H1: the tenant is fixed", "answer", "H1", "the tenant is fixed"),
-        ("h2 = later", "answer", "H2", "later"),
-        ("explain H1", "explain", "H1", "Why are you asking this?"),
-        ("ask H2: what breaks if we don't?", "explain", "H2", "what breaks if we don't?"),
-        ("skip", "skip", "", "skip"),
-        ("skip all", "skip", "", "skip all"),
-        ("none", "skip", "", "none"),
-        ("", "end", "", ""),
-        ("   ", "end", "", ""),
+        ("H1: the tenant is fixed", "answer", "H1", "the tenant is fixed", ()),
+        ("h2 = later", "answer", "H2", "later", ()),
+        ("explain H1", "explain", "H1", "Why are you asking this?", ()),
+        ("ask H2: what breaks if we don't?", "explain", "H2", "what breaks if we don't?", ()),
+        ("skip", "skip", "", "skip", ()),
+        ("skip all", "skip", "", "skip all", ()),
+        ("none", "skip", "", "none", ()),
+        ("skip H2", "skip", "", "skip H2", ("H2",)),
+        ("skip h2", "skip", "", "skip h2", ("H2",)),
+        ("skip H1, h2", "skip", "", "skip H1, h2", ("H1", "H2")),
+        ("skip H1 H2", "skip", "", "skip H1 H2", ("H1", "H2")),
+        ("", "end", "", "", ()),
+        ("   ", "end", "", "", ()),
     ],
 )
-def test_the_line_grammar(text, kind, qid, body):
+def test_the_line_grammar(text, kind, qid, body, ids):
     line = parse_line(text)
-    assert (line.kind, line.id, line.text) == (kind, qid, body)
+    assert (line.kind, line.id, line.text, line.ids) == (kind, qid, body, ids)
 
 
 def test_a_bare_line_answers_the_first_open_question_rather_than_being_dropped():
@@ -53,8 +57,80 @@ def test_a_bare_line_answers_the_first_open_question_rather_than_being_dropped()
     assert line.kind == "answer" and line.id == "" and line.text
 
 
+@pytest.mark.parametrize("text", ["skip the cache one", "skip H1 and H2", "skip all H1", "none of the above", "explain H1 why?"])
+def test_a_line_that_opened_like_a_command_gets_the_grammar_and_is_never_an_answer(text):
+    """A near miss must not be recorded as an authoritative answer to whichever question is open first.
+
+    An answer buys a round, retires escalations and can end the run; a line that is told the grammar costs one retype.
+    """
+    line = parse_line(text)
+    assert line.kind == "error" and "`skip H1` declines one" in line.text
+
+
 def test_an_answer_containing_a_colon_is_still_one_answer():
     assert parse_line("H1: use X: because Y").text == "use X: because Y"
+
+
+# --------------------------------------------------------------------------- the menu
+
+
+def offered(docket, *options, text="which tenant?", **kw):
+    """One question with an offered menu, which is what the brief now asks a seat for."""
+    question = escalations.raise_question(docket, text=text, asker="Agent1", item_id="F1", blocking=True, round_=1, options=list(options))[
+        0
+    ]
+    return question
+
+
+def test_the_menu_prints_numbered_and_the_help_line_says_a_number_takes_one():
+    docket = build()
+    question = offered(docket, "key it on the tenant", "drop the cache")
+    question.context = "no caller passes a tenant id"
+    text = render_ask_set(docket, [question], names=NAMES, waiting=True)
+    assert "context: no caller passes a tenant id" in text
+    assert "1) key it on the tenant" in text and "2) drop the cache" in text
+    assert "and nothing else" in text and "qualifier, answer in your own words" in text and "`skip H1` just one" in text
+
+
+def test_a_number_takes_the_option_verbatim_and_the_selection_is_recorded():
+    docket = build()
+    question = offered(docket, "key it on the tenant", "drop the cache")
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: 2"])
+    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "drop the cache"}, "the answer is the asker's own line, not the digit"
+    assert outcome.answer_options == {"H1": 2}
+    assert any('"drop the cache" (option 2)' in line for line in console.lines), "the echo proves what the number meant"
+
+
+def test_a_number_off_the_end_of_the_menu_is_an_answer_of_its_own():
+    """`H1: 30` where four options were offered is the human answering `30` — never a selection of nothing."""
+    docket = build()
+    question = offered(docket, "one", "two")
+    cp, _console, _reader = make_checkpoint(docket, lines=["H1: 30"])
+    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "30"} and outcome.answer_options == {}
+
+
+def test_a_number_with_any_word_after_it_stays_the_human_s_own_words():
+    """The number **alone** is the only selection there is.
+
+    A note syntax would have to decide what `1, only for new installs` or `1-2 weeks` was meant to mean, and that
+    decision would then be the authoritative answer.  So anything but digits alone stays the human's own words.
+    """
+    docket = build()
+    question = offered(docket, "key it on the tenant", "drop the cache")
+    cp, _console, _reader = make_checkpoint(docket, lines=["H1: 1, only for new installs"])
+    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "1, only for new installs"} and outcome.answer_options == {}
+    assert outcome.answers["H1"] != question.options[0], "the option was not taken on the human's behalf"
+
+
+def test_a_bare_number_selects_on_the_first_open_question():
+    docket = build()
+    question = offered(docket, "one", "two")
+    cp, _console, _reader = make_checkpoint(docket, lines=["2"])
+    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "two"} and outcome.answer_options == {"H1": 2}
 
 
 # --------------------------------------------------------------------------- what prints
@@ -146,6 +222,107 @@ def test_a_skip_declines_everything_still_open_and_the_run_moves_on():
     cp, _console, _reader = make_checkpoint(docket, lines=["skip"])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert outcome.skipped == ["H1"] and not outcome.answers
+
+
+def test_skip_can_name_one_question_and_leave_the_rest_for_an_answer():
+    """With a menu on the table you usually can answer two and decline one; `skip` was all-or-nothing."""
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
+    cp, console, reader = make_checkpoint(docket, lines=["skip H1", "H2: later"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.skipped == ["H1"] and outcome.answers == {"H2": "later"}
+    assert any("H1: declined" in line for line in console.lines)
+    assert len(reader.asked) == 2, "the checkpoint kept asking after a one-question decline"
+
+
+def test_declining_a_question_that_is_not_open_is_corrected_not_swallowed():
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True))
+    cp, console, _reader = make_checkpoint(docket, lines=["skip H9", "skip"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.skipped == ["H1"]
+    assert any("no open question H9" in line for line in console.lines)
+
+
+def test_skip_can_decline_several_named_questions_at_once():
+    """`skip H1 H2` is the shape a human reaches for with three questions on the table, so it is the grammar."""
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True), ("c?", "Agent1", "F1", True))
+    cp, _console, reader = make_checkpoint(docket, lines=["skip H1 H3", "H2: later"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.skipped == ["H1", "H3"] and outcome.answers == {"H2": "later"}
+    assert len(reader.asked) == 2
+
+
+def test_answering_a_question_after_declining_it_takes_it_back():
+    """The last line about a question is the human's word on it, and one question gets exactly one of them.
+
+    `skip H1` stopped ending the checkpoint, so a human who changes their mind can answer a question they just declined.
+    Refusing that would strand the question: a decline is final for the run, so the council would keep deliberating
+    around an item the human was willing to settle two lines later.  What the checkpoint may not do is put one question
+    in `answers` *and* `skipped` — the engine applies answers first and skips after, so that pair leaves a question the
+    report lists as unanswered holding an answer that retired its escalation and bought the round.
+    """
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
+    cp, console, reader = make_checkpoint(docket, lines=["skip H1", "H1: keep it", "H2: later"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "keep it", "H2": "later"}, "the later line is the answer"
+    assert outcome.skipped == [], "the decline is gone, not merely contradicted"
+    assert not set(outcome.answers) & set(outcome.skipped), "one question, one disposition"
+    assert any("the decline you gave is withdrawn" in line for line in console.lines), "the human hears the change of mind land"
+    assert len(reader.asked) == 3
+
+
+def test_declining_a_question_after_answering_it_takes_the_answer_back():
+    """The rule runs both ways, or `skip H1` after an answer is the same trap wearing the other coat."""
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: keep it", "skip H1", "H2: later"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H2": "later"} and outcome.skipped == ["H1"]
+    assert not outcome.answer_options, "the withdrawn answer takes any selection it carried with it"
+    assert not set(outcome.answers) & set(outcome.skipped)
+    assert any("the answer you gave is withdrawn" in line for line in console.lines)
+
+
+def test_answering_a_question_this_checkpoint_does_not_hold_is_corrected():
+    """An answer buys a round, so it has to be for something on the table — a real `H` id is not enough."""
+    docket = build()
+    settled, open_one = questions(docket, ("settled?", "Agent1", None, False), ("open?", "Agent2", None, False))
+    settled.state = state.ANSWERED
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: a late second thought", "H2: later"])
+    outcome = asyncio.run(cp.run([open_one], ask_set=[open_one], round_=2, terminal=True, waiting=True))
+    assert outcome.answers == {"H2": "later"} and not outcome.skipped
+    assert any("no open question H1" in line for line in console.lines)
+
+
+def test_a_second_answer_to_the_same_question_wins_and_drops_the_option_it_took():
+    """The last line the human types about their own answer is their answer — and `answer_option` names only that line.
+
+    `H1: 2` then `H1: keep it manually` would otherwise pair the prose with the number of the option the **first** line
+    chose, and `human_input.json` would swear an answer in the human's own words came off the menu.
+    """
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
+    question = offered(docket, "key it on the tenant", "drop the cache", text="a?")
+    assert question is listing[0], "the menu belongs to the question the human answers first"
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: 2", "H1: keep it, but only for new installs", "H2: later"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "keep it, but only for new installs", "H2": "later"}, "the second line is the answer"
+    assert outcome.answer_options == {}, "an answer in the human's own words took no option"
+    assert any('H1: answered "drop the cache" (option 2)' in line for line in console.lines)
+
+
+def test_a_near_miss_command_is_corrected_and_the_checkpoint_keeps_waiting():
+    """`skip the cache one` declines nothing and, above all, answers nothing; the human is told the grammar instead."""
+    docket = build()
+    listing = questions(docket, ("a?", "Agent1", "F1", True))
+    cp, console, reader = make_checkpoint(docket, lines=["skip the cache one", "H1: keep it"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "keep it"} and outcome.skipped == []
+    assert any("`skip H1` declines one" in line for line in console.lines)
+    assert len(reader.asked) == 2, "the near miss cost a retype, not an answer the human never gave"
 
 
 def test_a_blank_line_ends_the_checkpoint_without_answering_or_declining():

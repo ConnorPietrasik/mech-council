@@ -22,59 +22,107 @@ from .deliberation.state import Docket, Question
 _ANSWER = re.compile(r"^\s*(h\d+)\s*[:=]\s*(.*)$", re.DOTALL | re.IGNORECASE)
 _EXPLAIN = re.compile(r"^\s*(?:explain|ask)\s+(h\d+)\s*(?:[:=]\s*(.*))?$", re.DOTALL | re.IGNORECASE)
 _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
+#: `skip H1`, `skip h1, h2` — the whole line has to be ids, so `skip the cache one` cannot pass for a command.
+_SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
+#: A line that opens like a command is a command that failed to parse, and gets the grammar said back to it.  Left to
+#: the fallback it would be recorded as an authoritative answer to whichever question happens to be open first, which
+#: is the one thing a checkpoint must never do with a line it did not understand.  The cost is deliberate and small: an
+#: answer that merely *begins* with "skip" or "none" is refused until it is written `H1: <text>`, and a refused line is
+#: visible and correctable while a misread one is authoritative, retires escalations and buys a round nobody worked for.
+_COMMAND_HEAD = re.compile(r"^\s*(?:(?:skip|none)\b|(?:explain|ask)\s+h\d+)", re.IGNORECASE)
+#: `2` takes option 2, and **nothing else does**: a number with any word after it is the human's own answer.  A note
+#: syntax would have to guess what `2, but only for new installs` or `1-2 weeks` meant, and that guess is authoritative.
+#: A number is a selection only when the question offered that many — otherwise `H1: 30` is an answer of "30".
+_SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
+
+#: What a line that opened like a command and did not parse is told instead of being taken for an answer.
+_GRAMMAR = (
+    "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), and "
+    "`explain H1: <question>` asks the seat that raised H1 — to answer in your own words, write `H1: <text>`"
+)
 
 
 class Line:
-    """One checkpoint line: `answer`, `explain`, `skip` or `end`."""
+    """One checkpoint line: `answer`, `explain`, `skip` (`ids` empty declines every open one), `error` or `end`.
 
-    __slots__ = ("id", "kind", "text")
+    For `error` — a line that tried to be a command — `text` is the correction to say back, and it is never an answer.
+    """
 
-    def __init__(self, kind: str, id: str = "", text: str = "") -> None:
-        self.kind, self.id, self.text = kind, id, text
+    __slots__ = ("id", "ids", "kind", "text")
+
+    def __init__(self, kind: str, id: str = "", text: str = "", ids: tuple[str, ...] = ()) -> None:
+        self.kind, self.id, self.text, self.ids = kind, id, text, tuple(ids)
 
 
 def parse_line(text: str) -> Line:
-    """`H1: text` answers · `explain H1`/`ask H1: …` asks the asker · `skip` declines all · an empty line ends the checkpoint.
+    """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
 
-    Anything else is an answer to the first still-unanswered question: a human
-    mid-typing should not have to remember IDs, and a guessed ID beats a dropped answer.
+    An empty line ends the checkpoint.  Anything else is an answer to the first still-unanswered question: a human
+    mid-typing should not have to remember IDs, and a guessed ID beats a dropped answer.  What is **not** an answer is
+    a line that opens like a command and does not parse: it gets the grammar, because an answer the human never typed
+    settles a question they were never asked.
     """
     if not (text or "").strip():
         return Line("end")
+    if match := _SKIP_IDS.match(text):
+        ids = tuple(found.upper() for found in re.findall(r"h\d+", match.group(1), flags=re.IGNORECASE))
+        return Line("skip", text=text.strip(), ids=ids)
     if _SKIP_ALL.match(text):
         return Line("skip", text=text.strip())
     if match := _ANSWER.match(text):
         return Line("answer", id=match.group(1).upper(), text=match.group(2).strip())
     if match := _EXPLAIN.match(text):
         return Line("explain", id=match.group(1).upper(), text=(match.group(2) or "").strip() or "Why are you asking this?")
+    if _COMMAND_HEAD.match(text):
+        return Line("error", text=_GRAMMAR)
     return Line("answer", id="", text=text.strip())
 
 
 def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool) -> str:
-    """The console form: id, item, effective class, asker, question, context, options."""
+    """What the human reads at a checkpoint: id, item, effective class, asker, question, context, a numbered menu.
+
+    The menu is numbered because the cheap reply is typing a number — un-number it and `H1: 2` means nothing.
+    """
     from .render.text import caption
 
     if not listing:
-        return "[council] the council has no question for you right now"
-    lines = ["[council] the council needs you" if waiting else "[council] open questions (the run keeps working):"]
+        return "the council has no question for you right now"
+    lines = ["the council needs you" if waiting else "open questions (the run keeps working):"]
     for question in listing:
         where = f" on {question.item_id}" if question.item_id else ""
         askers = ", ".join(caption(a, names) for a in question.askers) or "the chair"
-        lines.append(
-            f"[council]   {question.id}{where} [{effective_class(docket, question)}] asked by {askers} (round {question.raised_round})"
-        )
-        lines.append(f"[council]     {question.text}")
+        lines.append(f"  {question.id}{where} [{effective_class(docket, question)}] asked by {askers} (round {question.raised_round})")
+        lines.append(f"    {question.text}")
         if question.context:
-            lines.append(f"[council]     context: {question.context}")
-        for option in question.options:
-            lines.append(f"[council]       - {option}")
+            lines.append(f"    context: {question.context}")
+        # Numbered because the cheap reply is typing a number; `1)` is the whole of it.
+        for number, option in enumerate(question.options, start=1):
+            lines.append(f"      {number}) {option}")
     if waiting:
-        lines.append(
-            "[council] answer with `H1: <text>` · ask the asker `explain H1: "
-            "<question>` · `skip` declines every question · an empty line ends "
-            "this checkpoint"
-        )
+        lines += [
+            "",
+            "answer with `H1: <text>` · a number and nothing else (`H1: 2`) takes that option verbatim, in the asker's words",
+            "to take one with a qualifier, answer in your own words · ask the asker `explain H1: <question>`",
+            "`skip` every open question, `skip H1` just one · a blank line ends this checkpoint",
+        ]
     return "\n".join(lines)
+
+
+def take_selection(text: str, question: Question) -> tuple[str, int]:
+    """Resolve a line of digits against the options this question offers.
+
+    Returns `(answer, option number)`; the number is `0` when the human answered in their own words, which is every line
+    that is not digits alone and any number off the end of the menu — `30` where four options were offered is the answer
+    `30`, and `2, only for new installs` is that whole sentence, as an answer.  To take an option **and** qualify it the
+    human answers in their own words: nothing authoritative gets assembled from a guess about what the words meant.
+    """
+    match = _SELECTION.match(text or "")
+    if not match or not question.options:
+        return text, 0
+    number = int(match.group(1))
+    if not 1 <= number <= len(question.options):
+        return text, 0
+    return question.options[number - 1], number
 
 
 class Checkpoint:
@@ -118,20 +166,58 @@ class Checkpoint:
             parsed = parse_line(line if isinstance(line, str) else "")
             if parsed.kind == "end":
                 break
+            if parsed.kind == "error":
+                self.console.say(parsed.text)
+                continue
             if parsed.kind == "skip":
-                skipped |= pending
-                break
+                if not parsed.ids:
+                    skipped |= pending
+                    break
+                for one in parsed.ids:
+                    if one not in pending and one not in result.answers:
+                        self.console.say(f"no open question {one}; the open ones are {', '.join(sorted(pending)) or '(none)'}")
+                        continue
+                    # The last line about a question is the human's word on it: a decline takes back an answer given
+                    # earlier at this checkpoint, so `answers` and `skipped` never both name one question.
+                    took_back = result.answers.pop(one, None) is not None
+                    result.answer_options.pop(one, None)
+                    skipped.add(one)
+                    pending.discard(one)
+                    said = f"{one}: declined — the report lists it as asked and not answered"
+                    self.console.say(said + (", and the answer you gave is withdrawn" if took_back else ""))
+                continue
             if parsed.kind == "answer":
                 qid = parsed.id or self._first_pending(pending)
                 if qid is None:
                     self.console.say("no question is open; an empty line ends this checkpoint")
                     continue
+                open_ids = ", ".join(sorted(pending)) or "(none)"
                 if qid not in self.docket.questions:
-                    self.console.say(f"no question {qid}; the open ones are {', '.join(sorted(pending)) or '(none)'}")
+                    self.console.say(f"no question {qid}; the open ones are {open_ids}")
                     continue
-                result.answers[qid] = parsed.text
+                # The last line the human types about a question is their word on it: an answer takes back a decline
+                # given earlier at this checkpoint, exactly as a decline takes back an answer.  What may never happen is
+                # one question landing in `answers` *and* `skipped` — the engine applies answers first and skips after,
+                # so the pair leaves a question the report lists as unanswered holding an answer that retired its
+                # escalation and bought the round.  A question this checkpoint never held is not a change of mind: an
+                # answer for it buys a round on something no longer on the table.
+                if qid not in pending and qid not in skipped and qid not in result.answers:
+                    self.console.say(f"no open question {qid}; the open ones are {open_ids}")
+                    continue
+                took_back = qid in skipped
+                skipped.discard(qid)
+                answer, number = take_selection(parsed.text, self.docket.questions[qid])
+                result.answers[qid] = answer
+                if number:
+                    result.answer_options[qid] = number
+                else:
+                    # A corrected answer drops the selection the first one took: `answer_option` names the line this
+                    # answer came from, and an answer in the human's own words came from none of them.
+                    result.answer_options.pop(qid, None)
                 pending.discard(qid)
-                self.console.say(f"{qid}: answered — the answer is authoritative and buys a full round")
+                chose = f' "{answer}" (option {number})' if number else ""
+                back = ", and the decline you gave is withdrawn" if took_back else ""
+                self.console.say(f"{qid}: answered{chose} — the answer is authoritative and buys a full round{back}")
                 continue
             if parsed.kind == "explain":
                 reply = await self._explain(parsed.id, parsed.text)

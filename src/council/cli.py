@@ -162,8 +162,8 @@ def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: l
 
 def fail(message: str) -> int:
     """The CLI contract's two-line complaint, never a 30-line usage dump."""
-    sys.stderr.write(f"[council] {message}\n")
-    sys.stderr.write("[council] run 'council --help'\n")
+    sys.stderr.write(f"{message}\n")
+    sys.stderr.write("run 'council --help'\n")
     return 2
 
 
@@ -227,15 +227,15 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as failure:
         return fail(str(failure))
     except ConfigError as failure:
-        sys.stderr.write(f"[council] {failure}\n")
+        sys.stderr.write(f"{failure}\n")
         return 1
     try:
         startup.prepare_runs_root(launch.runs_dir)
     except ConfigError as failure:
-        sys.stderr.write(f"[council] {failure}\n")
+        sys.stderr.write(f"{failure}\n")
         return 1
     for note in launch.notes:  # the override notes, each saying what it costs
-        print(f"[council] note: {note}")
+        print(f"note: {note}")
     from . import supervisor
 
     return supervisor.spawn_orchestrator(lambda: _inside_namespace(launch), name="orchestrator")
@@ -265,15 +265,15 @@ def _inside_namespace(launch) -> int:
         )
     except OSError as failure:
         where = f"{failure.filename} " if failure.filename else ""
-        sys.stderr.write(f"[council] sandbox setup failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno})\n")
+        sys.stderr.write(f"sandbox setup failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno})\n")
         return 1
     except Exception as failure:
-        sys.stderr.write(f"[council] sandbox setup failed: {failure}\n")
+        sys.stderr.write(f"sandbox setup failed: {failure}\n")
         return 1
     try:
         launch.run_dir = startup.create_run_dir(launch)
     except ConfigError as failure:
-        sys.stderr.write(f"[council] {failure}\n")
+        sys.stderr.write(f"{failure}\n")
         return 1
     from .run import orchestrate
 

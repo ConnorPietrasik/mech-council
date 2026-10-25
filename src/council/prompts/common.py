@@ -30,6 +30,8 @@ human what you cannot settle.
 - Verify before you claim. A finding survives because peers with workspace access failed
   to knock it down, not because somebody asserted it. Cite the file, the line or the
   command output that shows it.
+- Peers are numbers. You are shown `AgentN`, never a name: a claim carries its evidence or
+  it carries nothing, and who reported it is never a reason to believe or to fold.
 - Silence is never consent and never rejection: you are asked for a stance on every open
   item, and an answer you withhold is asked for. `abstain` is always valid, costs
   nothing, and neither endorses nor blocks — abstain rather than going quiet.
@@ -54,10 +56,33 @@ ESCALATION = """\
 - If a peer challenges your escalation with cited evidence, answer the challenge.
 """
 
+QUESTION_SHAPE = """\
+# Asking well
+
+Every `human_input` entry carries three fields besides the item it names, and the human
+reads them at a checkpoint while the run is stopped:
+
+- `question` — the decision in one line. Not a topic and not a summary of your finding:
+  the thing you cannot decide from the code.
+- `context` — what you looked at that leaves it open, and what guessing wrong costs. Never
+  restate the question there; two lines is the limit and the second one is the stakes.
+- `options` — two to four answers **you would accept**, each phrased AS the answer
+  ("keep it 30 days"), never as a subject ("retention").
+
+Options are your candidates, not the whole space, and they settle nothing: only the
+human's own answer is authoritative. They are shown numbered so the human can take one
+verbatim; answering in their own words stays open to them. If you truly cannot name an
+acceptable answer, say why in `context` — that is a real result too.
+
+The menu is yours: when you re-ask, what you send **replaces the candidates you offered
+before**, so send the whole menu you stand behind now and never a fragment of it. A peer
+asking the same question keeps its own candidates beside yours.
+"""
+
 ANSWER_SHAPE = """\
 # Answer shape
 
-Answer with a single JSON object, anywhere in your reply (prose around it is fine, and
+Answer with a single JSON object at the start of your reply (prose after it is fine, and
 is welcome). Field names are matched case- and separator-insensitively, so
 `validationGate` and `validation_gate` are the same field.
 """
@@ -100,6 +125,7 @@ def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
             PROTOCOL,
             SANDBOX,
             ESCALATION,
+            QUESTION_SHAPE,
             ANSWER_SHAPE,
             text.PHASE0_SCHEMA,
         ]
@@ -114,15 +140,16 @@ def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket
             f"# Round deliberation — you are {me}",
             "",
             f"You are one seat on a council of coding agents deliberating over `{project}`.",
-            f"You are {me}. The docket labels the seats `Agent1…`; your own entries are tagged "
-            "`[yours]`, so a near-identical twin of your own claim still reads as somebody "
-            "else's.",
+            f"You are {me}. The docket labels every seat by its numeric ID — peers read `AgentN` and you read `you` — and your own "
+            "entries are tagged `[yours]`, so a near-identical twin of your own claim still reads as somebody else's. Judge a claim on "
+            "its evidence: who raised it is not part of the evidence.",
             goal_line(goal),
             phase0_summary,
             text.ROUND_TASK,
             PROTOCOL,
             ESCALATION,
             PLAN_EXTRA if mode == "plan" else "",
+            QUESTION_SHAPE,
             SANDBOX,
             ANSWER_SHAPE,
             text.ROUND_SCHEMA,
@@ -183,11 +210,10 @@ def schema_hint(mode: str, *, phase: str) -> str:
 
 
 def merge_task(mode: str, listing: str) -> str:
-    """The chair's merge pass, both modes: one pass, the mode's own framing."""
+    """The chair's merge pass, both modes: the chair's own framing, the mode's own task line."""
     from . import chair
 
-    task = chair.MERGE_TASK_REVIEW if mode == "review" else chair.MERGE_TASK_PLAN
-    return "\n".join([chair.MERGE, task, ANSWER_SHAPE, chair.MERGE_SCHEMA, "---", "## The new items", "", listing])
+    return "\n".join([chair.MERGE, _mode_text(mode).MERGE_TASK, ANSWER_SHAPE, chair.MERGE_SCHEMA, "---", "## The new items", "", listing])
 
 
 def comparison_task(mode: str, listing: str) -> str:

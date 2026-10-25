@@ -14,6 +14,8 @@ from council.deliberation.state import (
     ABSTAIN,
     AGREE,
     AGREED,
+    ANSWERED,
+    ASKED,
     DISAGREE,
     DISPUTED,
     HUMAN,
@@ -245,6 +247,177 @@ def test_an_item_less_question_is_never_blocking_however_many_ask():
     assert termination.blocking_questions(docket) == []
 
 
+def test_the_entry_that_names_an_item_gives_the_deduped_question_its_item():
+    """The same words, first as a request and then as an escalation: the item comes with the escalation.
+
+    Naming an item is the stronger act — it is what makes a question able to stop the run — and a seat re-sending its own
+    one-liner is the ordinary way a phase-0 request becomes an escalation.  Leaving the deduped entry item-less would
+    strand it: `effective_class` answers `deferred` for an item-less question before it counts a single stance.
+    """
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which tenant key?", asker="Agent1", item_id=None, blocking=False, round_=0)
+    assert escalations.effective_class(docket, question) == "deferred", "no item, so never a way to hold the run"
+
+    again, _ = escalations.raise_question(docket, text="Which tenant key?", asker="Agent1", item_id="F1", blocking=True, round_=1)
+    assert again is question, "one question, deduplicated as ever"
+    assert question.item_id == "F1" and question.blocking_requested is True
+
+    stance(docket, "F1", "Agent2", NEEDS_HUMAN)
+    assert escalations.effective_class(docket, question) == "deferred", "one seat of three is below the bar"
+    stance(docket, "F1", "Agent3", NEEDS_HUMAN)
+    assert escalations.effective_class(docket, question) == "blocking", "the bar counts stances, not a lost item"
+
+
+def test_an_item_is_adopted_once_and_never_lost():
+    """Nothing later demotes an escalation back to a request: a co-asker naming no item changes nothing."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which tenant key?", asker="Agent1", item_id="F1", blocking=True, round_=1)
+    again, _ = escalations.raise_question(docket, text="which tenant key?", asker="Agent2", item_id=None, blocking=False, round_=2)
+    assert again is question and question.item_id == "F1"
+    assert question.askers == ["Agent1", "Agent2"]
+    assert escalations.effective_class(docket, question) == "deferred", "still one seat of three"
+
+
+def test_options_union_across_askers_and_never_replace():
+    """The text belongs to the first asker; the menu belongs to everybody.
+
+    Two seats asking one thing and offering different candidates describe a wider space than either saw alone, so the
+    union is what the human sees — deduplicated on the question's own key, first wording winning.
+    """
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(
+        docket,
+        text="which retention?",
+        asker="Agent1",
+        item_id=None,
+        blocking=False,
+        round_=1,
+        options=["keep 30 days", "tie it to the job"],
+    )
+    again, updated = escalations.raise_question(
+        docket,
+        text="  Which   RETENTION? ",
+        asker="Agent2",
+        item_id=None,
+        blocking=False,
+        round_=2,
+        options=["KEEP 30 DAYS", "no cache at all"],
+    )
+    assert again is question and not updated, "the same question from anyone is one entry"
+    assert question.options == ["keep 30 days", "tie it to the job", "no cache at all"]
+    assert question.askers == ["Agent1", "Agent2"]
+
+
+def test_a_reasking_seat_replaces_its_own_menu_and_leaves_a_peers_alone():
+    """The menu is each asker's own to revise: a re-ask retires the candidates **it** offered, and nobody else's.
+
+    Options used to accumulate forever, so a seat that changed its mind left the candidate it abandoned on the numbered
+    menu — and the human taking that line makes it the authoritative answer for something its own author no longer
+    offers.  Provenance is the only thing that tells the two seats apart, so the menu carries it: Agent1's re-ask touches
+    Agent1's lines and nothing else, and a candidate it repeats keeps its number.
+    """
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(
+        docket,
+        text="which retention?",
+        asker="Agent1",
+        item_id="F1",
+        blocking=True,
+        round_=1,
+        options=["keep 30 days", "tie it to the job"],
+    )
+    escalations.raise_question(
+        docket, text="which retention?", asker="Agent2", item_id="F1", blocking=True, round_=1, options=["no cache at all"]
+    )
+    assert question.askers == ["Agent1", "Agent2"], "one question, two askers, three candidates"
+
+    assert escalations.refresh_question(
+        question,
+        asker="Agent1",
+        text="which retention window?",
+        item_id="F1",
+        blocking=True,
+        round_=2,
+        options=["keep 30 days", "wipe it nightly"],
+    )
+    assert question.options == ["keep 30 days", "no cache at all", "wipe it nightly"], "the candidate Agent1 abandoned is off the menu"
+    assert ("no cache at all", "Agent2") in question.menu.values(), "a peer that never re-asked still stands behind its line"
+
+
+def test_a_reask_offering_no_menu_takes_it_from_nobody():
+    """Re-asking without candidates is not a revision: a menu the human was shown must not vanish because a model went terse."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(
+        docket, text="which retention?", asker="Agent1", item_id="F1", blocking=True, round_=1, options=["keep 30 days"]
+    )
+    assert escalations.refresh_question(question, asker="Agent1", text="which retention, then?", item_id="F1", blocking=True, round_=2)
+    assert question.options == ["keep 30 days"], "the human can still take the line they were shown"
+
+
+def test_a_verbatim_reask_changes_nothing_and_says_no_more_than_that():
+    """`updated` is a fact about the docket, and the event log is the machine channel that reads it.
+
+    A seat standing by its ask re-sends the entry verbatim, round after round.  Read as an update, that writes
+    `question_updated` for a question nobody moved.
+    """
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(
+        docket,
+        text="which retention?",
+        asker="Agent1",
+        item_id="F1",
+        blocking=True,
+        round_=1,
+        context="the policy predates the tenant work",
+        options=["keep 30 days"],
+    )
+    assert not escalations.refresh_question(
+        question,
+        asker="Agent1",
+        text="which retention?",
+        item_id="F1",
+        context="the policy predates the tenant work",
+        options=["keep 30 days"],
+        blocking=True,
+        round_=2,
+    ), "the same words, context and menu changed nothing"
+    assert escalations.refresh_question(question, asker="Agent1", text="which retention window?", round_=3), "a rephrase did"
+
+
+def test_a_settled_question_is_not_a_home_for_a_new_ask():
+    """An answered entry is the answer to **that** decision; the same words about a new decision are a new question.
+
+    Dedup used to land a fresh escalation on the answered entry, and `unsettled_questions` reads `ASKED` and nothing
+    else: the new ask was never put to the human, `effective_class` judged it against the *old* question's item, and the
+    run could close `consensus` over a majority escalation it had never asked anybody about.
+    """
+    docket = docket_with(3, items=2)
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which tenant key?")
+    first = docket.questions[docket.escalations[("F1", "Agent1")].question_id]
+    first.state, first.answer = ANSWERED, "put the tenant id in the key"
+
+    stance(docket, "F2", "Agent2", NEEDS_HUMAN, note="which tenant key?")
+    again = docket.questions[docket.escalations[("F2", "Agent2")].question_id]
+    assert again is not first and again.id == "H2", "the answered words did not absorb the new ask"
+    assert again.state == ASKED and again.item_id == "F2", "counted against F2, the decision actually being held"
+    assert termination.unsettled_questions(docket) == [again], "the new ask is back in the human's sight"
+    assert escalations.effective_class(docket, again) == "deferred", "one seat of three is below the bar on F2"
+
+
+def test_the_asker_owns_the_text_and_its_revised_menu_arrives_whole():
+    """The latest asker round wins the wording, and the menu that arrives with it **is** the menu now."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(
+        docket, text="which retention?", asker="Agent1", item_id=None, blocking=False, round_=1, options=["keep 30 days"]
+    )
+    again, updated = escalations.raise_question(
+        docket, text="  Which RETENTION? ", asker="Agent1", item_id=None, blocking=False, round_=2, options=["no cache at all"]
+    )
+    assert again is question and updated, "the same key, retitled by its own asker: latest asker round wins"
+    assert question.text == "  Which RETENTION? "
+    assert question.options == ["no cache at all"], "the re-ask is the menu now"
+
+
 def test_withdraw_retire_and_demote_never_leave_an_item_human():
     for end in ("withdrawn", "retired", "demoted"):
         docket = docket_with(3)
@@ -298,9 +471,9 @@ def test_docket_shows_you_and_yours_to_the_viewer():
 
     docket = docket_with(3)
     stance(docket, "F1", "Agent1", DISAGREE, note="because")
-    # A peer is named, yourself is `you`, and your own entries say `[yours]`.
-    other = render.render(docket, "Agent2", names={"Agent1": "Metic"})
+    # A peer is a number, yourself is `you`, and your own entries say `[yours]`.
+    other = render.render(docket, "Agent2")
     body = other.split("\n", 1)[1]  # the header names the viewer to itself
-    assert "Metic" in other and "you" in body and "Agent2" not in body
-    own = render.render(docket, "Agent1", names={"Agent1": "Metic"})
-    assert "[yours]" in own and "Metic" not in own
+    assert "Agent1" in body and "you" in body and "Agent2" not in body
+    own = render.render(docket, "Agent1")
+    assert "[yours]" in own

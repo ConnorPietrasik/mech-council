@@ -61,11 +61,18 @@ def context(**kw):
 def test_the_docket_reads_you_and_tags_your_own_entries():
     docket = build()
     item(docket, "F1", "the cache ignores tenants", raised=("Agent1",))
-    mine = docket_render.render(docket, "Agent1", names={"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"})
-    theirs = docket_render.render(docket, "Agent2", names={"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"})
+    mine = docket_render.render(docket, "Agent1")
+    theirs = docket_render.render(docket, "Agent2")
     assert "[yours]" in mine and "you" in mine  # the prompt text, literally
     assert "[yours]" not in theirs
-    assert "Metic (Agent1)" in theirs, "the caption carries both name and id"
+    assert "Agent1" in theirs, "a peer reads as a bare number, never as a name"
+
+
+def test_the_docket_renderer_cannot_be_handed_names():
+    """The bias control is the signature: no parameter of the renderer could carry a name into a seat's docket."""
+    import inspect
+
+    assert "names" not in inspect.signature(docket_render.render).parameters
 
 
 def test_a_closed_item_still_prints_its_id_so_it_can_be_reopened():
@@ -73,7 +80,7 @@ def test_a_closed_item_still_prints_its_id_so_it_can_be_reopened():
     docket = build()
     entry = item(docket, "F1", "a settled claim")
     entry.disposition, entry.closed_round = state.AGREED, 1
-    text = docket_render.render(docket, "Agent2", names={})
+    text = docket_render.render(docket, "Agent2")
     assert "F1" in text and "agreed" in text
 
 
@@ -81,7 +88,7 @@ def test_open_human_requests_print_with_their_effective_class():
     docket = build()
     item(docket, "F1", "a call only a human can make")
     stance(docket, "F1", "Agent1", state.NEEDS_HUMAN, note="which tenant?")
-    text = docket_render.render(docket, "Agent2", names={"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"})
+    text = docket_render.render(docket, "Agent2")
     qid = docket.escalations[("F1", "Agent1")].question_id
     assert qid in text, "the open request prints with its H id"
     assert "deferred" in text, "one seat of three is below the bar"

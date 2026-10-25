@@ -1,4 +1,4 @@
-"""The `[council]` line and `events.jsonl`, from one emitter.
+"""The console line and `events.jsonl`, from one emitter.
 
 Every event name is snake_case and the file is append-only, so a consumer never breaks when a new event appears.  Console
 line and event record are emitted together: a fact never reaches the run directory without being said, or the reverse.
@@ -25,12 +25,12 @@ class Console:
         self._written = 0
 
     def say(self, text: str) -> None:
-        line = f"[council] {text}"
-        self.lines.append(line)
-        print(line, file=self.stream, flush=True)
+        """One console utterance."""
+        self.lines.append(text)
+        print(text, file=self.stream, flush=True)
 
     def note(self, text: str) -> None:
-        """A CLI contract override note or any other non-event chatter, still `[council]`-tagged."""
+        """A CLI contract override note or any other non-event chatter, still marked `note:`."""
         self.say(f"note: {text}")
 
     def event(self, name: str, **fields) -> None:

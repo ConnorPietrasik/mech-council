@@ -522,6 +522,9 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
             out.repaired = True
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _strings(pick(data, "open_questions"))
+    # The phase-0 schema advertises `human_input` with `context` and `options`, so extraction reads them here too:
+    # what the phase-0 brief asks for and the run then discards is a prompt that lies.
+    out.data["human_input"] = _human_input(data)
     return out
 
 

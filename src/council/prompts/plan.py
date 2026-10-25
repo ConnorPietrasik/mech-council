@@ -29,7 +29,9 @@ PHASE0_SCHEMA = """\
     "rejected_alternatives": ["…"]
   },
   "open_questions": ["…"],
-  "human_input": [{"question": "…", "item": null, "blocking": false}]
+  "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
+                   "context": "what you saw that leaves it open, and the cost of guessing",
+                   "options": ["an answer you would accept", "another you would accept"]}]
 }
 ```
 """
@@ -40,7 +42,7 @@ ROUND_TASK = """\
 DECIDE — stance every open decision point, with evidence.
 CONVERGE — `backing` is mandatory and is exactly one of `AgentN`, `merged: <label>` (a
 label you spelled out in a `revised_plan`), or `no_preference`. It is restated every
-round; `abstain` is never legal here, and a `merged:` token you never wrote down is not
+round; `abstain` is never a legal backing, and a `merged:` token you never wrote down is not
 a plan.
 IMPROVE — new decision points, a revised plan of your own, questions and answers.
 ESCALATE — `human_input` for what only the human can settle.
@@ -61,7 +63,9 @@ ROUND_SCHEMA = """\
                                                   "scope": "…", "exceptions": []}]},
   "questions": [{"to": "Agent2", "question": "…"}],
   "answers": [{"to": "Agent3", "question": "Q1", "answer": "…"}],
-  "human_input": [{"question": "…", "item": "T1", "blocking": false}],
+  "human_input": [{"question": "the decision, one line", "item": "T1", "blocking": false,
+                   "context": "what you saw that leaves it open, and the cost of guessing",
+                   "options": ["an answer you would accept", "another you would accept"]}],
   "signoff": false
 }
 ```
