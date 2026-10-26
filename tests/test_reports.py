@@ -190,7 +190,7 @@ def test_an_aborted_run_still_writes_a_report_that_explains_itself(cli, project)
 
 
 def _docket_with_item(evidence: str):
-    from council.deliberation.state import Docket, Item
+    from mech_council.deliberation.state import Docket, Item
 
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     docket.add_item(Item(id="F1", claim="the guard is missing", evidence=evidence))
@@ -215,7 +215,7 @@ def _journal(created: dict[str, list[str]], modified: dict[str, list[str]] | Non
 
 def test_an_item_naming_a_file_only_a_member_wrote_is_marked_as_an_artifact(tmp_path):
     """That file is the seat's own artifact and never project evidence."""
-    from council.sandbox.journal import mark_sandbox_items
+    from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
     (project / "src").mkdir(parents=True)
@@ -227,7 +227,7 @@ def test_an_item_naming_a_file_only_a_member_wrote_is_marked_as_an_artifact(tmp_
 
 def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
     """The bug this case exists to keep dead: `modified` is not `created`."""
-    from council.sandbox.journal import mark_sandbox_items
+    from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
     (project / "src").mkdir(parents=True)
@@ -240,7 +240,7 @@ def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
 
 def test_a_path_the_lower_layer_also_holds_is_not_an_artifact(tmp_path):
     """A deleted-then-recreated project file is the project's file, not an invention."""
-    from council.sandbox.journal import mark_sandbox_items
+    from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
     (project / "src").mkdir(parents=True)
@@ -251,7 +251,7 @@ def test_a_path_the_lower_layer_also_holds_is_not_an_artifact(tmp_path):
 
 def test_a_file_two_seats_both_wrote_is_marked_and_owned_by_neither(tmp_path):
     """Naming one of them as the author would be a guess; the marker is still the truth."""
-    from council.sandbox.journal import mark_sandbox_items
+    from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
     project.mkdir()
@@ -264,7 +264,7 @@ def test_a_file_two_seats_both_wrote_is_marked_and_owned_by_neither(tmp_path):
 
 def test_an_item_whose_evidence_is_an_overlay_refusal_is_a_limit_not_a_finding(tmp_path):
     """`rename across the view` is the sandbox talking, not the code."""
-    from council.sandbox.journal import mark_sandbox_items
+    from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
     project.mkdir()
@@ -279,11 +279,11 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     import os
     from unittest import mock
 
-    from council import run as run_mod
-    from council import runjson
-    from council.console import Console
-    from council.deliberation.state import Docket, Item
-    from council.startup import convene
+    from mech_council import run as run_mod
+    from mech_council import runjson
+    from mech_council.console import Console
+    from mech_council.deliberation.state import Docket, Item
+    from mech_council.startup import convene
 
     _, launch = convene(["review"], environ=dict(os.environ, COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
     council = launch.council
@@ -301,7 +301,7 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
 
-    with mock.patch("council.render.report_review.render", side_effect=RuntimeError("the renderer had a bug")):
+    with mock.patch("mech_council.render.report_review.render", side_effect=RuntimeError("the renderer had a bug")):
         path = run_mod._report(council, docket, console, str(run_dir), "consensus", 1, [], manifest, "")
 
     assert path and os.path.exists(path), "a failed renderer must not cost the report too"

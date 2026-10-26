@@ -14,14 +14,14 @@ import time
 
 import pytest
 
-from council import launcher as launcher_mod
-from council.process import lifecycle
-from council.process.spawn import member_env
-from council.sandbox import journal as journal_mod
-from council.sandbox import mount as m
-from council.sandbox import mount as mount_mod
-from council.sandbox.memberns import SCRATCH_NAME, SetupFailure, setup_member_namespace
-from council.sandbox.setup import _is_mounted, establish
+from mech_council import launcher as launcher_mod
+from mech_council.process import lifecycle
+from mech_council.process.spawn import member_env
+from mech_council.sandbox import journal as journal_mod
+from mech_council.sandbox import mount as m
+from mech_council.sandbox import mount as mount_mod
+from mech_council.sandbox.memberns import SCRATCH_NAME, SetupFailure, setup_member_namespace
+from mech_council.sandbox.setup import _is_mounted, establish
 from tests.support.ground import FIXTURE_ROOT, fstype_under
 from tests.support.namespaces import in_mapped_child
 
@@ -579,7 +579,7 @@ def test_a_setup_failure_is_reported_as_syscall_and_errno_and_the_member_never_e
             [
                 sys.executable,
                 "-m",
-                "council",
+                "mech_council",
                 "--setup-seat",
                 "--slot",
                 "seat1-x",

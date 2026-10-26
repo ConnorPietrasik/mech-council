@@ -13,10 +13,10 @@ from typing import cast
 
 import pytest
 
-from council.pi_rpc import PiRpc
-from council.process import lifecycle
-from council.process.lifecycle import SweepResult, send, survivor_line, sweep
-from council.process.spawn import Member
+from mech_council.pi_rpc import PiRpc
+from mech_council.process import lifecycle
+from mech_council.process.lifecycle import SweepResult, send, survivor_line, sweep
+from mech_council.process.spawn import Member
 from tests.support.namespaces import in_mapped_child
 
 pytestmark = [pytest.mark.timeout(180)]

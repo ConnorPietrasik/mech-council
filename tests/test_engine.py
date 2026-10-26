@@ -6,9 +6,9 @@ import re
 
 import pytest
 
-from council.deliberation.engine import Abort, Engine
-from council.deliberation.state import DEMOTED, STANDING, WITHDRAWN, Docket
-from council.prompts.brief import Brief
+from mech_council.deliberation.engine import Abort, Engine
+from mech_council.deliberation.state import DEMOTED, STANDING, WITHDRAWN, Docket
+from mech_council.prompts.brief import Brief
 
 from .support.harness import RawAsk, ScriptPort, events_collector, payload
 
@@ -185,7 +185,7 @@ def test_a_phase_0_one_liner_the_seat_later_escalates_still_stops_the_run():
     """Phase 0 raises the request item-less; the escalation that re-sends those words brings the item with it."""
     import asyncio
 
-    from council.deliberation.escalations import effective_class
+    from mech_council.deliberation.escalations import effective_class
 
     decision = "is the tenant fixed by contract?"
 
@@ -979,7 +979,7 @@ def test_a_defense_offering_the_human_a_menu_keeps_it():
 
 def test_a_defense_that_rephrases_updates_its_own_question_and_never_opens_a_second():
     """One escalation is one question, however many times its asker rewords it."""
-    from council.deliberation.termination import unsettled_questions
+    from mech_council.deliberation.termination import unsettled_questions
 
     built, _records = _escalation_and_defense(
         asked=[

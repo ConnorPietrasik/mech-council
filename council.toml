@@ -1,7 +1,7 @@
 # council.toml — the councils this project convenes.
 # Knobs not stated here take their built-in defaults.
 
-[councils.review]                   # `council review` — the whole tree
+[councils.review]                   # `mech-council review` — the whole tree
 mode = "review"
 goal = "See if there is anything that should be fixed / improved in this project."
 
@@ -45,7 +45,7 @@ persona = """
 You are the council chair.
 """
 
-[councils.review-staged]             # `council review-staged` — same roster, narrower scope
+[councils.review-staged]             # `mech-council review-staged` — same roster, narrower scope
 mode = "review"
 goal = "Another agent made the staged changes; did they do a good job?"
 
@@ -89,7 +89,7 @@ persona = """
 You are the council chair.
 """
 
-[councils.plan]                     # `council plan`
+[councils.plan]                     # `mech-council plan`
 mode = "plan"
 goal = "Make a plan for the implementation of the next TODO item"
 

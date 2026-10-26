@@ -9,14 +9,14 @@ from typing import cast
 
 import pytest
 
-from council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_repair
-from council.chairwork import Chair
-from council.config import Council, MemberSpec
-from council.console import Console as RunConsole
-from council.members import Members
-from council.pi_rpc import Answer, ChildGone
-from council.prompts.brief import Brief
-from council.watchdog import Watchdog
+from mech_council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_repair
+from mech_council.chairwork import Chair
+from mech_council.config import Council, MemberSpec
+from mech_council.console import Console as RunConsole
+from mech_council.members import Members
+from mech_council.pi_rpc import Answer, ChildGone
+from mech_council.prompts.brief import Brief
+from mech_council.watchdog import Watchdog
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -357,7 +357,7 @@ def test_an_errored_first_prompt_is_an_unusable_seat_naming_the_provider():
 
 
 def test_a_transport_failure_takes_the_restart_path_not_the_unusable_exit():
-    from council.pi_rpc import ChildGone
+    from mech_council.pi_rpc import ChildGone
 
     async def main():
         board, members, _console, _ = lanes(script={"seat1-one": [ChildGone("child stdout closed"), {"text": verdict()}]})

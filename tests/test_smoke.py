@@ -21,7 +21,7 @@ RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
 
 def _run(argv: list[str], cwd: str, env: dict, timeout: int) -> subprocess.CompletedProcess:
     process = subprocess.Popen(
-        [sys.executable, "-m", "council", *argv],
+        [sys.executable, "-m", "mech_council", *argv],
         cwd=cwd,
         env=env,
         stdin=subprocess.DEVNULL,

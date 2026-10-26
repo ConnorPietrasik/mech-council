@@ -18,7 +18,7 @@ test = ["pytest", "pytest-timeout"]
 dev = ["ruff==0.17.2", "mypy==2.4.0"]
 
 [project.scripts]
-council = "council.cli:main"
+mech-council = "mech_council.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -43,7 +43,7 @@ select = ["E4", "E7", "E9", "F", "I", "E501", "W291", "W292", "W293", "W605",
 [tool.ruff.lint.per-file-ignores]
 # The transcript and stderr handles are opened once and live for the whole run, so a
 # context manager would be a lie about their lifetime.
-"src/council/console.py" = ["SIM115"]
+"src/mech_council/console.py" = ["SIM115"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

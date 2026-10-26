@@ -16,7 +16,7 @@ class LauncherSetupError(Exception):
 
 
 def launcher_argv() -> tuple[str, ...]:
-    return (sys.executable, "-m", "council")
+    return (sys.executable, "-m", "mech_council")
 
 
 def pi_argv(spec: MemberSpec, pi_cli: str, *, file_base: str, untrusted: bool) -> list[str]:

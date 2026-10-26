@@ -59,7 +59,7 @@ def _try(func, *args) -> None:
 def child_env(ground):
     """A scrubbed env: no inherited run marker, throwaway pi state, offline."""
     env = dict(os.environ)
-    for key in ("COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH", "COUNCIL_CONFIG"):
+    for key in ("COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):
         env.pop(key, None)
     env["PI_CODING_AGENT_DIR"] = os.path.join(ground, "pi-state")
     env["PI_OFFLINE"] = "1"
@@ -194,7 +194,7 @@ def cli(child_env):
             full.pop("COUNCIL_RUN_DIR", None)
             full.pop("COUNCIL_RUN_PATH", None)
         process = subprocess.Popen(
-            [sys.executable, "-m", "council", *args],
+            [sys.executable, "-m", "mech_council", *args],
             cwd=cwd,
             env=full,
             stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,

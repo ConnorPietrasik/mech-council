@@ -58,7 +58,7 @@ def test_usage_errors_exit_two_before_anything_is_spawned(cli, project, canary, 
     assert result.returncode == 2
     assert wanted in result.console
     assert canary_entries(canary) == [], "a usage error creates nothing anywhere"
-    assert "run 'council --help'" in result.console
+    assert "run 'mech-council --help'" in result.console
 
 
 def test_two_lines_not_a_usage_dump(cli, project):
@@ -177,7 +177,7 @@ def test_a_bad_project_is_a_usage_error(cli, canary):
 def test_sigterm_leaves_on_128_plus_signum(cli, project, child_env):
     env = dict(child_env, **runs_env(project), FAKE_PI_SCRIPT=json.dumps([{"contains": "", "sleep": 60}]))
     child = subprocess.Popen(
-        [sys.executable, "-m", "council", "review"],
+        [sys.executable, "-m", "mech_council", "review"],
         cwd=project,
         env=env,
         stdout=subprocess.PIPE,
@@ -239,7 +239,7 @@ def test_allow_nested_overrides_the_guard(cli, project):
     ],
 )
 def test_runs_root_resolution(ground, runs, xdg, home, expected):
-    from council.cli import _runs_root_from_env
+    from mech_council.cli import _runs_root_from_env
 
     env = {"CWD": ground}
     for key, name in (("COUNCIL_RUNS_DIR", runs), ("XDG_CACHE_HOME", xdg), ("HOME", home)):
@@ -251,7 +251,7 @@ def test_runs_root_resolution(ground, runs, xdg, home, expected):
 
 
 def test_a_relative_runs_root_is_absolute_against_the_invoking_cwd(ground):
-    from council.cli import _runs_root_from_env
+    from mech_council.cli import _runs_root_from_env
 
     assert _runs_root_from_env({"COUNCIL_RUNS_DIR": "side", "CWD": ground}) == os.path.realpath(os.path.join(ground, "side"))
 

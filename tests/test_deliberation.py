@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from council import naming
-from council.deliberation import dispositions, escalations, stalemate, termination
-from council.deliberation.state import (
+from mech_council import naming
+from mech_council.deliberation import dispositions, escalations, stalemate, termination
+from mech_council.deliberation.state import (
     ABSTAIN,
     AGREE,
     AGREED,
@@ -434,7 +434,7 @@ def test_file_bases_are_their_own_vocabulary():
 
 
 def test_docket_shows_you_and_yours_to_the_viewer():
-    from council.render import docket as render
+    from mech_council.render import docket as render
 
     docket = docket_with(3)
     stance(docket, "F1", "Agent1", DISAGREE, note="because")

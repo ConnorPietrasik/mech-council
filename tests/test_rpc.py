@@ -11,11 +11,11 @@ from typing import cast
 
 import pytest
 
-from council.config import MemberSpec
-from council.pi_rpc import ChildGone, PiRpc, ProtocolError
-from council.process import lifecycle
-from council.process.spawn import pi_argv
-from council.sandbox import infer
+from mech_council.config import MemberSpec
+from mech_council.pi_rpc import ChildGone, PiRpc, ProtocolError
+from mech_council.process import lifecycle
+from mech_council.process.spawn import pi_argv
+from mech_council.sandbox import infer
 
 from .conftest import FAKE_PI
 
@@ -301,7 +301,7 @@ def test_an_abort_that_gets_nothing_comes_back_false_within_its_own_bound():
     async def main():
         child, rpc, _events = await start(extra_env={"FAKE_PI_SILENT_ABORT": "1"})
         try:
-            from council import pi_rpc
+            from mech_council import pi_rpc
 
             pi_rpc.ABORT_TIMEOUT_S = 1.0  # the bound itself, not a 30 s wait
             return await rpc.abort()
@@ -373,7 +373,7 @@ def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
 
 def _member(pgid=None, pid=999_991, stubborn=False, settled=None):
     """A doubled child and session: `dispose` is the subject, and neither fake carries more than it inspects."""
-    from council.process.spawn import Member
+    from mech_council.process.spawn import Member
 
     class Proc:
         def __init__(self):

@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from council.deliberation import escalations, state
-from council.humaninput import Checkpoint, parse_line, render_ask_set
-from council.humanio import EOF
+from mech_council.deliberation import escalations, state
+from mech_council.humaninput import Checkpoint, parse_line, render_ask_set
+from mech_council.humanio import EOF
 
 NAMES = {"Agent1": "Metic", "Agent2": "Senior", "chair": "Gavel"}
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from council.extraction import (
+from mech_council.extraction import (
     map_backing,
     map_severity,
     map_stance,

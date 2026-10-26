@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from council.deliberation import dispositions, escalations, state
-from council.render import docket as docket_render
-from council.render import preview, report_plan, report_review
-from council.render.context import ReportContext, RosterRow
+from mech_council.deliberation import dispositions, escalations, state
+from mech_council.render import docket as docket_render
+from mech_council.render import preview, report_plan, report_review
+from mech_council.render.context import ReportContext, RosterRow
 
 
 def build(mode="review", n=3, goal="g"):

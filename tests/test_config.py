@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-from council import config as config_mod
-from council import suggest
-from council.cli import Args, ConfigError, UsageError
+from mech_council import config as config_mod
+from mech_council import suggest
+from mech_council.cli import Args, ConfigError, UsageError
 
 REFERENCE_CONFIG = '''# council.toml — the reference config, taken verbatim by the loader.
 

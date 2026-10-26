@@ -1,9 +1,9 @@
-# council
+# mech-council
 
 A council of coding agents that reviews a project or plans a task together.
 
 You name a council in `council.toml` — seats and a chair, each a [`pi`](https://github.com/earendil-works/pi)
-session on whatever provider and model you like — and `council` convenes them. The seats
+session on whatever provider and model you like — and `mech-council` convenes them. The seats
 read the code, argue about it, and have to sign off; the chair merges duplicates, compares
 plans, and watches for a seat that has stopped making progress. When the council is done
 you get a report with the findings.
@@ -27,14 +27,14 @@ the product's own code.
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
-pip install -e .            # console script: council
-council --help
+pip install -e .            # console script: mech-council
+mech-council --help
 ```
 
 ## Quick start
 
 ```sh
-council review            # or: council -g "focus on the parser" review
+mech-council review            # or: mech-council -g "focus on the parser" review
 ```
 
 Narration goes to **stdout**, usage errors to stderr, and the report is

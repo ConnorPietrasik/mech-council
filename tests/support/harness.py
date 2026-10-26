@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from council.deliberation.engine import CheckpointOutcome, RawAsk
-from council.deliberation.state import Docket
+from mech_council.deliberation.engine import CheckpointOutcome, RawAsk
+from mech_council.deliberation.state import Docket
 
 
 def payload(**kw) -> str:
@@ -62,7 +62,7 @@ class ScriptPort:
     async def chair_merge(self, listing: str, *, round_: int) -> dict:
         # The real Port runs this same extractor, so the harness must too: a scripted plan is JSON text first.
         self.asks.append(Ask("chair", "merge", round_, "merge", listing))
-        from council.extraction import parse_merge_plan
+        from mech_council.extraction import parse_merge_plan
 
         text = self._chair_answer(Ask("chair", "merge", round_, "merge", listing))
         data, questions, _errors = parse_merge_plan(text or "")
@@ -70,7 +70,7 @@ class ScriptPort:
 
     async def chair_compare(self, listing: str, *, round_: int) -> dict:
         self.asks.append(Ask("chair", "compare", round_, "compare", listing))
-        from council.extraction import parse_comparison
+        from mech_council.extraction import parse_comparison
 
         text = self._chair_answer(Ask("chair", "compare", round_, "compare", listing))
         data, _errors = parse_comparison(text or "")
@@ -80,7 +80,7 @@ class ScriptPort:
         """A scripted `RawAsk(failure=…)` on a chair ask becomes the engine's `Abort`, as `Port` does."""
         answer = self.reply(ask) if callable(self.reply) else {}
         if isinstance(answer, RawAsk) and answer.failure:
-            from council.deliberation.engine import Abort
+            from mech_council.deliberation.engine import Abort
 
             raise Abort(answer.failure, member="chair", round_=ask.round)
         return self._text(answer)

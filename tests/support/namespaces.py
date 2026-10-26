@@ -11,7 +11,7 @@ import json
 import os
 import socket
 
-from council.sandbox import mount as mount_mod
+from mech_council.sandbox import mount as mount_mod
 
 
 def in_mapped_child(body, *args, mount_namespace=True):

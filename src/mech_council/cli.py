@@ -52,7 +52,7 @@ class Args:
 
 
 HELP = """\
-usage: council [<council>] [flags]
+usage: mech-council [<council>] [flags]
 
 Run one named council from the project's council.toml.
 
@@ -104,7 +104,7 @@ def parse_args(argv: list[str]) -> Args:
             sys.stdout.write(HELP)
             raise SystemExit(0)
         if token in ("-V", "--version"):
-            sys.stdout.write(f"council {__version__}\n")
+            sys.stdout.write(f"mech-council {__version__}\n")
             raise SystemExit(0)
         inline: str | None = None
         name = token
@@ -151,7 +151,7 @@ def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: l
 
 def fail(message: str) -> int:
     sys.stderr.write(f"{message}\n")
-    sys.stderr.write("run 'council --help'\n")
+    sys.stderr.write("run 'mech-council --help'\n")
     return 2
 
 
@@ -193,8 +193,8 @@ def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | Non
 
 
 # --------------------------------------------------------------------------- CLI contract, exit codes `main()`, and the only place
-# exit codes are chosen.  `python -m council` reaches it the same way the console script does, so there is one entry and one contract. The
-# internal `--setup-seat` dispatch comes first: the launcher form is this same entry point.
+# exit codes are chosen.  `python -m mech_council` reaches it the same way the console script does, so there is one entry and one
+# contract. The internal `--setup-seat` dispatch comes first: the launcher form is this same entry point.
 
 
 def main(argv: list[str] | None = None) -> int:
