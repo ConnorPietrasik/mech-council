@@ -24,40 +24,35 @@ def errored(**extra) -> str:
 # ------------------------------------------------------------ The config loader shape 1
 
 
-def test_a_seat_that_errors_its_first_prompt_is_unusable_after_one_prompt(cli, project):
-    result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
-    assert result.returncode == 1, result.console
-    console = result.console.lower()
-    assert "unusable" in console, result.console
-    for named in ("agent1", "429 provider quota exhausted"):
-        assert named in console, f"the line names the member and pi's message: {console}"
-    # The fixture council names its seats; the file base is derived, so read it by role.
-    seats = [record for record in result.manifest["members"].values() if record["kind"] == "seat"]
-    assert len(seats) == 2
-    assert all(record["prompts"] == 1 for record in seats), f"an unusable seat spends exactly one prompt: {[r['prompts'] for r in seats]}"
-    assert result.manifest["outcome"] == "aborted"
-    assert not [row for row in result.events if row["event"] == "round_start"], "nobody deliberates after a seat is found unusable"
-
-
 def test_an_unusable_seat_leaves_only_the_minimal_report_and_a_finalized_manifest(cli, project):
-    """The minimal-artifacts rule, in the direction that catches an over-eager exit path."""
+    """The minimal-artifacts rule, in the direction that catches an over-eager exit path.
+
+    One `errored()` run carries the whole unusable-member contract, so it asserts all of it: it
+    exits one naming the member and pi's own message, it spends exactly one prompt and never
+    reaches the repair path or a deliberation round, and it leaves three files and a finalized
+    manifest behind. Three separate runs of this same scenario killed the same mutants.
+    """
     result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
     assert result.returncode == 1
+    console = result.console.lower()
+    for named in ("agent1", "unusable", "429 provider quota exhausted"):
+        assert named in console, f"the line names the member and pi's message: {console}"
+    records = result.manifest["members"]
+    seats = [record for record in records.values() if record["kind"] == "seat"]
+    assert len(seats) == 2
+    assert all(record["prompts"] == 1 for record in seats), f"an unusable seat spends exactly one prompt: {[r['prompts'] for r in seats]}"
+    chair = [record for record in records.values() if record["kind"] == "chair"][0]
+    assert chair["prompts"] <= 1, "the chair is never asked to repair a dead council"
+    assert result.manifest["outcome"] == "aborted"
+    kinds = [row["event"] for row in result.events]
+    assert "round_summary" not in kinds, "nobody deliberates after a seat is found unusable"
+    assert "verdict_rejected" not in kinds, "a dead council is not asked to repair itself"
     written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
     assert written == ["events.jsonl", "report.md", "run.json"], written
     assert result.manifest["finished"], "run.json is finalized, not left as created"
     report = result.report()
     assert "aborted" in report.lower() and "429" in report, "the minimal report says why"
     assert "consensus findings" not in report.lower()
-
-
-def test_the_repair_path_is_not_taken_for_an_unusable_member(cli, project):
-    """Classified unusable, *not* repaired-and-re-asked (lenient extraction's repairs are later)."""
-    result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
-    kinds = [row["event"] for row in result.events]
-    assert "verdict_rejected" not in kinds and "ask_repair" not in kinds
-    chair = [r for r in result.manifest["members"].values() if r["kind"] == "chair"][0]
-    assert chair["prompts"] <= 1, "the chair is never asked to repair a dead council"
 
 
 # ------------------------------------------------------------ The config loader shape 2

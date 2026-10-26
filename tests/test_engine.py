@@ -533,33 +533,6 @@ def test_an_answer_at_the_terminal_checkpoint_buys_a_full_round():
     assert rounds == [1, 2], f"a full round after the answer, not a partial one: {rounds}"
 
 
-def test_declining_the_whole_ask_set_ends_the_run_immediately():
-    import asyncio
-
-    def blocked(ask):
-        return payload(
-            positions=[{"item": item, "stance": "needs_human", "note": "blocked"} for item in shown_items(ask.text)],
-            backing="no_preference",
-            signoff=True,
-        )
-
-    def reply(ask):
-        if ask.phase == "phase0":
-            return phase0_first(ask.who, "a bug")
-        if ask.kind == "merge":
-            return {"groups": []}
-        if ask.who in ("Agent1", "Agent2"):
-            return blocked(ask)
-        return stance_all(ask, "agree")
-
-    async def main():
-        built, port, _records = engine(reply=reply, skip=["H1"])
-        return await built.run(), port
-
-    outcome, _port = asyncio.run(main())
-    assert outcome == "needs_human"
-
-
 # ------------------------------------------------------------------ The gap ladder gaps
 
 

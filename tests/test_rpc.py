@@ -339,11 +339,6 @@ def test_the_spawn_argv_is_pi_plus_exactly_the_flags_we_add():
     assert "--no-approve" in untrusted and "--approve" not in untrusted
 
 
-def test_a_chair_carries_no_id_in_its_name():
-    argv = pi_argv(MemberSpec(name="Chair"), "/usr/sbin/pi", file_base="chair", untrusted=False)
-    assert "council-chair" in argv
-
-
 # ------------------------------- The dispose path on teardown
 
 

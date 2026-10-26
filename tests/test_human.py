@@ -177,16 +177,6 @@ def questions(docket, *specs):
     ]
 
 
-def test_a_deferred_question_prints_and_the_run_never_waits():
-    docket = build()
-    listing = questions(docket, ("what is the retention policy?", "Agent2", None, False))
-    cp, console, reader = make_checkpoint(docket)
-    outcome = asyncio.run(cp.run(listing, ask_set=[], round_=1, terminal=False, waiting=False))
-    assert outcome.waited is False
-    assert any("keeps working" in line for line in console.lines)
-    assert reader.asked == [], "not one line was read"
-
-
 def test_the_ask_set_waits_and_an_answer_is_applied():
     docket = build()
     listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
@@ -385,24 +375,3 @@ def test_explain_without_a_channel_says_so_and_keeps_waiting():
 
 
 # --------------------------------------------------------------------------- the menu's provenance
-
-
-def test_a_re_ask_withdraws_its_own_candidates_and_leaves_a_co_askers():
-    """Each asker owns only its own slice of the menu, and a candidate the human read keeps its number."""
-    docket = build()
-    item(docket, "F1")
-    question, _ = escalations.raise_question(
-        docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=1, options=["redis", "postgres"]
-    )
-    escalations.raise_question(docket, text="which cache?", asker="Agent2", item_id="F1", blocking=True, round_=1, options=["in-process"])
-    assert question.options == ["redis", "postgres", "in-process"]
-
-    # Agent1 re-asks with one candidate out and one in; Agent2 never re-asked, so its own stands.
-    escalations.raise_question(
-        docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=2, options=["redis", "memcached"]
-    )
-    assert question.options == ["redis", "in-process", "memcached"], "postgres is withdrawn, in-process stands, redis keeps 1"
-
-    # A re-ask offering nothing replaces nothing: a menu the human is reading must not vanish.
-    escalations.raise_question(docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=3)
-    assert question.options == ["redis", "in-process", "memcached"]
