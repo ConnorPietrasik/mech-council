@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from tests.support.ground import GROUND_SKIP_PHRASE, SKIP_MARKERS
+from tests.support.ground import FIXTURE_ROOT, GROUND_SKIP_PHRASE, SKIP_MARKERS, fstype_under
 
 TOY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "testdata", "toy-project")
 RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
@@ -70,18 +70,18 @@ def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent():
     marker = {"COUNCIL_RUN_DIR": "/tmp/not-a-real-run-dir", "COUNCIL_RUN_PATH": "/tmp/not-a-real-run-dir"}
     env = dict(os.environ, **marker, COUNCIL_RUNS_DIR="/tmp/council-smoke-guard")
     result = _run(["review", "--project", TOY], cwd=TOY, env=env, timeout=120)
-    # A refusal to convene is a setup failure (1), not a usage error (2) — the
-    # flags were well-formed, and what the run refused to do was start.
+    # Well-formed flags refused at startup: a setup failure (1), not a usage error (2).
     assert result.returncode == 1, result.stderr[-400:]
     assert "--allow-nested" in result.stderr, "the refusal must name the way out"
     assert not os.path.exists("/tmp/council-smoke-guard"), "a refusal creates nothing"
 
 
 def test_the_sandbox_family_is_never_silently_empty():
-    """The harness rule is that the sandbox family *ran*, not that it exited 0."""
+    """The harness rule is that the sandbox family *ran*, not that it exited 0 — and the ground skip is the one
+    sanctioned way it may not have, so this says nothing about a run on ground that cannot hold a lower."""
     here = os.path.dirname(os.path.abspath(__file__))
     listing = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/test_sandbox.py", "--collect-only", "-q", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", "tests/test_sandbox.py", "--collect-only", "-q", "-rs", "-p", "no:cacheprovider"],
         cwd=os.path.dirname(here),
         capture_output=True,
         text=True,
@@ -89,7 +89,14 @@ def test_the_sandbox_family_is_never_silently_empty():
         check=False,
     )
     collected = [line for line in listing.stdout.splitlines() if "::" in line]
-    assert len(collected) >= 12, f"the sandbox family collected {len(collected)} cases"
+    if len(collected) >= 12:
+        return
+    ground = fstype_under(FIXTURE_ROOT)
+    said_the_ground = GROUND_SKIP_PHRASE in listing.stdout + listing.stderr
+    assert said_the_ground and ground == "overlay", (
+        f"the sandbox family collected {len(collected)} cases on {ground} ground ({FIXTURE_ROOT}): "
+        f"only {GROUND_SKIP_PHRASE} excuses it, and the family said otherwise\n{(listing.stdout + listing.stderr)[-600:]}"
+    )
 
 
 def _skip_candidates(path: str) -> list[tuple[int, str]]:

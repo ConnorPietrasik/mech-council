@@ -22,15 +22,12 @@ from council.sandbox import mount as m
 from council.sandbox import mount as mount_mod
 from council.sandbox.memberns import SCRATCH_NAME, SetupFailure, setup_member_namespace
 from council.sandbox.setup import _is_mounted, establish
-
-# The family's ground: `fstype_under` decides the one skip below, so it belongs with the
-# imports rather than after the marks.
 from tests.support.ground import FIXTURE_ROOT, fstype_under
+from tests.support.namespaces import in_mapped_child
 
 pytestmark = [pytest.mark.sandbox, pytest.mark.timeout(240)]
 
-# The one narrow skip, decided once for the whole family rather than per case: a fixture lower inside an overlay cannot hold
-# the uppers this family mounts, and the answer is `TMPDIR`/`COUNCIL_TEST_FS` pointing at plain ground, not a narrower test.
+# One ground decision for the whole family, never per case.
 if fstype_under(FIXTURE_ROOT) == "overlay":
     pytest.skip(
         f"SKIPPED (lower inside an overlay): fixture ground {FIXTURE_ROOT} sits "
@@ -54,58 +51,7 @@ def tree(ground):
     return {"project": project, "runs": runs, "ground": ground, "members": ["seat1-a", "seat2-b", "chair"]}
 
 
-# ------------------------------------------------------------------ the two helpers
-
-
-def in_mapped_child(body, *args, mount_namespace=True):
-    """Fork, unshare, let the **parent** write the map, then run `body(*args)` inside."""
-    parent, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-    os.set_inheritable(parent.fileno(), False)
-    pid = os.fork()
-    if pid == 0:
-        parent.close()
-        try:
-            flags = mount_mod.CLONE_NEWUSER | (mount_mod.CLONE_NEWNS if mount_namespace else 0)
-            os.unshare(flags)
-            child_end.sendall(b"r")
-            if child_end.recv(1) != b"m":
-                os._exit(3)
-            result = body(*args)
-            child_end.sendall(b"|" + json.dumps(result, default=str).encode())
-            child_end.close()
-            os._exit(0)
-        except BaseException as error:  # reported, not lost
-            import traceback
-
-            detail = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-            try:
-                child_end.sendall(b"!" + detail.encode()[-900:])
-            except Exception:
-                pass
-            os._exit(1)
-    child_end.close()
-    uid, gid = os.getuid(), os.getgid()
-    assert parent.recv(1) == b"r", "the child never reached the mapping handshake"
-    for name, value in (("setgroups", "deny"), ("uid_map", f"0 {uid} 1"), ("gid_map", f"0 {gid} 1")):
-        with open(f"/proc/{pid}/{name}", "w", encoding="utf-8") as handle:
-            handle.write(value)  # written from outside: the only place it can be
-    parent.sendall(b"m")
-    payload = _drain(parent)
-    parent.close()
-    _, status = os.waitpid(pid, 0)
-    if payload.startswith(b"!"):
-        raise AssertionError(f"the sandboxed child failed:\n{payload[1:].decode()}")
-    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, f"the child did not exit cleanly: {status}"
-    return json.loads(payload[1:] or b"null")
-
-
-def _drain(sock) -> bytes:
-    payload = b""
-    while True:
-        chunk = sock.recv(65536)
-        if not chunk:
-            return payload
-        payload += chunk
+# -------------------------------------------------- the box every case runs its plan in
 
 
 def run_sandboxed(tree, plan, *, members=None, sandbox_mib=32):
@@ -422,8 +368,7 @@ def test_a_member_cannot_read_the_orchestrators_run_state(tree):
         snippet = f"""
 ORCH = {orchestrator}
 closed = {{}}
-# `environ` and `exe` are read as files, `cwd` is a link and `fd` is a directory: the
-# entry points differ, and dumpability has to close all four shapes.
+# Four shapes to close: `environ` and `exe` are files, `cwd` a link, `fd` a directory.
 probes = {{"cwd": lambda: os.readlink(f'/proc/{{ORCH}}/cwd'),
           "environ": lambda: open(f'/proc/{{ORCH}}/environ', 'rb').read(),
           "exe": lambda: open(f'/proc/{{ORCH}}/exe', 'rb').read(1),
@@ -454,63 +399,94 @@ PROBE(closed=closed, readable=readable)
 
 
 def test_the_sweep_kills_a_stray_left_running_in_a_namespace_this_run_created(tree):
-    """The namespace sweep, on a stray that ignores `SIGTERM` and leaves its process group."""
+    """Two strays that ignore `SIGTERM` and leave their process group, one per member namespace: the sweep's own scope
+    — a descriptor the run holds — kills one, and the unguarded scan by reported number kills the other.  Each scan
+    gets a target nothing has touched yet, and a live stray in a namespace the other scan is not pointed at."""
 
     def plan(box, tell):
-        slot, project, runs = box.slot_dir("seat1-a"), tree["project"], tree["runs"]
-        parent_end, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-        os.set_inheritable(parent_end.fileno(), False)
-        os.set_inheritable(child_end.fileno(), True)
-        pid = os.fork()
-        if pid == 0:
+        def stray(file_base) -> tuple[int, int, int]:
+            """Fork the member, take back the namespace it made, and leave it running."""
+            parent_end, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            os.set_inheritable(parent_end.fileno(), False)
+            os.set_inheritable(child_end.fileno(), True)
+            pid = os.fork()
+            if pid == 0:
+                parent_end.close()
+                keep = child_end.fileno()
+                for fd in {fd for fd in range(3, 512) if fd != keep}:
+                    with contextlib.suppress(OSError):
+                        os.close(fd)  # only the report survives
+                inode = setup_member_namespace(project=tree["project"], runs_dir=tree["runs"], slot_dir=box.slot_dir(file_base))
+                # A member that execs is dumpable again, so the orchestrator can open the namespace it reports.
+                m.prctl(m.PR_SET_DUMPABLE, 1)
+                ns_fd = os.open("/proc/self/ns/mnt", os.O_RDONLY)
+                _send_fd(child_end, ns_fd, inode)
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                os.setpgrp()
+                time.sleep(120)
+                os._exit(0)
+            child_end.close()
+            ns_fd, inode = _recv_fd(parent_end, timeout=25)
             parent_end.close()
-            keep = child_end.fileno()
-            for fd in {fd for fd in range(3, 512) if fd != keep}:
-                with contextlib.suppress(OSError):
-                    os.close(fd)  # only the report survives
-            inode = setup_member_namespace(project=project, runs_dir=runs, slot_dir=slot)
-            # The other half: a member that execs is dumpable again, so the orchestrator can open a descriptor on the namespace it reports.
-            m.prctl(m.PR_SET_DUMPABLE, 1)
-            ns_fd = os.open("/proc/self/ns/mnt", os.O_RDONLY)
-            _send_fd(child_end, ns_fd, inode)
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            signal.signal(signal.SIGHUP, signal.SIG_IGN)
-            os.setpgrp()
-            time.sleep(120)
-            os._exit(0)
-        child_end.close()
-        ns_fd, inode = _recv_fd(parent_end, timeout=25)
-        parent_end.close()
-        assert inode > 0 and ns_fd >= 0, "the stray never handed over its namespace"
-        stray = _find_in_namespace(inode, exclude={os.getpid()})
-        blind = lifecycle.sweep({inode}, keep_fds=[])  # the race, unguarded
-        result = lifecycle.sweep(set(), keep_fds=[ns_fd])  # as written
-        deadline = time.monotonic() + 15
-        while stray and _alive(stray) and time.monotonic() < deadline:
-            time.sleep(0.2)
-        if stray:
-            try:
-                os.waitpid(stray, os.WNOHANG)
-            except ChildProcessError:
-                pass
+            return pid, ns_fd, inode
+
+        def gone(pid: int) -> bool:
+            """Wait for the kill to land and reap: a zombie still answers `kill(pid, 0)`, so looking without reaping
+            is a 15 s poll, and inside this namespace the stray is our own child.
+            """
+            deadline = time.monotonic() + 15
+            while pid and _alive(pid) and time.monotonic() < deadline:
+                try:
+                    os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                time.sleep(0.2)
+            return bool(pid and _alive(pid))
+
+        held_pid, ns_fd, held_ns = stray("seat1-a")
+        assert ns_fd >= 0 and held_ns > 0, "the stray in the held namespace never handed it over"
+        reported_pid, reported_fd, reported_ns = stray("seat2-b")
+        assert reported_fd >= 0 and reported_ns > 0, "the stray in the reported namespace never handed it over"
+        os.close(reported_fd)  # the unguarded path holds nothing: a number is the whole of its scope
+        found_held = _find_in_namespace(held_ns, exclude={os.getpid()})
+        found_reported = _find_in_namespace(reported_ns, exclude={os.getpid()})
+
+        # As written: what this run holds a descriptor for. The other stray is running in a namespace the run holds
+        # no descriptor for, so this same scan must pass it by.
+        result = lifecycle.sweep(set(), keep_fds=[ns_fd])
+        # The race, unguarded: a reported inode and nothing to re-verify it against. That stray is still running
+        # here, so its kill is this scan's doing and no earlier one's.
+        blind = lifecycle.sweep({reported_ns}, keep_fds=[])
         os.close(ns_fd)
+
         tell(
             {
-                "ns": inode,
-                "stray": stray,
-                "blind_pids": blind.pids,
+                "ns": held_ns,
+                "stray": found_held,
+                "started": held_pid,
+                "ns_reported": reported_ns,
+                "reported": found_reported,
+                "reported_started": reported_pid,
                 "pids": sorted(result.pids),
                 "namespaces": result.namespaces,
-                "alive": bool(stray and _alive(stray)),
+                "blind_pids": blind.pids,
+                "blind_namespaces": blind.namespaces,
+                "alive": gone(held_pid),
+                "alive_reported": gone(reported_pid),
                 "line": lifecycle.survivor_line(result),
             }
         )
 
     [row] = run_sandboxed(tree, plan)
-    assert row["stray"] > 0, "the stray is found by the namespace the run holds"
-    assert row["namespaces"] == [row["ns"]]
-    assert row["pids"] == sorted([row["stray"]]), row
+    assert row["stray"] == row["started"] > 0, "the stray is found by the namespace the run holds"
+    assert row["reported"] == row["reported_started"] > 0, "the other stray is found by the namespace it reported"
+    assert row["pids"] == sorted([row["stray"]]), f"the held namespace was swept and the foreign one left running:\n{row}"
+    assert row["namespaces"] == [row["ns"]], "the sweep credited a namespace it was not pointed at"
+    assert row["blind_pids"] == [row["reported"]], "a reported inode alone scopes the kill: that is the race"
+    assert row["blind_namespaces"] == [row["ns_reported"]], "and it credits only the namespace that number named"
     assert not row["alive"], "the sweep killed the survivor"
+    assert not row["alive_reported"], "and the unguarded scan killed its own target"
     assert str(row["stray"]) in row["line"] and f"ns {row['ns']}" in row["line"]
 
 
@@ -547,47 +523,8 @@ def _find_in_namespace(inode: int, *, exclude: set[int]) -> int:
     return 0
 
 
-def test_the_sweep_leaves_alone_a_namespace_this_run_did_not_make():
-    keep = os.fork()
-    if keep == 0:
-        time.sleep(5)
-        os._exit(0)
-    try:
-        result = lifecycle.sweep({0x7FFFFFFF}, keep_fds=[])
-        assert result.pids == [] and result.empty
-        assert lifecycle.survivor_line(result).startswith("no survivors")
-    finally:
-        os.kill(keep, signal.SIGKILL)
-        os.waitpid(keep, 0)
-
-
-def _start_stray(tree, box, file_base, ready) -> int:
-    """A member's child that outlives its group kill and ignores SIGTERM (the sweep's case)."""
-    read_fd, write_fd = os.pipe()
-    pid = os.fork()
-    if pid == 0:
-        os.close(read_fd)
-        os.closerange(3, 512)  # a stray holds no inherited fd
-        inode = setup_member_namespace(project=tree["project"], runs_dir=tree["runs"], slot_dir=box.slot_dir(file_base))
-        os.write(write_fd, str(inode).encode())
-        os.close(write_fd)
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        os.setpgrp()
-        time.sleep(300)
-        os._exit(0)
-    os.close(write_fd)
-    inode = int(os.read(read_fd, 32) or b"0")
-    os.close(read_fd)
-    ready(pid, inode)
-    return pid
-
-
-def _ns_of(pid: int) -> int:
-    try:
-        return os.stat(f"/proc/{pid}/ns/mnt").st_ino
-    except OSError:
-        return 0
+# The other half of that pair — an inode that matches no namespace at all, and a host pid — lives in
+# `test_process.py::test_a_pid_in_another_namespace_is_left_alone`.
 
 
 def _alive(pid: int) -> bool:

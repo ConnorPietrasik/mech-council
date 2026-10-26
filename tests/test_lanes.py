@@ -158,8 +158,7 @@ def lanes(*, n=2, concurrency=2, script=None, watchdog=0, script_defaults=False)
     members = FakeMembers(roster)
     board = council(n=n, concurrency=concurrency, watchdog=watchdog)
     console = Console()
-    # The fakes stand in for the registry and the console: the lanes themselves, which are the
-    # subject here, hold only what they call on them.
+    # The fakes carry only what the lanes call on them.
     return Lanes(board, cast(Members, members), cast(RunConsole, console)), members, console, board
 
 
@@ -244,9 +243,7 @@ def test_the_seat_pool_lets_the_two_seats_answer_together():
 
 
 def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
-    """The chair judges who is wedged from these rows: a seat that is not being asked is not in them, and a seat that
-    has moved since its ask began reads as moved.
-    """
+    """The chair judges wedging from these rows: a seat that is not being asked is absent, and one that has moved reads as moved."""
 
     async def main():
         board, members, _console, _ = lanes(concurrency=2, script={"seat1-one": [{"hang": 5, "text": verdict()}]})
@@ -254,7 +251,7 @@ def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
             board.ask_agent("Agent1", "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
         )
         await asyncio.sleep(0.1)
-        # A peer that is idle but has activity of its own, and a wedge that has taken two more events since it began.
+        # A peer idle with activity of its own; a wedge that has taken two more events since it began.
         members.members["seat2-two"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
         members.members["seat1-one"].rpc.activity.events = 2
         rows = board.digest()

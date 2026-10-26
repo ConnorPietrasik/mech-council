@@ -134,13 +134,12 @@ def test_the_inference_pass_reads_erroring_tool_results_and_nothing_else():
     assert infer.scan(record("cp: write failed: no space left on device")) == infer.FULL
     assert infer.scan(record("rename 'a': Invalid cross-device link")) == infer.LIMIT
     assert infer.scan(record("rm -rf src: Input/output error")) == infer.LIMIT
-    # A successful result that merely *mentions* the errno proves nothing: the cap is not spent because a member quoted the words.
+    # A *successful* result that merely mentions the errno proves nothing.
     assert infer.scan(record("no space left on device", error=False)) is None
-    # Only the tail is scanned, so a transcript that recited the message thousands of characters ago is not a spent cap.
+    # Only the tail is scanned, so an old recitation is not a spent cap.
     assert infer.scan(record("no space left on device" + " " * 4096)) is None
     assert infer.scan({}) is None
-    # `EROFS` — writing into a mask — is the one errno the report marks and the pump does not infer: a mask the seat was
-    # briefed about is not the run's cap running out.  Pinned so the two tables' difference stays a choice, not an oversight.
+    # `EROFS` — writing into a mask the seat was briefed about — is the one errno the report marks and the pump does not infer.
     assert infer.scan(record("rm: cannot remove 'x': Read-only file system")) is None
     assert infer.evidence_is_limit("Read-only file system")
 
@@ -345,41 +344,35 @@ def test_a_chair_carries_no_id_in_its_name():
     assert "council-chair" in argv
 
 
-# ------------------------------- The exit-code table / the dispose path on teardown
-
-
-class FakeProc:
-    def __init__(self, pid, alive=True):
-        self.pid, self.returncode = pid, None
-        self._alive = alive
-        self.killed = False
-
-    def kill(self):
-        self.killed = True
-        self._alive = False
+# ------------------------------- The dispose path on teardown
 
 
 def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
     """The *group*, because pi detaches its tool shells; KILL if TERM is ignored."""
     sent: list[tuple[int, int]] = []
+    settled: list[int | None] = []
+    member = _member(stubborn=True, settled=settled)
     real_killpg = os.killpg
 
     def fake_killpg(pgid, sig):
         sent.append((pgid, sig))
+        if sig == signal.SIGKILL:
+            member.proc.returncode = -9  # the KILL lands: the child reports its exit
 
     os.killpg = fake_killpg
     lifecycle.STDIN_CLOSE_GRACE_S = 0.05
     lifecycle.TERM_GRACE_S = 0.05
     try:
-        member = _member(stubborn=True)
         asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
     finally:
         os.killpg = real_killpg
         lifecycle.STDIN_CLOSE_GRACE_S, lifecycle.TERM_GRACE_S = 5.0, 5.0
     assert sent == [(member.pgid, signal.SIGTERM), (member.pgid, signal.SIGKILL)], sent
+    assert settled == [-9], "the exit the KILL caused is awaited, not just the KILL sent"
 
 
-def _member(pgid=None, pid=999_991, stubborn=False):
+def _member(pgid=None, pid=999_991, stubborn=False, settled=None):
+    """A doubled child and session: `dispose` is the subject, and neither fake carries more than it inspects."""
     from council.process.spawn import Member
 
     class Proc:
@@ -387,12 +380,17 @@ def _member(pgid=None, pid=999_991, stubborn=False):
             self.returncode = None
             self.pid = pid
 
-        def kill(self):
-            self.returncode = -9
-
         async def wait(self):
-            if stubborn:
-                await asyncio.sleep(30)  # it is not going to exit on its own
+            if not stubborn:
+                return self.returncode
+            # Stubborn: nothing is reported until the caller's group KILL sets `returncode`.  The bound outlasts
+            # `dispose`'s TERM grace, so a `dispose` that never escalates fails an assertion instead of the timeout.
+            loop = asyncio.get_running_loop()
+            bound = loop.time() + lifecycle.TERM_GRACE_S * 4
+            while self.returncode is None and loop.time() < bound:
+                await asyncio.sleep(0.01)
+            if self.returncode is not None and settled is not None:
+                settled.append(self.returncode)
             return self.returncode
 
     class Rpc:
@@ -402,8 +400,6 @@ def _member(pgid=None, pid=999_991, stubborn=False):
         async def stop(self):
             pass
 
-    # The doubles stand in for a child and its session: `dispose` is the subject, and neither the
-    # process nor the RPC object is inspected beyond the few members these fakes carry.
     return Member(
         file_base="seat1-x",
         id="Agent1",

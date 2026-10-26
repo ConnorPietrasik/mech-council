@@ -349,13 +349,11 @@ def test_a_plan_council_writes_plan_md_and_says_plainly_when_no_direction_was_ch
         "## Alternatives on the table",
     ):
         assert heading in report, f"{heading} missing from\n{report[:600]}"
-    # The offline plan fixture never converges, so the direction section must say so out loud rather than
-    # quietly printing a heading nobody chose: a named direction carries its backer, an absent one is named.
+    # The offline plan fixture never converges, so the section must say so rather than print a heading nobody chose.
     direction = report.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
     assert "did not settle a direction" in direction, f"the report chose a direction this run never agreed:\n{direction[:400]}"
     assert "backed by" not in direction.split("The candidates")[0], "no `backed by` line stands where no direction was chosen"
-    # The plan report opens with the standing reading rules, and the stages carry
-    # the gates the seats wrote; nothing here invents a chair-authored rule list.
+    # Nothing here invents a chair-authored rule list.
     assert "prescriptive" in report and "descriptive" in report
     assert "wrap the call in a retry helper" in report, "the stage gates reach the plan"
     assert "bounded backoff" in report
@@ -402,8 +400,7 @@ def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project
 
 def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_waits(cli, project):
     """The human checkpoint's wait rule: `round_limit_reached` is the one way a question ends unasked."""
-    # Round 2 raises something new so the docket keeps moving: the run must end on the round
-    # limit, not on termination's stalemate, which is a different rule and another test.
+    # Round 2 raises something new, so the run ends on the round limit and not on termination's stalemate.
     script = json.dumps(
         [
             {

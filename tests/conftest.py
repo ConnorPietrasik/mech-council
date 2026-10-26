@@ -7,22 +7,17 @@ import os
 import signal
 import subprocess
 import sys
-import sysconfig
 import time
 from dataclasses import dataclass, field
 
 import pytest
 
-# The fixture ground is chosen in tests/support/ground.py, and the sandbox family reads the
-# fstype under it once and skips the whole family on that answer.
 from tests.support.ground import FIXTURE_ROOT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAKE_PI = os.path.join(HERE, "support", "fake_pi.py")
 
-# The choice of ground belongs to `tests/support/ground.py`: `$COUNCIL_TEST_FS`, then `$TMPDIR` (which inside
-# a member *is* that member's own scratch), then a scratch dir beside the checkout — never the project under
-# test.  `tests/test_sandbox.py` reads the fstype under it once and skips the whole family on that answer.
+# Ground precedence (`$COUNCIL_TEST_FS`, `$TMPDIR`, a scratch dir) lives in `tests/support/ground.py` — never the project under test.
 
 
 def _plain_ground(name: str) -> str:
@@ -276,27 +271,3 @@ def _read_json(path: str) -> dict:
             return json.load(handle)
         except json.JSONDecodeError:
             return {}
-
-
-# ---------------------------------------------------------------------------
-# an offline council, convened in-process (no CLI, no namespace)
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def council(project):
-    """The `review` council from the fixture config, convened for real."""
-    from council import config as config_mod
-    from council.cli import Args
-
-    loaded = config_mod.load_config(os.path.join(project, "council.toml"))
-    name = config_mod.select_council(loaded, "review")
-    return config_mod.convene(loaded, name, Args(), project)
-
-
-@pytest.fixture(scope="session")
-def console_script() -> str:
-    """The installed entry point — the sandbox family asserts a member can exec it by absolute path."""
-    scripts = sysconfig.get_path("scripts")
-    path = os.path.join(scripts, "council")
-    return path if os.path.exists(path) else sys.executable

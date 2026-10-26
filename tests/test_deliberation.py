@@ -56,9 +56,7 @@ def stance(docket: Docket, item: str, agent: str, value: str, **kw) -> None:
         (("disagree", "disagree", "abstain"), UNHEARD),
         (("abstain", "abstain", "abstain"), UNHEARD),
         (("needs_human", "agree", "agree"), HUMAN),  # a standing escalation wins
-        # The disposition rules' own row: "a `declined` abstention is inert, never a
-        # dissent: 3 seats, 2 `agree` + 1 `declined` → `agreed`". A declined
-        # record is a current stance.
+        # `declined` is inert, never a dissent: 2 `agree` + 1 `declined` → `agreed`.
         (("agree", "agree", "declined"), AGREED),
         (("declined", "declined", "declined"), UNHEARD),
         ((None, None, None), UNSEEN),
@@ -108,8 +106,7 @@ def test_every_open_item_yields_exactly_one_state():
 
 
 def test_no_open_item_derives_short_a_stance_except_unseen():
-    """The invariant in the other direction: with a seat holding no current stance and nothing escalated or
-    disputed, the only state reachable is `unseen`; once every seat has one, `unseen` is unreachable."""
+    """`unseen` needs a seat with no current stance; once all three have one, it is unreachable."""
     docket = docket_with(3)
     stance(docket, "F1", "Agent1", AGREE)
     stance(docket, "F1", "Agent2", ABSTAIN)
@@ -126,8 +123,7 @@ def test_a_declined_record_is_inert_in_every_count():
     docket.stances["F1"]["Agent3"] = Stance(stance=DISAGREE, note="ignored", declined=True)
     assert dispositions.support(docket, "F1") == before
     assert dispositions.objections(docket, "F1") == []
-    # The disposition rules' boundary row, verbatim: 3 seats, 2 `agree` + 1 `declined` → `agreed`. Inert
-    # means it neither dissents nor withholds a stance, so it cannot hold the item open.
+    # Inert means it neither dissents nor withholds a stance, so it cannot hold the item open.
     assert dispositions.derive(docket, "F1") == AGREED
     docket.stances["F1"]["Agent3"] = Stance(stance=AGREE, round=1)
     assert dispositions.derive(docket, "F1") == AGREED
@@ -409,8 +405,7 @@ def test_withdraw_retire_and_demote_never_leave_an_item_human():
             # The asker sent a real stance on the way out, so that stance counts.
             assert docket.effective_stance("F1", "Agent1") == AGREE
         else:
-            # A retired or demoted ask is abstain-equivalent: it neither blocks
-            # nor objects, and it is not counted as a stance for the bar either.
+            # A retired or demoted ask is abstain-equivalent: it neither blocks nor objects.
             assert docket.effective_stance("F1", "Agent1") == ABSTAIN, end
             assert dispositions.support(docket, "F1") == 2, end
         assert not docket.standing_escalations("F1"), end

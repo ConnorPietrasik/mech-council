@@ -397,12 +397,12 @@ def test_a_re_ask_withdraws_its_own_candidates_and_leaves_a_co_askers():
     escalations.raise_question(docket, text="which cache?", asker="Agent2", item_id="F1", blocking=True, round_=1, options=["in-process"])
     assert question.options == ["redis", "postgres", "in-process"]
 
-    # Agent1 re-asks with one candidate withdrawn and one added; Agent2 never re-asked, so it still stands behind its own.
+    # Agent1 re-asks with one candidate out and one in; Agent2 never re-asked, so its own stands.
     escalations.raise_question(
         docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=2, options=["redis", "memcached"]
     )
     assert question.options == ["redis", "in-process", "memcached"], "postgres is withdrawn, in-process stands, redis keeps 1"
 
-    # A re-ask offering nothing replaces nothing: a menu the human is reading must not vanish because the model went terse.
+    # A re-ask offering nothing replaces nothing: a menu the human is reading must not vanish.
     escalations.raise_question(docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=3)
     assert question.options == ["redis", "in-process", "memcached"]

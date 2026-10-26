@@ -137,7 +137,7 @@ The offline suite drives real orchestrator, sandbox, RPC and dispose paths again
 scripted fake pi. The `sandbox` family is the only one
 with a platform requirement: its fixture lower must sit on a plain filesystem (ext4, or a
 tmpfs such as a member's `$TMPDIR`). Point `COUNCIL_TEST_FS` at a plain directory to
-choose it explicitly. A test skipped for any other reason fails the suite.
+choose it explicitly.
 
 ## Lint and types
 

@@ -113,9 +113,6 @@ def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
     for question in asked:
         for field_name in ("id", "askers", "raised_round", "question", "effective", "state", "answer", "recommendation", "markers"):
             assert field_name in question, f"{question['id']} is missing {field_name}"
-        # The questions records print `item` and `question` for what the docket calls `item_id` and `text` — the same two
-        # renames the `escalations` records make over their own fields.  A record carrying the docket's names instead is how
-        # a consumer reads the wrong field.
         assert not {"item_id", "text"} & set(question), f"{question['id']} carries the docket's field names, not the wire's"
     assert asked[0]["item"] is None, "a phase-0 open question is item-less"
 

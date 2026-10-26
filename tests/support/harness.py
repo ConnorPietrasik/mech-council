@@ -60,8 +60,7 @@ class ScriptPort:
     # -- the chair lane ---------------------------------------------------------
 
     async def chair_merge(self, listing: str, *, round_: int) -> dict:
-        # The real Port runs the same extractor the chair's reply goes through, so the
-        # harness must too: a scripted plan is JSON text first, parsed data second.
+        # The real Port runs this same extractor, so the harness must too: a scripted plan is JSON text first.
         self.asks.append(Ask("chair", "merge", round_, "merge", listing))
         from council.extraction import parse_merge_plan
 

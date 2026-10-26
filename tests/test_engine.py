@@ -469,8 +469,7 @@ def test_an_open_question_never_blocks_consent_but_is_asked_at_the_terminal_chec
     assert outcome == "consensus", "an item-less question is never effective-blocking"
     terminal = [c for c in port.checkpoints if c["terminal"]]
     assert terminal, "the checkpoint runs before the termination check"
-    # The human checkpoint's ask set is every unsettled question the asker still holds, deferred included; the terminal
-    # checkpoint waits for all of it. Consensus still arrives because being asked is not the same as being effective-blocking.
+    # The terminal checkpoint waits for every unsettled question, deferred included; being asked is not being effective-blocking.
     assert terminal[-1]["listing"] == ["H1"]
     assert terminal[-1]["ask_set"] == ["H1"]
     assert terminal[-1]["waiting"] is True
@@ -757,7 +756,7 @@ def test_a_refused_merge_plan_leaves_the_docket_unmerged_and_the_run_going():
         if ask.phase == "phase0":
             return phase0_first(ask.who, "the token cache is wrong", "the cache token is wrong")
         if ask.kind == "merge":
-            # The engine's structural check for a merge plan — a pass both modes run: one ID reused across groups refuses the whole plan.
+            # The structural merge check both modes run: one ID reused across groups refuses the whole plan.
             return payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}, {"canonical": "F2", "duplicates": ["F3"]}])
         return stance_all(ask, "agree")
 
@@ -936,7 +935,6 @@ def test_a_defense_that_concedes_withdraws_and_is_never_reported_undefended():
     escalation = built.docket.escalations[("F1", "Agent1")]
     events = [r["event"] for r in records]
     assert escalation.state == WITHDRAWN
-    assert escalation.state != DEMOTED, "a seat that changed its mind was not demoted"
     assert not escalation.undefended
     assert "escalation_demoted" not in events
 

@@ -17,15 +17,13 @@ from council.pi_rpc import PiRpc
 from council.process import lifecycle
 from council.process.lifecycle import SweepResult, send, survivor_line, sweep
 from council.process.spawn import Member
-
-from .test_sandbox import in_mapped_child
+from tests.support.namespaces import in_mapped_child
 
 pytestmark = [pytest.mark.timeout(180)]
 
 FAKE_PI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "support", "fake_pi.py")
 
-#: A detached tool shell in its own session, ignoring TERM: the hardest survivor
-#: this file can produce, and the reason a group kill is not sufficient.
+#: The hardest survivor this file can produce, and the reason a group kill is not sufficient.
 STRAY = """\
 import os, signal, sys, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -143,8 +141,7 @@ def test_a_member_ignoring_term_escalates_to_kill_and_still_goes(tmp_path):
 
     async def scenario():
         member = await live_member(tmp_path)
-        # Hand the member's bookkeeping to the stubborn child: same dispose path,
-        # and the only process that ends up signalled is the one this test started.
+        # Point the member's bookkeeping at the stubborn child: only this test's own process is signalled.
         member.rpc = cast(PiRpc, _QuietRpc(stubborn.stdin))
         member.pgid = os.getpgid(stubborn.pid)
         real_proc, member.proc = member.proc, cast(asyncio.subprocess.Process, _Pollable(stubborn))
@@ -186,8 +183,7 @@ class _QuietRpc:
         self._stdin = stdin
 
     async def close_stdin(self) -> None:
-        # A `Popen` pipe is a BufferedWriter: it closes and it is done — there is no `wait_closed`
-        # to await, and swallowing that mistake here would hide the very step this test is about.
+        # A `Popen` pipe is a BufferedWriter: it closes and it is done, with no `wait_closed` to await.
         if self._stdin is not None and not self._stdin.closed:
             self._stdin.close()
 
@@ -228,8 +224,8 @@ def test_the_sweep_kills_what_lives_in_the_namespace_it_holds(tmp_path):
         inode = _os.fstat(fd).st_ino
         result = sweep({inode}, keep_fds=[fd])
         _os.close(fd)
-        # SIGKILL is asynchronous: the sweep reports the kill it *sent*, and the proof it landed is that the pid stops
-        # existing.  Reaping matters too — inside this namespace the stray is our own child, so it would linger as a zombie forever.
+        # SIGKILL is asynchronous: the sweep reports the kill it *sent*; the proof is the pid going away.
+        # Reap too — inside this namespace the stray is our own child.
         deadline = _time.monotonic() + 10
         while _time.monotonic() < deadline:
             try:
@@ -292,8 +288,7 @@ def test_the_sweep_set_is_every_held_namespace_plus_the_orchestrators_own():
     fd = os.open("/proc/self/ns/mnt", os.O_RDONLY)
     own = os.fstat(fd).st_ino
     try:
-        # `namespace_set` reads the namespace record and nothing else, so this member is bookkeeping
-        # only: no child and no session, which is what the two casts say rather than what it pretends.
+        # `namespace_set` reads the namespace record and nothing else: this member is bookkeeping only.
         member = Member(
             file_base="chair",
             id=None,
