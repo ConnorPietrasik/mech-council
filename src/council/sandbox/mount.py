@@ -1,8 +1,4 @@
-"""The design's only `ctypes` module: `mount(2)`, `umount2(2)`, `unshare(2)`, `prctl(2)`.
-
-Python exposes no mount call, so it arrives here and nowhere else.  Every failure raises
-`MountError` naming the syscall and the `errno`: one line, never a traceback, never a fallback.
-"""
+"""Python exposes no `mount(2)`/`unshare(2)` binding, so this is the design's only `ctypes` module."""
 
 from __future__ import annotations
 
@@ -14,18 +10,12 @@ CLONE_NEWUSER = 0x10000000
 CLONE_NEWNS = 0x00020000
 
 MS_RDONLY = 1
-MS_NOSUID = 2
-MS_NODEV = 4
-MS_NOEXEC = 8
 MS_REC = 1 << 14
 MS_PRIVATE = 1 << 18
-MS_SHARED = 1 << 19
 MS_BIND = 1 << 12
 
-MNT_DETACH = 2
 
 PR_SET_DUMPABLE = 4
-PR_GET_DUMPABLE = 3
 
 #: The mask tmpfs size, for every mask the member's namespace gets: a constant, never a knob.
 MASK_MIB = 1
@@ -35,8 +25,6 @@ WATCHDOG_PASS_TIMEOUT_S = 120
 
 
 class MountError(OSError):
-    """A failed syscall, named, with its errno — the whole of the sandbox's failure contract."""
-
     def __init__(self, syscall: str, err: int) -> None:
         super().__init__(err, f"{syscall}: {os.strerror(err)}")
         self.syscall = syscall
@@ -58,7 +46,6 @@ def _last_error() -> int:
 
 
 def mount(source: str | None, target: str, fstype: str | None = None, flags: int = 0, data: str | None = None) -> None:
-    """`mount(2)`, or `MountError` naming it."""
     result = _libc.mount(
         source.encode() if source is not None else None,
         target.encode(),
@@ -80,19 +67,14 @@ def tmpfs(target: str, *, size_mib: int, read_only: bool = False) -> None:
 
 
 def overlay(lower: str, root: str, view: str) -> None:
-    """One member's pair: `up/`, `work/`, `view/` under `root`, overlaying `lower`."""
     for name in ("up", "work", "view"):
         os.makedirs(os.path.join(root, name), exist_ok=True)
     mount("overlay", view, "overlay", 0, f"lowerdir={lower},upperdir={root}/up,workdir={root}/work")
 
 
 def private_recursive(target: str = "/") -> None:
-    """Unconditional: no mount of ours may propagate back to the host."""
+    """No mount of ours may propagate back to the host."""
     mount(None, target, None, MS_REC | MS_PRIVATE)
-
-
-def shared_recursive(target: str) -> None:
-    mount(None, target, None, MS_REC | MS_SHARED)
 
 
 def umount2(target: str, flags: int = 0) -> None:
@@ -101,7 +83,6 @@ def umount2(target: str, flags: int = 0) -> None:
 
 
 def unshare(flags: int) -> None:
-    """`os.unshare` where it exists, `libc.unshare` where the flags are unusual."""
     try:
         os.unshare(flags)
         return
@@ -123,27 +104,5 @@ def set_not_dumpable() -> None:
     prctl(PR_SET_DUMPABLE, 0)
 
 
-def is_dumpable() -> bool:
-    return prctl(PR_GET_DUMPABLE, 0) == 1
-
-
 def namespace_id(path: str = "/proc/self/ns/mnt") -> int:
-    """The inode number that identifies a mount namespace — the id the launcher reports for itself before it execs."""
     return os.stat(path).st_ino
-
-
-def propagation_tags(prefix: str) -> list[str]:
-    """`shared:`/`master:` tags on this namespace's own sandbox mounts."""
-    bad = []
-    with open("/proc/self/mountinfo", encoding="utf-8") as handle:
-        for line in handle:
-            fields, sep, rest = line.strip().partition(" - ")
-            if not sep:
-                continue
-            mount_point = rest.split(" ")[0]
-            tags = [
-                field for field in fields.split() if ":" in field and not field[0].isdigit() and field.split(":")[0] in ("shared", "master")
-            ]
-            if tags and (mount_point == prefix or mount_point.startswith(prefix + "/")):
-                bad.append(f"{mount_point}: {','.join(tags)}")
-    return bad

@@ -1,11 +1,3 @@
-"""The orchestrator's body: the loop owner, inside the run's own namespaces.
-
-Once the sandbox is mounted, everything happens here, in the namespace the supervisor mapped: the run
-directory's artifacts, the members, the loop, the dispose, the sweep, the journal, the report.  The
-order below is the order the exit-code table needs, because **every** path out of this function owes the
-same five things: dispose, the sweep, a finalized `run.json`, a written report, and a flushed stdout.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +31,6 @@ RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
 
 
 async def orchestrate(launch, sandbox) -> int:
-    """Run one council to its outcome and return the process exit code."""
     council = launch.council
     run_dir, runs_dir = launch.run_dir, launch.runs_dir
     console = Console(run_dir=run_dir)
@@ -102,15 +93,10 @@ async def orchestrate(launch, sandbox) -> int:
         aborted, outcome = str(failure), "aborted"
         console.say(aborted)
         console.event("run_aborted", reason=aborted)
-    except _SetupFailure as failure:
-        aborted, outcome = str(failure), "aborted"
-        console.say(aborted)
     except Exception as failure:  # a bug ends the run too
         aborted = f"internal error: {type(failure).__name__}: {failure}"
         outcome = "aborted"
         console.say(aborted)
-        # "nothing may swallow an internal error". The console line is for the
-        # terminal; the frames belong in events.jsonl, where they survive the scrollback.
         console.event(
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
@@ -125,7 +111,6 @@ async def orchestrate(launch, sandbox) -> int:
         )
         _owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
         if lanes is not None:
-            # "exactly one prompt each" is asserted from run.json, not from a log.
             _owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
         _owed(
             console,
@@ -141,7 +126,6 @@ async def orchestrate(launch, sandbox) -> int:
             **({"aborted_reason": aborted} if aborted else {}),
         )
         _owed(console, "the transcripts", transcripts.close)
-        # "every run ends by printing what it wrote" — including when it wrote none.
         _owed(console, "the transcript tally", console.say, f"transcripts: {transcripts.tally()}")
         if signalled:
             console.say(f"exiting on signal {signalled[0]}")
@@ -153,10 +137,7 @@ async def orchestrate(launch, sandbox) -> int:
 
 
 def _owed(console: Console, what: str, call, *args, **kw):
-    """Run one owed exit-path step; a failure is a console line and an event, not a gap.
-
-    Returns the call's value, or None when it failed, so a caller falls back to whatever it can still do without it.
-    """
+    """One owed exit-path step, whose failure is a console line and an event rather than a gap: the caller falls back on None."""
     try:
         return call(*args, **kw)
     except Exception as failure:  # nothing may swallow this
@@ -166,16 +147,11 @@ def _owed(console: Console, what: str, call, *args, **kw):
         return None
 
 
-class _SetupFailure(Exception):
-    """A member could not be spawned at all; the unusable-seat rule owns the wording."""
-
-
 def _file_bases(council: Council) -> list[str]:
     return [spec.file_base for spec in council.agents] + [council.chair.file_base]
 
 
 async def _deliberate(council: Council, members: Members, console: Console, stop: asyncio.Event, lanes: Lanes):
-    """Wire the loop to the lanes and run it — one loop, one owner."""
     from .humanio import LineReader
 
     roster = council.seat_ids
@@ -250,7 +226,6 @@ def _explainer(lanes: Lanes, council: Council, docket: Docket):
 
 
 def _emitter(console: Console, names: dict[str, str]):
-    """Every state change is one console line **and** one `events.jsonl` record."""
 
     def emit(name: str, **fields) -> None:
         fields = {key: value for key, value in fields.items() if not callable(value)}
@@ -308,7 +283,6 @@ async def _teardown(members: Members | None, console: Console):
 
 
 def _journal(council: Council, sandbox, baselines: dict, console: Console) -> list[dict]:
-    """The write journal, read where every upper layer is visible: the orchestrator."""
     if not baselines:
         return []
     out = []
@@ -335,17 +309,11 @@ def _journal(council: Council, sandbox, baselines: dict, console: Console) -> li
 def _report(
     council: Council, docket, console: Console, run_dir: str, outcome: str, rounds: int, journal: list[dict], manifest, aborted: str
 ) -> str:
-    """Renderers are pure over (state, context); this builds the context.
-
-    A renderer that raises on some docket shape must not cost the operator the report too: the fallback says what
-    happened, because every exit owes a report and a run whose report is missing explains nothing about itself.
-    """
     from .render import report_plan, report_review
 
     try:
         if docket is not None:
-            # The review report's two sandbox markers are earned from the write journal, here
-            # and nowhere else: the renderers stay pure and the docket carries the fact.
+            # The review report's sandbox markers are earned from the write journal: see `journal.mark_sandbox_items`.
             from .sandbox.journal import mark_sandbox_items
 
             mark_sandbox_items(docket, journal, project=council.project)
@@ -426,7 +394,6 @@ def _report_context(
 
 
 def _write_human_input(run_dir: str, docket, console: Console) -> None:
-    """`human_input.json`: every request, answer, skip and the retirements caused."""
     if docket is None:
         return
     record = {
@@ -479,7 +446,6 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
 
 
 def _print_report(path: str) -> None:
-    """The report is printed to stdout at exit: verbatim, after a blank line, so a terminal pager sees a document."""
     try:
         with open(path, encoding="utf-8") as handle:
             sys.stdout.write("\n" + handle.read())

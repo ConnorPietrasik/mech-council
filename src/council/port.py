@@ -1,9 +1,3 @@
-"""The seam that keeps deliberation I/O-free: the engine's `AskPort`, over the two lanes, the chair and the reader.
-
-The loop asks; this translates.  Nothing deliberates here — it is the one place the pure state and the live processes meet,
-which is what lets the deliberation units test the whole protocol against a fake port with no pi, no sandbox and no tokens.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,8 +14,6 @@ from .prompts.brief import Brief
 
 @dataclass
 class Port:
-    """The engine's port.  A member-level failure is **reported**, never raised past it."""
-
     council: Council
     lanes: Lanes
     chair: Chair
@@ -82,5 +74,4 @@ class Port:
 
 
 def _raw(outcome) -> RawAsk:
-    """An ask outcome in the shape the loop reads.  `rejected` is lenient extraction, never restart-and-re-ask."""
     return RawAsk(text=outcome.text, failure=getattr(outcome, "failure", None), rejected=bool(outcome.rejected))

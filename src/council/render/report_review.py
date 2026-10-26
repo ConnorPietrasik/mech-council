@@ -1,5 +1,3 @@
-"""`report.md`.  A pure function of (state, context), and so byte-for-byte reproducible."""
-
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
@@ -28,8 +26,6 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
 
 
 def _bucket(docket: Docket) -> dict[str, list[Item]]:
-    """Where each item prints.  A reopened item that never re-closed is its own bucket,
-    so it is never silently under either the consensus or the rejection section."""
     out: dict[str, list[Item]] = {"agreed": [], "unheard": [], "disputed": [], "rejected": [], "unseen": [], "human": [], "reopened": []}
     for item in docket.items.values():
         if item.closed:
@@ -186,7 +182,6 @@ def _never_vetted(docket: Docket, items: list[Item], context: ReportContext) -> 
 
 
 def _sandbox_limits(docket: Docket) -> list[str]:
-    """An item whose evidence *is* an overlay refusal, never as consensus proof."""
     hit = [item for item in docket.items.values() if "sandbox_limit" in item.markers]
     out = ["## Sandbox limits", ""]
     if not hit:

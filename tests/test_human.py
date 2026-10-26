@@ -1,9 +1,4 @@
-"""The checkpoint: what prints, what waits, and what a line means.
-
-The human checkpoint's are load-bearing and easy to get subtly wrong: the listing always
-prints, only the ask set waits, a deferred question never holds the run, `explain` is advice
-and never authority, and EOF declines everything rather than parking the run forever.
-"""
+"""The checkpoint: what prints, what waits, and what a line means."""
 
 from __future__ import annotations
 
@@ -59,10 +54,7 @@ def test_a_bare_line_answers_the_first_open_question_rather_than_being_dropped()
 
 @pytest.mark.parametrize("text", ["skip the cache one", "skip H1 and H2", "skip all H1", "none of the above", "explain H1 why?"])
 def test_a_line_that_opened_like_a_command_gets_the_grammar_and_is_never_an_answer(text):
-    """A near miss must not be recorded as an authoritative answer to whichever question is open first.
-
-    An answer buys a round, retires escalations and can end the run; a line that is told the grammar costs one retype.
-    """
+    """A near miss must not be recorded as an authoritative answer to whichever question is open first."""
     line = parse_line(text)
     assert line.kind == "error" and "`skip H1` declines one" in line.text
 
@@ -75,7 +67,6 @@ def test_an_answer_containing_a_colon_is_still_one_answer():
 
 
 def offered(docket, *options, text="which tenant?", **kw):
-    """One question with an offered menu, which is what the brief now asks a seat for."""
     question = escalations.raise_question(docket, text=text, asker="Agent1", item_id="F1", blocking=True, round_=1, options=list(options))[
         0
     ]
@@ -112,11 +103,7 @@ def test_a_number_off_the_end_of_the_menu_is_an_answer_of_its_own():
 
 
 def test_a_number_with_any_word_after_it_stays_the_human_s_own_words():
-    """The number **alone** is the only selection there is.
-
-    A note syntax would have to decide what `1, only for new installs` or `1-2 weeks` was meant to mean, and that
-    decision would then be the authoritative answer.  So anything but digits alone stays the human's own words.
-    """
+    """The number **alone** is the only selection there is."""
     docket = build()
     question = offered(docket, "key it on the tenant", "drop the cache")
     cp, _console, _reader = make_checkpoint(docket, lines=["H1: 1, only for new installs"])
@@ -255,14 +242,7 @@ def test_skip_can_decline_several_named_questions_at_once():
 
 
 def test_answering_a_question_after_declining_it_takes_it_back():
-    """The last line about a question is the human's word on it, and one question gets exactly one of them.
-
-    `skip H1` stopped ending the checkpoint, so a human who changes their mind can answer a question they just declined.
-    Refusing that would strand the question: a decline is final for the run, so the council would keep deliberating
-    around an item the human was willing to settle two lines later.  What the checkpoint may not do is put one question
-    in `answers` *and* `skipped` — the engine applies answers first and skips after, so that pair leaves a question the
-    report lists as unanswered holding an answer that retired its escalation and bought the round.
-    """
+    """The last line about a question is the human's word on it, and one question gets exactly one of them."""
     docket = build()
     listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
     cp, console, reader = make_checkpoint(docket, lines=["skip H1", "H1: keep it", "H2: later"])
@@ -298,11 +278,7 @@ def test_answering_a_question_this_checkpoint_does_not_hold_is_corrected():
 
 
 def test_a_second_answer_to_the_same_question_wins_and_drops_the_option_it_took():
-    """The last line the human types about their own answer is their answer — and `answer_option` names only that line.
-
-    `H1: 2` then `H1: keep it manually` would otherwise pair the prose with the number of the option the **first** line
-    chose, and `human_input.json` would swear an answer in the human's own words came off the menu.
-    """
+    """The last line the human types about their own answer is their answer — and `answer_option` names only that line."""
     docket = build()
     listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
     question = offered(docket, "key it on the tenant", "drop the cache", text="a?")
@@ -406,3 +382,27 @@ def test_explain_without_a_channel_says_so_and_keeps_waiting():
     cp, _console, _reader = make_checkpoint(docket, lines=["explain H1", ""])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert not outcome.recommendations and not outcome.answers
+
+
+# --------------------------------------------------------------------------- the menu's provenance
+
+
+def test_a_re_ask_withdraws_its_own_candidates_and_leaves_a_co_askers():
+    """Each asker owns only its own slice of the menu, and a candidate the human read keeps its number."""
+    docket = build()
+    item(docket, "F1")
+    question, _ = escalations.raise_question(
+        docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=1, options=["redis", "postgres"]
+    )
+    escalations.raise_question(docket, text="which cache?", asker="Agent2", item_id="F1", blocking=True, round_=1, options=["in-process"])
+    assert question.options == ["redis", "postgres", "in-process"]
+
+    # Agent1 re-asks with one candidate withdrawn and one added; Agent2 never re-asked, so it still stands behind its own.
+    escalations.raise_question(
+        docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=2, options=["redis", "memcached"]
+    )
+    assert question.options == ["redis", "in-process", "memcached"], "postgres is withdrawn, in-process stands, redis keeps 1"
+
+    # A re-ask offering nothing replaces nothing: a menu the human is reading must not vanish because the model went terse.
+    escalations.raise_question(docket, text="which cache?", asker="Agent1", item_id="F1", blocking=True, round_=3)
+    assert question.options == ["redis", "in-process", "memcached"]

@@ -1,10 +1,3 @@
-"""The one boundary where pi's dialect is spoken.
-
-Framing, id correlation and the command set live here and nowhere else, so a protocol change is
-a one-file fix.  Nothing in this module matches sandbox text (the sandbox inference is handed to
-an injected callback) and nothing renames pi's names into ours: this is the only rename site.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,24 +7,19 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-#: pi's RPC command set, and only these.
-COMMANDS = ("prompt", "abort", "clear_queue", "get_state")
-
 ABORT_TIMEOUT_S: float = 30  # the abort response's own bound, never a knob
 
 
 class ProtocolError(Exception):
-    """A child that does not speak the protocol we send.  Hard error: no result, exit 1."""
+    pass
 
 
 class ChildGone(ProtocolError):
-    """The child's stdout closed: nothing more will be said."""
+    pass
 
 
 @dataclass
 class Activity:
-    """What the watchdog needs about an in-flight ask (the chair's digest inputs)."""
-
     started: float
     last_event: float
     events: int = 0
@@ -45,8 +33,6 @@ class Activity:
 
 @dataclass
 class Answer:
-    """One ask's outcome: text, and the two fields the unusable-seat test reads."""
-
     text: str = ""
     stop_reason: str = ""
     error_message: str = ""
@@ -62,7 +48,7 @@ class Answer:
 
 
 class PiRpc:
-    """One long-lived `pi --mode rpc` child, read continuously — which is what keeps backpressure honest."""
+    """One long-lived `pi --mode rpc` child, read continuously: a pipe nobody drains fills, and pi stops mid-message."""
 
     def __init__(
         self,
@@ -102,11 +88,6 @@ class PiRpc:
                 await self._reader_task
 
     async def _pump(self) -> None:
-        """Raw chunk reads split on `b"\\n"` only.
-
-        `str.splitlines()` would break on U+0085/U+2028/U+2029 — all legal inside a JSON string — and asyncio's line limit would
-        raise a plain `ValueError` and clear the buffer on a multi-megabyte record.  There is no line-size cap here at all.
-        """
         buffer = b""
         try:
             while True:
@@ -227,14 +208,13 @@ class PiRpc:
         self._pending.clear()
         if self._ask is not None and not self._ask.done():
             self._ask.set_exception(error)
-            # The waiting `ask()` learns of the death from its own command future, so this one is left unawaited by
-            # design.  An exception nobody retrieves is reported by asyncio when the loop closes — noise that reads
-            # like a swallowed bug, so it is marked seen here while still carrying the error for any other awaiter.
+            # The waiting `ask()` learns of the death from its own command future, so this one is unawaited by design —
+            # mark it seen for the same reason as above.
             self._ask.exception()
         self._ask = None
 
     def _cancel_dialog(self, record: dict) -> None:
-        """A project extension's dialog must never wedge the run: cancel it and move on."""
+        """A project extension's dialog must not wedge the run: cancel it and move on."""
         method = record.get("method")
         if method in ("notify", "setStatus", "setWidget", "setTitle", "set_editor_text"):
             return
@@ -270,17 +250,9 @@ class PiRpc:
     # -- the commands -----------------------------------------------------
 
     async def get_state(self) -> dict:
-        """Every child's first RPC call — the real spawn *is* the probe: it proves the child speaks JSONL."""
         return await self._request({"type": "get_state"}, timeout=60)
 
     async def ask(self, message: str, *, timeout: float | None = None) -> Answer:
-        """Prompt and wait for `agent_settled` — never merely `agent_end`.
-
-        The read pump is already subscribed from `start()`, so a fast completion cannot be missed: that is how
-        "subscribe before prompt" holds here.  It also means a quick member can settle *while this coroutine is
-        still parked on the prompt's own "ok*" response — one event-loop turn serves both — so the answer is
-        held in a local: the settle handler owns `self._answer`, and this one must not reach for it afterwards.
-        """
         if self._ask is not None:
             raise ProtocolError(f"{self.label}: asked while an ask is in flight")
         loop = asyncio.get_running_loop()
@@ -313,18 +285,12 @@ class PiRpc:
             raise
 
     def _release(self, answer: Answer, settled: asyncio.Future) -> None:
-        """Drop the in-flight ask, but only if it is still this one."""
         if self._answer is answer:
             self._answer = None
         if self._ask is settled:
             self._ask = None
 
     async def abort(self) -> bool:
-        """`clear_queue` first, then `abort`; the response *is* the synchronization point.
-
-        Waiting additionally for `agent_settled` risks burning the grace period and then tree-killing a child that had stopped
-        cleanly — and the abort request needs **its own** bounded timeout, because an abort to a wedged child never returns.
-        """
         ok = True
         try:
             async with asyncio.timeout(ABORT_TIMEOUT_S):
@@ -336,7 +302,6 @@ class PiRpc:
         return ok
 
     async def close_stdin(self) -> None:
-        """An orderly shutdown starts here — pi disposes its runtime, and that dispose aborts every in-flight tool call."""
         with contextlib.suppress(Exception):
             if self._in.can_write_eof():
                 self._in.write_eof()

@@ -1,10 +1,5 @@
-"""The sandbox family's ground rule, in one place: where fixtures may be built, and when it must say
-it cannot run rather than pass on a filesystem that cannot hold the layers the sandbox mounts.
-
-`COUNCIL_TEST_FS` names plain ground when the operator knows where it is.  `$TMPDIR` is right inside a council
-member — there it is that member's own scratch — and wrong outside one when `/tmp` is a container root's
-overlay, which is the common case.  The checkout's own filesystem is the last resort.  The family then
-decides honestly from the fstype instead of mounting one layer on an overlay and calling the result green.
+"""The sandbox family's ground rule, in one place: where fixtures may be built, and when it must say it cannot run rather than
+pass on a filesystem that cannot hold the layers the sandbox mounts.
 """
 
 from __future__ import annotations
@@ -18,11 +13,7 @@ FIXTURE_ROOT = os.path.realpath(os.environ.get("COUNCIL_TEST_FS") or os.environ.
 
 
 def fstype_under(path: str) -> str:
-    """The fstype of the deepest mountinfo prefix of `path`.
-
-    mountinfo reads `… mount_point opts - fstype source superopts`, so the fstype
-    is *after* the separator; reading the wrong half disables the skip in silence.
-    """
+    """The fstype of the deepest mountinfo prefix of `path`."""
     best, fstype = "", "unknown"
     try:
         with open("/proc/self/mountinfo", encoding="utf-8") as handle:

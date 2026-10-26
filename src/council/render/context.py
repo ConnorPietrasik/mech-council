@@ -1,9 +1,3 @@
-"""The injected facts a report prints that are not deliberation state.
-
-`date`, paths and the sandbox/journal numbers arrive here from `run.json`, so a renderer
-is a pure function of (state, context), and so its output is byte-for-byte reproducible.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -60,8 +54,6 @@ class ReportContext:
         ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
 
     def roster_table(self, *, extra: str = "") -> list[str]:
-        """The `abstain`/`declined` distinction belongs to the docket, not here; this table
-        carries the model column, whose label is the config's string or pi's default."""
         noun = "plans" if self.mode == "plan" else "findings"
         title = f"| ID | name | model | phase-0 {noun}" + (f" | {extra} |" if extra else " |")
         head = [title, "|---|---|---|" + "---|" * (1 + (1 if extra else 0))]
@@ -76,8 +68,6 @@ class ReportContext:
         return head
 
     def artifacts(self, run_dir: str) -> list[str]:
-        """No artifact that does not exist.  `agents/` is lazy, and with
-        transcripts off there are no transcripts to name — only the stderr sink."""
         lines = [
             "## Artifacts",
             "",
@@ -98,7 +88,6 @@ class ReportContext:
 
 
 def minimal_report(*, reason: str, context: ReportContext) -> str:
-    """The minimal report an aborted run writes, naming what went wrong."""
     lines = context.header("Council run: no result") + ["", "# Why nothing ran", "", reason, ""]
     if context.roster or context.chair_model:
         lines += ["The council it convened:", ""] + context.roster_table() + [""]

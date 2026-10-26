@@ -1,5 +1,3 @@
-"""The plan adapter: data only."""
-
 from __future__ import annotations
 
 from .base import BaseAdapter, register

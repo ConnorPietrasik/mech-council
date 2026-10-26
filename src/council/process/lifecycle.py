@@ -1,8 +1,5 @@
-"""The dispose path and the namespace-scoped sweep; the exit mechanics every exit path owes.
-
-Testable without pi: every function here takes a pid/pgid/namespace, not a model. Two classes of
-descendant escape every group kill — a tool shell whose pi never ran its cleanup, and any descendant
-that `setsid`s — and the sweep is what catches them, by mount namespace rather than by process tree.
+"""Two classes of descendant escape every group kill — a tool shell pi never cleaned up, and any descendant that called
+setsid() and moved to a new pgid.  That is what the namespace-scoped sweep at the end of teardown is for.
 """
 
 from __future__ import annotations
@@ -22,8 +19,6 @@ STDIN_CLOSE_GRACE_S = 3.0
 
 @dataclass
 class SweepResult:
-    """`run.json`'s `survivor_pids`/`survivor_ns`: the sweep's whole honest report."""
-
     pids: list[int] = field(default_factory=list)
     namespaces: list[int] = field(default_factory=list)
 
@@ -33,7 +28,6 @@ class SweepResult:
 
 
 def send(pgid: int, sig: int, *, own_pgid: int) -> bool:
-    """Absolute guards: never below 2, never our own group, never a failed lookup."""
     if pgid < 2 or pgid == own_pgid:
         return False
     try:
@@ -44,10 +38,8 @@ def send(pgid: int, sig: int, *, own_pgid: int) -> bool:
 
 
 async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
-    """Close stdin → group SIGTERM → group SIGKILL.  Signals are the escalation, not the move.
-
-    pi spawns every tool shell detached in its own group, so our `killpg` never reaches a tool shell and pi's own shutdown
-    must: closing stdin is what starts that shutdown, and it is why SIGKILL-first is the bug that leaves tool shells running.
+    """Close stdin → group SIGTERM → group SIGKILL.  Closing stdin is what starts pi's own shutdown, the only thing that
+    reaches a tool shell pi detached into its own process group; SIGKILL-first is the bug that leaves them running.
     """
     own_pgid = own_pgid if own_pgid is not None else os.getpgid(0)
     with contextlib.suppress(Exception):
@@ -73,11 +65,6 @@ async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
 
 
 def namespace_set(members: list[Member], *, own_namespace: int) -> set[int]:
-    """The orchestrator's own namespace plus every one whose fd is still held.
-
-    Holding the reference is what makes the key sound: a namespace we hold cannot be freed, so no unrelated
-    namespace can have taken its inode number — membership really does mean "ours", with no depth or pid cap.
-    """
     out = {own_namespace}
     for member in members:
         out.update(member.ns_records)
@@ -85,15 +72,9 @@ def namespace_set(members: list[Member], *, own_namespace: int) -> set[int]:
 
 
 def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None = None) -> SweepResult:
-    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created.
-
-    Where `/proc` is absent the sweep is unavailable and says so by returning nothing.
-
-    The comparison is against `keep_fds` — the descriptors this run opened on its own namespaces — and not against the
-    numbers read back from `/proc`. Reading `/proc/<pid>/ns/mnt` from *outside* the namespace in question reports
-    the reader's own namespace: measured here, a parent scanning a mapped child's entry sees the parent's inode, so a
-    set of *reported* ids matches nothing and the sweep reports "no survivors" over a member that is still running.  `fstat`
-    on a held fd is the namespace the run actually owns, which is also why the fd is held until after this.
+    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created; where `/proc` is absent, nobody.  The comparison is
+    against `keep_fds`, never numbers read back from `/proc`: from outside a namespace the readback can print the right
+    inode for a namespace that is not the run's.
     """
     result = SweepResult()
     exclude = (exclude or set()) | {os.getpid()}
@@ -132,10 +113,6 @@ def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None
 
 
 def survivor_line(result: SweepResult) -> str:
-    """The sweep's own line, built from `run.json`'s two fields and nothing else: name the *scope* that died.
-
-    "killed 3 processes" hides the only fact that matters — whether they were ours.
-    """
     if result.empty:
         return "no survivors: every namespace this run created is empty"
     joined = ", ".join(f"ns {ns}" for ns in sorted(result.namespaces))
@@ -143,14 +120,13 @@ def survivor_line(result: SweepResult) -> str:
 
 
 def close_ns_fds(members: list[Member]) -> None:
-    """Closed after the sweep, at the very end of teardown — never before."""
+    """After the sweep: the held fd is the last handle on the run's namespaces once every member is gone."""
     for member in members:
         with contextlib.suppress(OSError):
             os.close(member.ns_fd)
 
 
 async def dispose_all(members: list[Member], *, own_namespace: int, on_line=None, budget: float = DISPOSE_SWEEP_AFTER_S) -> SweepResult:
-    """Dispose every member, then sweep the namespaces for whatever escaped the group kill."""
     own_pgid = os.getpgid(0)
     try:
         async with asyncio.timeout(budget):

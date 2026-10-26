@@ -5,9 +5,14 @@ The fake is deliberately dumb — canned JSON keyed on the prompt's first line �
 behaviour around a member, not about what a member says.  It is a `pi --mode rpc` replacement in exactly four commands,
 and it is reachable through the real launcher, so the namespaces, mounts, journal and sweep are all real in an "offline" test.
 
-`FAKE_PI_SCRIPT` holds a JSON list of behaviours, applied in prompt order per member:
+`FAKE_PI_SCRIPT` holds the behaviours to play out, applied in prompt order per member: a JSON list, or
+`{"behaviours": [...]}`.  An entry answers the first prompt that contains its `"contains"` once the member has
+reached its `"index"`.  Everything `scripted` and `reply_to` read is listed below — keep this table current when a key is
+added, because a key it does not mention is a key a test author will not find:
 
-{"contains": "Phase 0", "reply": {...}, "stop_reason": "stop", "tools": [...], "exit_after": 2, "sleep": 30, "stderr": "..."}
+{"contains": "Phase 0", "index": 0, "reply": {...} or "raw text", "text": "...", "wrap": true, "sidechain": true,
+ "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}], "sleep": 30, "stderr": "...",
+ "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...", "no_settle": true, "aborted": true}
 """
 
 from __future__ import annotations
@@ -115,11 +120,7 @@ _LOCK = threading.Lock()
 
 
 def _read_stdin():
-    """Yield prompt-shaped commands; answer `abort` the moment it arrives.
-
-    A real pi takes an abort mid-turn.  If the fake only read stdin between replies, an abort would sit unread in the pipe for
-    the whole turn and the abort path could not be tested at all — so the reader thread handles abort and clear_queue itself.
-    """
+    """Yield prompt-shaped commands; answer `abort` the moment it arrives."""
     queue: list[str] = []
     done = threading.Event()
 

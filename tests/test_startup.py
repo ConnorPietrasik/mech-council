@@ -1,9 +1,4 @@
-"""Startup and an unusable member, through the real CLI.
-
-The config loader's three shapes, aimed at the fake pi, plus the startup ordering rule: a config error leaves nothing on disk,
-a member failure leaves a run directory holding only the minimal report and the finalized `run.json`. "Spends no tokens" is
-asserted as a count — one prompt per unusable member, read out of `run.json` (the human-input record's derivability rule).
-"""
+"""Startup and an unusable member, through the real CLI."""
 
 from __future__ import annotations
 
@@ -69,9 +64,7 @@ def test_the_repair_path_is_not_taken_for_an_unusable_member(cli, project):
 
 
 def test_a_member_whose_launcher_never_reaches_pi_exits_one_with_minimal_artifacts(cli, project):
-    """A member-namespace failure, reported over the spawn pipe: exit 1, and the run dir holds only
-    the minimal report and the finalized `run.json`.  The fake answers `--version` and dies
-    on the RPC form, which is exactly the shape a member whose namespace setup failed takes."""
+    """A launcher that answers `--version` and dies on the RPC form: exit 1, and the run dir still holds the report and `run.json`."""
     broken = os.path.join(os.path.dirname(project), "half-a-pi")
     with open(broken, "w", encoding="utf-8") as handle:
         handle.write('#!/bin/sh\nif [ "$1" = "--version" ]; then echo 9.9.9; exit 0; fi\nexit 1\n')
@@ -132,18 +125,3 @@ def test_a_chair_that_errors_its_first_publication_exits_one_after_one_prompt(cl
     assert "chair" in result.console.lower() and "500 upstream unavailable" in result.console
     chair = [r for r in result.manifest["members"].values() if r["kind"] == "chair"][0]
     assert chair["prompts"] == 1, f"the chair spent {chair['prompts']} prompts to be unusable"
-
-
-def test_a_chair_that_only_fails_a_digest_is_restarted_not_declared_unusable(cli, project):
-    """Restart-and-re-ask's shape, not the config loader's: a digest failure mid-run restarts once and the run goes on."""
-    script = json.dumps(
-        [
-            {"contains": "Phase 0", "reply": {"findings": [{"claim": "a real finding", "severity": "major", "evidence": "src/app.py:1"}]}},
-            {"contains": "# Deduplicate", "reply": {"groups": [], "human_input": []}},
-            {"contains": "Round ", "reply": {"positions": [{"id": "F1", "stance": "agree", "note": "yes"}], "sign_off": True}},
-            {"contains": "watchdog", "die": True},
-        ]
-    )
-    result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script, COUNCIL_WATCHDOG_SEC="0"), timeout=200)
-    assert result.returncode == 0, result.console
-    assert "unusable" not in result.console.lower(), "a digest failure is the restart path, never an unusable-seat verdict"

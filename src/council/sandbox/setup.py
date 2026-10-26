@@ -1,10 +1,3 @@
-"""Everything the orchestrator mounts before a run dir exists: the private remount,
-dumpability, the tmpfs cap, the per-member overlays and the lower-layer fd.
-
-The member's own namespace is the launcher's (`memberns.py`); this module is the orchestrator's half, and it runs
-to completion *before* the run directory is created, so a failure here leaves nothing behind but a `MountError`.
-"""
-
 from __future__ import annotations
 
 import os
@@ -15,8 +8,6 @@ from . import mount as m
 
 @dataclass
 class Sandbox:
-    """The mounted shape the sandbox owns: one tmpfs, one overlay pair per member, one lower fd."""
-
     project: str
     runs_dir: str
     sandbox_dir: str = ""
@@ -37,11 +28,6 @@ class Sandbox:
         return f"{self.slot_dir(file_base)}/scratch"
 
     def prepare_member(self, file_base: str) -> None:
-        """One `up`/`work` pair per member, mounted **once** and reused.
-
-        A restart re-uses this mount; a second overlay on the same pair would
-        be `EBUSY`, which is why this is idempotent rather than retried.
-        """
         root = self.slot_dir(file_base)
         os.makedirs(f"{root}/scratch", exist_ok=True)
         if _is_mounted(self.view(file_base)):
@@ -60,11 +46,6 @@ class Sandbox:
 def establish(
     *, project: str, runs_dir: str, sandbox_mib: int, members: list[str], scratch_cwd: str | None = None, sandbox_dir: str | None = None
 ) -> Sandbox:
-    """The mounts, in order.  Any one raising is fatal: one line naming the syscall and its errno, no fallback.
-
-    One tmpfs per **run**, at `<runs_root>/sandbox/<run>`: two councils on one host are
-    then independent, and the directory the journal reads is the directory this run made.
-    """
     sandbox = Sandbox(project=project, runs_dir=runs_dir, sandbox_dir=sandbox_dir or f"{runs_dir}/sandbox", sandbox_mib=sandbox_mib)
     m.private_recursive("/")  # nothing propagates back out
     m.set_not_dumpable()  # /proc closes over the run
@@ -80,12 +61,8 @@ def establish(
 
 
 def _is_mounted(path: str) -> bool:
-    """Whether `path` is a mount point, read from mountinfo's **left** half.
-
-    The line is `id parent id major:minor root opts - fstype source superopts`: the mount point is field 5
-    of the left side, and the field after the `-` separator is the *fstype*. Reading the wrong half made
-    every slot look unmounted, and the per-member overlay's idempotence — the one that keeps a restarted
-    member on its own upper — became a second `mount(2)` on the same `up`/`work` pair, which is `EBUSY`.
+    """The mountinfo line is `id parent id major:minor root opts - fstype source superopts`: the mount point is field 5, on the
+    *left* of the `-`, and the field after the `-` is the *fstype*.
     """
     wanted = _mountinfo_escape(path)
     try:
@@ -101,13 +78,7 @@ def _is_mounted(path: str) -> bool:
 
 
 def _mountinfo_escape(path: str) -> str:
-    r"""mountinfo spells space, tab, newline and `\` as `\040` &c."""
+    """mountinfo escapes space, tab, newline and backslash as `\\040` &c."""
     for character, code in (("\\", "\\134"), (" ", "\\040"), ("\t", "\\011"), ("\n", "\\012")):
         path = path.replace(character, code)
     return path
-
-
-def statvfs_free_mib(path: str) -> int:
-    """The per-round cap check (`sandbox_full` with nobody named)."""
-    info = os.statvfs(path)
-    return info.f_bsize * info.f_bavail // (1024 * 1024)

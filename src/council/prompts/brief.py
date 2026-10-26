@@ -1,13 +1,3 @@
-"""The one facade the loop uses to reach prompt text.
-
-The engine never builds a string: it asks for a briefing and gets one.  Keeping the vocabulary here means
-`modes/` stays data, the engine stays pure, and every word a member reads is greppable in `prompts/`.
-
-**No agent reads a name through here.**  `Brief` holds no roster names at all — it takes none in its constructor
-and passes none down — so a seat reads a peer as `AgentN` and cannot weight a seat called "Senior" over one called
-"Newbie".  Names are the human's: `report_*`, the checkpoint and the console caption IDs from their own tables.
-"""
-
 from __future__ import annotations
 
 from ..render import docket as docket_render
@@ -15,8 +5,6 @@ from . import common
 
 
 class Brief:
-    """Every message a member reads is built here, and only here."""
-
     def __init__(self, *, mode: str, project: str, max_items: int = 12) -> None:
         self.mode = mode
         self.project = project
@@ -34,7 +22,6 @@ class Brief:
         )
 
     def docket(self, docket, viewer: str) -> str:
-        """The docket for one seat: IDs, never names."""
         return docket_render.render(docket, viewer)
 
     def gap(self, chunk: list[str], *, deliberate: bool, reason: str) -> str:
@@ -42,9 +29,6 @@ class Brief:
 
     def defense(self, item_id: str, challenge: dict, question: str) -> str:
         return common.defense_ask(item_id, challenge, question)
-
-    def explain(self, question: str, followup: str) -> str:
-        return common.explain_ask(question, followup)
 
     # -- chair asks ------------------------------------------------------------
 
@@ -59,7 +43,6 @@ class Brief:
 
 
 def render_digest(rows: list[dict]) -> str:
-    """The chair's digest, as text: member id, last tool, previewed args, time since last event."""
     lines = []
     for row in rows:
         lines.append(

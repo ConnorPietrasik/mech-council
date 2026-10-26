@@ -1,9 +1,3 @@
-"""Lenient extraction of structured verdicts from model prose.
-
-Leniency is scoped to model output and goes nowhere near the config loader.  Case and separators are not
-identity; only *different words* need the synonym tables, which are data here so a mode can add to them.
-"""
-
 from __future__ import annotations
 
 import json
@@ -127,15 +121,12 @@ BACKING_WORDS: dict[str, str] = {
 }
 BACKING_WORDS = {fold(word): value for word, value in BACKING_WORDS.items()}
 
-WITHDRAW_WORDS = ("withdraw", "withdraw_human", "no_human_needed", "drop_escalation")
 
 SEVERITIES = ("blocker", "major", "minor", "trivial")
 
 
 @dataclass
 class Extraction:
-    """One parsed message plus the classification the cause table and lenient extraction need."""
-
     data: dict = field(default_factory=dict)
     repaired: bool = False
     errors: list[str] = field(default_factory=list)  # repairable problems
@@ -144,10 +135,6 @@ class Extraction:
 
 
 def find_json(text: str) -> tuple[dict | None, str | None]:
-    """The first balanced JSON object in the text, tolerating fences and prose.
-
-    Tries every `{` until one parses — a model that opens with prose still lands.
-    """
     if not text:
         return None, "empty answer"
     cleaned = text.replace("```json", "```")
@@ -170,7 +157,6 @@ def find_json(text: str) -> tuple[dict | None, str | None]:
 
 
 def _balanced_end(text: str, start: int) -> int | None:
-    """The offset of the `}` that closes the `{` at `start`, string- and escape-aware."""
     depth, in_string, escape = 0, False, False
     for pos in range(start, len(text)):
         char = text[pos]
@@ -194,11 +180,6 @@ def _balanced_end(text: str, start: int) -> int | None:
 
 
 def pick(mapping: object, canonical: str, extra: tuple[str, ...] = ()) -> object:
-    """Fetch `canonical` from a dict through folding and the synonym table.
-
-    `mapping` is `object` because every caller here holds whatever a member's JSON parsed to,
-    and the guard below is what turns that into a dict or into no value at all.
-    """
     if not isinstance(mapping, dict):
         return None
     forms = {fold(k): k for k in mapping}
@@ -225,7 +206,6 @@ def text_of(value: object) -> str:
 
 
 def map_stance(value: object) -> str | None:
-    """A stance paraphrase is mapped, never dropped; an unknown one invalidates the entry."""
     word = fold(value)
     if word in STANCES:
         return word
@@ -233,11 +213,6 @@ def map_stance(value: object) -> str | None:
 
 
 def map_backing(value: object, me: str) -> tuple[str | None, bool]:
-    """`(token, invalidated)` — an unmappable token invalidates `backing` **only**.
-
-    Never defaulted to `no_preference`: a value the parser invented is not
-    a shrug. `abstain` arriving here is the invalid case, not a synonym.
-    """
     word = fold(value)
     if not word:
         return None, True
@@ -258,7 +233,6 @@ def map_backing(value: object, me: str) -> tuple[str | None, bool]:
 
 
 def map_severity(value: object) -> str:
-    """Unknown severities degrade to `minor`."""
     word = fold(value)
     if word in ("blocker", "critical", "fatal", "severe", "high"):
         return "blocker"
@@ -280,7 +254,6 @@ def parse_verdict(
     known_items: set[str] | None = None,
     closed_items: set[str] | None = None,
 ) -> Extraction:
-    """One seat's round verdict: positions, new items, Q&A, human_input, signoff (+ plan)."""
     data, error = find_json(payload)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
@@ -374,11 +347,6 @@ def parse_verdict(
 
 
 def _entries(value: object, need: tuple[str, ...], *, text: tuple[str, ...] = ("text",)) -> list[dict]:
-    """`answers`/`questions` rows: the fields the engine routes on, plus the prose.
-
-    The text key is passed in because the two schemas differ: an answer carries `answer`, a question carries `question` — and
-    the `question` field of an *answer* is its `Q<n>` id, which must never be mistaken for the answer's text.
-    """
     out: list[dict] = []
     if not isinstance(value, list):
         return out
@@ -406,7 +374,6 @@ def _strings(value: object) -> list[str]:
 
 
 def _human_input(data: dict) -> list[dict]:
-    """An entry naming an item is an escalation request, one naming none is a question."""
     raw = pick(data, "human_input")
     if isinstance(raw, str):
         raw = [{"question": raw}]
@@ -460,7 +427,6 @@ def _revised_plan(value: object) -> dict | None:
 
 
 def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None) -> Extraction:
-    """Phase 0: findings (review) or plans (plan), plus summary and open_questions."""
     data, error = find_json(payload)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
@@ -529,10 +495,6 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
 
 
 def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
-    """The chair's merge plan: groups of duplicate IDs plus any questions it raises.
-
-    Structural validation lives with the engine's `_apply_merge`, which both modes reach; this only extracts.
-    """
     data, error = find_json(payload)
     if data is None:
         return None, [], [error or "no JSON object found"]
@@ -554,7 +516,6 @@ def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
 
 
 def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
-    """The plan comparison pass: agreed points, conflicts, uncovered, human_input."""
     data, error = find_json(payload)
     if data is None:
         return None, [error or "no JSON object found"]
@@ -605,7 +566,6 @@ def _conflicts(value: object) -> list[dict]:
 
 
 def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
-    """The chair's watchdog decisions: per-agent keep/restart plus any questions."""
     data, error = find_json(payload)
     if data is None:
         return [], [], [error or "no JSON object found"]
@@ -630,15 +590,7 @@ def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
     return out, _human_input(data), []
 
 
-def schema_hint(mode: str, *, phase: str) -> str:
-    """Lenient extraction's repair re-ask carries the schema hint; the text lives in `prompts/`."""
-    from .prompts import common
-
-    return common.schema_hint(mode, phase=phase)
-
-
 def extract(kind: str, text: str, **kwargs) -> Extraction:
-    """One dispatch over the parsers, so a lane repairs whatever kind of message it sent."""
     if kind == "phase0":
         return parse_phase0(text, **kwargs)
     if kind == "verdict":

@@ -1,5 +1,3 @@
-"""`plan.md`.  Pure, byte-for-byte comparable, and never invents a synthesis."""
-
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
@@ -73,8 +71,6 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
 
 
 def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
-    """The token resolves to a real artifact, or to the fullest backer's plan
-    **labeled as what it is** — never a synthesis, never a title match."""
     if token.startswith("merged:"):
         label = token.split(":", 1)[1].strip()
         for agent in docket.roster:
@@ -102,7 +98,6 @@ def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
 
 
 def _fullest_backer(docket: Docket, token: str):
-    """Among seats backing `token`: most stages; tie → lowest slot."""
     best = None
     for agent in docket.roster:
         if docket.backing.get(agent) != token:
@@ -138,22 +133,7 @@ def _stages(docket: Docket, context: ReportContext, converged: str | None) -> li
     return out
 
 
-def _constraints_and_risks(docket: Docket, converged: str | None) -> dict[str, list[str]]:
-    artifact, _ = resolve_direction(docket, converged) if converged else (None, "")
-    source = artifact or {}
-    agent = docket.approaches.get(converged or "")
-    if agent and not source:
-        source = agent.artifact()
-    return {
-        "constraints": list(source.get("constraints") or []),
-        "risks": list(source.get("risks") or []),
-        "assumptions": list(source.get("assumptions") or []),
-    }
-
-
 def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
-    """Every deferred / skipped / unasked / undefended question touching the
-    direction is a named assumption spelling the guess it stands for."""
     out = ["## Assumptions", ""]
     questions = [docket.questions[i] for i in docket.question_order if _touches_direction(docket, docket.questions[i])]
     if not questions:
@@ -279,8 +259,6 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
 
 
 def _touches_direction(docket: Docket, question: Question) -> bool:
-    """A question touches the chosen direction when it names no item (so
-    it frames the whole plan) or names one that is not closed rejected."""
     if question.state == "answered":
         return False
     if question.item_id is None:

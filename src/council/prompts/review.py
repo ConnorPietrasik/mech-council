@@ -1,5 +1,3 @@
-"""Review-mode prompt text.  Text is data, and it all lives here."""
-
 from __future__ import annotations
 
 PHASE0_TASK = """\

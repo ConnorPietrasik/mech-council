@@ -1,5 +1,3 @@
-"""The review adapter: data only, readable in one sitting."""
-
 from __future__ import annotations
 
 from .base import BaseAdapter, register

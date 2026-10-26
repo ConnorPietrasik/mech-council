@@ -1,8 +1,3 @@
-"""The domain model as data.  Pure: no subprocess, no asyncio, no I/O.
-
-Wire names are the field names: what a dataclass attribute says is what `run.json`, a verdict and a report call it.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,16 +7,11 @@ STANCES = (AGREE, DISAGREE, NEEDS_HUMAN, ABSTAIN)
 
 OPEN = "open"
 AGREED, UNHEARD, UNSEEN, DISPUTED, HUMAN, REJECTED = ("agreed", "unheard", "unseen", "disputed", "human", "rejected")
-DISPOSITIONS = (AGREED, UNHEARD, UNSEEN, DISPUTED, HUMAN, REJECTED)
-# The disposition evaluation order — the line in `dispositions.py`, not a table's row order.
-EVALUATION_ORDER = (HUMAN, DISPUTED, AGREED, REJECTED, UNHEARD, UNSEEN)
 
 STANDING, WITHDRAWN, RETIRED, DEMOTED = "standing", "withdrawn", "retired", "demoted"
-ESCALATION_STATES = (STANDING, WITHDRAWN, RETIRED, DEMOTED)
 ASKED, ANSWERED, SKIPPED = "asked", "answered", "skipped"
 
 CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs_human", "stalemate", "round_limit_reached", "aborted")
-OUTCOMES = (CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
 
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
@@ -34,14 +24,11 @@ CHAIR_ID = "chair"
 
 
 def normalize_text(text: str) -> str:
-    """The human checkpoint's dedup key: whitespace-collapsed, case-folded question text."""
     return " ".join((text or "").split()).casefold()
 
 
 @dataclass
 class Stance:
-    """One seat's stance on one item, recorded with the round it was given."""
-
     stance: str = ABSTAIN
     note: str = ""
     evidence: str = ""
@@ -50,14 +37,11 @@ class Stance:
 
     @property
     def reasoned(self) -> bool:
-        """A disagree with cited evidence *or* a refuting note."""
         return bool(self.evidence.strip() or self.note.strip())
 
 
 @dataclass
 class Item:
-    """The unit of deliberation: a review finding or a plan decision point."""
-
     id: str
     claim: str
     detail: str = ""
@@ -79,8 +63,6 @@ class Item:
 
 @dataclass
 class Escalation:
-    """One seat's `needs_human` on one item, keyed (item, asker)."""
-
     item_id: str
     asker: str
     state: str = STANDING
@@ -95,8 +77,6 @@ class Escalation:
 
 @dataclass
 class Question:
-    """A human checkpoint request: asked at most once, deduplicated by normalized text."""
-
     id: str
     text: str
     context: str = ""
@@ -125,14 +105,11 @@ class Question:
 
     @property
     def options(self) -> list[str]:
-        """The menu as the human reads it, numbered: each wording in the order it was first offered."""
         return [wording for wording, _asker in self.menu.values()]
 
 
 @dataclass
 class QA:
-    """Lenient extraction's agent-to-agent question with an orchestrator-assigned `Q<n>` id."""
-
     id: str
     asker: str
     to: str
@@ -144,8 +121,6 @@ class QA:
 
 @dataclass
 class Approach:
-    """(plan) one seat's phase-0 plan and any revisions of it."""
-
     agent: str
     original: str = ""
     stages: list[dict] = field(default_factory=list)
@@ -155,14 +130,11 @@ class Approach:
     revisions: list[dict] = field(default_factory=list)  # {name, round, text, stages}
 
     def artifact(self) -> dict:
-        """The plan this seat stands behind — latest revision, else the original."""
         return self.revisions[-1] if self.revisions else {"name": f"{self.agent} original", "text": self.original, "stages": self.stages}
 
 
 @dataclass
 class RoundRecord:
-    """The round-by-round verdict section of the report."""
-
     round: int
     summary: str = ""
     lines: list[str] = field(default_factory=list)
@@ -170,8 +142,6 @@ class RoundRecord:
 
 @dataclass
 class Docket:
-    """The orchestrator-owned shared state."""
-
     mode: str = "review"
     goal: str | None = None
     roster: list[str] = field(default_factory=list)  # protocol ids, Agent1..N
@@ -197,7 +167,6 @@ class Docket:
 
     @property
     def n(self) -> int:
-        """The denominator: the roster as convened, frozen."""
         return len(self.roster)
 
     def bar(self) -> int:
@@ -221,18 +190,14 @@ class Docket:
         return self.stances.get(item_id, {}).get(agent)
 
     def stated_stance(self, item_id: str, agent: str) -> str | None:
-        """The seat's latest **stated** stance: a `declined` record states nothing."""
         record = self.stance(item_id, agent)
         if record is None or record.declined:
             return None
         return record.stance
 
     def effective_stance(self, item_id: str, agent: str) -> str | None:
-        """The count view: what the dispositions measure, or None if the seat holds nothing.
-
-        Two records are abstain-equivalent rather than absent.  A `declined` record the run wrote for a survived gap is a **current
-        stance** (the completeness rule), so it carries the item to `agreed`/`unheard` instead of holding it at `unseen`; a
-        retired or demoted asker's `needs_human` is inert too.  Only `None` — never shown it — is what makes an item `unseen`.
+        """A `declined` record and a retired or demoted asker are abstain-equivalent, not absent: the seat spoke, and it has no
+        backing to give.  `unseen` is for a seat with no record at all.
         """
         record = self.stance(item_id, agent)
         if record is None:

@@ -1,12 +1,4 @@
-"""The dispose path and the namespace sweep, against real descendants.
-
-Two classes of descendant walk out of a group kill — a tool shell pi never cleaned up, and anything that
-`setsid`s — so the case list is built from descendants that really escape rather than from a mocked `os.killpg`.
-
-The sweep's own cases run **inside a namespace this test created**.  `sweep()` kills every pid it recognises as ours,
-and a test that handed it a namespace it shared with the test process would kill the test process: exit 137 on the suite
-is that bug, so the namespace in these cases is always a private one and the pids are always pids this file spawned.
-"""
+"""The dispose path and the namespace sweep, against real descendants."""
 
 from __future__ import annotations
 
@@ -147,7 +139,6 @@ def test_a_member_ignoring_term_escalates_to_kill_and_still_goes(tmp_path):
         stdin=subprocess.PIPE,
         start_new_session=True,
     )
-    os.close(os.open(os.devnull, os.O_RDONLY))  # touch nothing else
     assert stubborn.stdin is not None, "stdin was PIPEd above: it is the whole dispose path's first step"
 
     async def scenario():
@@ -208,11 +199,7 @@ class _QuietRpc:
 
 
 def test_the_sweep_kills_what_lives_in_the_namespace_it_holds(tmp_path):
-    """A stray inside a namespace we hold dies; the report names that namespace.
-
-    Everything here runs in a private mount namespace created by this test, so the sweep can only ever aim at pids this
-    file started — which is also this file's "precisely those, never a host pid" claim, tested rather than asserted.
-    """
+    """A stray inside a namespace we hold dies; the report names that namespace."""
     marker = str(tmp_path / "stray")
 
     def probe():

@@ -1,10 +1,3 @@
-"""The chair's one shared tool-call preview formatter — previews and nothing else.
-
-Middle-out truncation (a long `npm test` tail matters more than its head), project-relative paths, and
-collapsed `cd … && …` prefixes.  The sandbox's `sandbox_full`/`sandbox_limit_hit` inference never
-runs here: it lives in the RPC pump, so a watchdog that is off or between ticks cannot blind the run.
-"""
-
 from __future__ import annotations
 
 import re
@@ -14,16 +7,14 @@ _MAX = 220
 
 
 def project_relative(text: str, project: str) -> str:
-    """Strip the project prefix — the seat's cwd — so previews read like the tree."""
     if not project:
         return text
     return text.replace(project.rstrip("/") + "/", "").replace(project, ".")
 
 
 def collapse_cd(command: str) -> str:
-    """`cd /x/y && make` → `make` (the cwd is the project; the prefix is noise)."""
     match = _CD.match(command.strip())
-    return command.strip() if not match else match.group(0)[match.end() - match.end() :] or command.strip()[match.end() :]
+    return command.strip()[match.end() :] if match else command.strip()
 
 
 def middle_out(text: str, limit: int = _MAX) -> str:
@@ -37,7 +28,6 @@ def middle_out(text: str, limit: int = _MAX) -> str:
 
 
 def preview(args: object, *, project: str = "", tool_name: str = "", limit: int = _MAX) -> str:
-    """One line describing a tool call, for the watchdog digest and for logs."""
     if isinstance(args, dict):
         if tool_name in ("bash", "shell", "exec"):
             text = str(args.get("command") or args.get("cmd") or "")

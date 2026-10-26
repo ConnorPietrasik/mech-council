@@ -1,9 +1,3 @@
-"""The CLI surface: a table-driven flag set, one-page help, two-line errors.
-
-Everything here is about the *invocation*; what the invocation means is `config.py`'s call.  A usage
-error is exit 2, a config error is exit 1, and the two are different exceptions for exactly that reason.
-"""
-
 from __future__ import annotations
 
 import os
@@ -14,11 +8,11 @@ from . import __version__, suggest
 
 
 class UsageError(Exception):
-    """Exit 2: the file is fine, the invocation is not."""
+    pass
 
 
 class ConfigError(Exception):
-    """Exit 1: a config error, an unresolvable pi, a refused setup."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -46,8 +40,6 @@ _SHORT = {f"-{f.short}": f for f in FLAGS if f.short}
 
 @dataclass
 class Args:
-    """A parsed invocation.  Values stay ``None`` when the flag was never stated."""
-
     council: str | None = None
     project: str | None = None
     config: str | None = None
@@ -83,7 +75,6 @@ exit codes: 0 a result was written, 1 no result, 2 usage error, 130/143 signalle
 
 
 def _whole_number(raw: str, flag: Flag) -> int:
-    """Whole numbers only — `1e3`, `0x10`, `3.5` are refused, naming the long flag."""
     text = raw.strip()
     if text and text[0] in "+-":
         digits, sign = text[1:], text[0]
@@ -96,7 +87,6 @@ def _whole_number(raw: str, flag: Flag) -> int:
 
 
 def parse_args(argv: list[str]) -> Args:
-    """Table-driven parse: `--flag value`, `--flag=value`, bare `--`, last-wins."""
     args = Args()
     positional: list[str] = []
     seen_end = False
@@ -153,7 +143,6 @@ def parse_args(argv: list[str]) -> Args:
 
 
 def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: list[str]) -> None:
-    """A repeat keeps its last value; a repeat that *changes* it is noted."""
     old = getattr(obj, attr)
     if old is not None and old != value:
         notes.append(f"--{flag.long} {value} overrides {old} (the last one wins)")
@@ -161,23 +150,20 @@ def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: l
 
 
 def fail(message: str) -> int:
-    """The CLI contract's two-line complaint, never a 30-line usage dump."""
     sys.stderr.write(f"{message}\n")
     sys.stderr.write("run 'council --help'\n")
     return 2
 
 
 def resolve_project(raw: str | None) -> str:
-    """The project directory, canonicalized — both sides of every containment test are resolved the same way."""
     path = os.path.abspath(raw) if raw else os.getcwd()
     return os.path.realpath(path)
 
 
 def _runs_root_from_env(environ: dict[str, str]) -> str:
-    """The three `COUNCIL_RUNS_DIR` resolution rules; pure — nothing is created here."""
     raw = environ.get("COUNCIL_RUNS_DIR") or ""
     if raw:
-        # Rule 2: a relative COUNCIL_RUNS_DIR is made absolute against the invoking cwd.
+        # Rule 1: a relative COUNCIL_RUNS_DIR is made absolute against the invoking cwd.
         return os.path.realpath(raw if os.path.isabs(raw) else os.path.join(environ.get("CWD", os.getcwd()), raw))
     cache = environ.get("XDG_CACHE_HOME") or ""
     if cache:
@@ -191,12 +177,10 @@ def _runs_root_from_env(environ: dict[str, str]) -> str:
 
 
 def is_within(path: str, parent: str) -> bool:
-    """Pure containment test, both sides already resolved."""
     return path == parent or path.startswith(parent.rstrip("/") + "/")
 
 
 def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | None:
-    """The nested-council guard.  `COUNCIL_RUN_DIR` is the only marker."""
     marker = environ.get("COUNCIL_RUN_DIR") or ""
     if not marker or allow_nested:
         return None
@@ -209,9 +193,8 @@ def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | Non
 
 
 # --------------------------------------------------------------------------- CLI contract, exit codes `main()`, and the only place
-# exit codes are chosen.  `python -m council` reaches it the same way the console script does, so there is one entry and one
-# contract. The internal `--setup-seat` dispatch comes first: the launcher form is this same entry point, resolved by the spawner
-# as `sys.executable -m council` and never as `sys.argv[0]`, so a member never runs whatever `sys.argv[0]` happened to be called.
+# exit codes are chosen.  `python -m council` reaches it the same way the console script does, so there is one entry and one contract. The
+# internal `--setup-seat` dispatch comes first: the launcher form is this same entry point.
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -242,12 +225,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _inside_namespace(launch) -> int:
-    """The sandbox steps — private remount, dumpability, the tmpfs cap, the per-member overlays, the
-    lower-layer fd — then the run, then nothing left behind, in the order `sandbox/setup.py` performs them.
-
-    A sandbox step that fails is fatal: one line naming the syscall and its errno, no fallback, no probe,
-    and — because the run directory is created only after this returns cleanly — nothing created anywhere.
-    """
     import asyncio
 
     from . import startup

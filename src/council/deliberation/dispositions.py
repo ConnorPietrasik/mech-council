@@ -1,26 +1,17 @@
-"""Item dispositions: the derivation, and closure/reopen.  Pure.
-
-The evaluation order is the *line* below, not the row order of any table:
-`human → disputed → agreed → rejected → unheard → unseen`.
-"""
-
 from __future__ import annotations
 
 from .state import AGREE, AGREED, DISAGREE, DISPUTED, HUMAN, NEEDS_HUMAN, OPEN, REJECTED, UNHEARD, UNSEEN, Docket, Item, Stance
 
 
 def support(docket: Docket, item_id: str) -> int:
-    """The `agree` count over current stances (the denominator is frozen `N`)."""
     return sum(1 for agent in docket.roster if docket.effective_stance(item_id, agent) == AGREE)
 
 
 def objections(docket: Docket, item_id: str) -> list[Stance]:
-    """Current `disagree` stances; a `declined` record never objects."""
     return [s for s in (docket.stance(item_id, a) for a in docket.roster) if s is not None and not s.declined and s.stance == DISAGREE]
 
 
 def derive(docket: Docket, item_id: str) -> str:
-    """The disposition of an **open** item, from current stances and nothing else."""
     item = docket.items[item_id]
     if item.closed:  # closure is stored, never re-derived
         return item.disposition
@@ -42,11 +33,6 @@ def derive(docket: Docket, item_id: str) -> str:
 
 
 def closure_pass(docket: Docket, judged_round: int) -> list[tuple[str, dict]]:
-    """Close what reached `agreed`/`rejected`; reopen what a challenge undoes.
-
-    Returns `(event_name, fields)` records for the console/events layer.  Reopening clears every stance record
-    for the item, `declined` included, so the ladder applies again and the item is `unseen` this round.
-    """
     events: list[tuple[str, dict]] = []
     for item_id in list(docket.order):
         item = docket.items[item_id]
@@ -84,7 +70,6 @@ def closure_pass(docket: Docket, judged_round: int) -> list[tuple[str, dict]]:
 
 
 def _reopen_trigger(docket: Docket, item: Item, judged_round: int):
-    """The closure rule's reopen conditions, judged on what this round actually brought in."""
     for agent in docket.roster:
         record = docket.stance(item.id, agent)
         if record is None or record.declined or record.round != judged_round:
@@ -99,7 +84,6 @@ def _reopen_trigger(docket: Docket, item: Item, judged_round: int):
 
 
 def _record_closed_notes(docket: Docket, item: Item, judged_round: int) -> None:
-    """An unreasoned disagree on a closed item is a note, never a reopen."""
     for agent in docket.roster:
         record = docket.stance(item.id, agent)
         if record is None or record.declined or record.round != judged_round:

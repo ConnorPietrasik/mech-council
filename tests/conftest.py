@@ -1,8 +1,4 @@
-"""The harness rules, built once and used by every family.
-
-The suite must pass from inside a council member, so nothing here assumes `/tmp` is usable ground, nothing writes inside the
-project under test, and every CLI is spawned in its own process group so a timed-out case cannot leave a supervisor holding mounts.
-"""
+"""The harness rules, built once and used by every family."""
 
 from __future__ import annotations
 
@@ -81,7 +77,7 @@ def child_env(ground):
 
 @pytest.fixture
 def canary(child_env):
-    """The runs root a family must see stay empty; `assert_canary_empty` checks it."""
+    """The runs root a family must see stay empty; `canary_entries()` lists what appeared in it."""
     path = child_env["COUNCIL_RUNS_DIR"]
     os.makedirs(path, mode=0o700, exist_ok=True)
     return path
@@ -135,7 +131,7 @@ name = "Senior"
 
 @pytest.fixture
 def project(ground):
-    """A tiny project with a `council.toml`; `write_config` rewrites it."""
+    """A tiny project with a `council.toml`; `write_project_config()` rewrites it."""
     path = os.path.join(ground, "proj")
     os.makedirs(os.path.join(path, "src"), exist_ok=True)
     with open(os.path.join(path, "hello.py"), "w", encoding="utf-8") as handle:

@@ -1,15 +1,4 @@
-"""The sandbox on the box it runs on: coverage, isolation, scratch, journal, sweep.
-
-Everything here forks and mounts for real: `mount(2)`, `unshare(2)`, the overlay and the namespace sweep are
-the subject, so nothing is mocked.  The shape mirrors the sandbox's own shape — a mapped child plays the
-orchestrator and establishes the sandbox *inside its own* mount namespace, then forks members that take a namespace
-of their own — because a journal read from the wrong namespace reads an empty directory and proves nothing.
-
-The fixture ground is `tests.support.ground.FIXTURE_ROOT`: `$COUNCIL_TEST_FS` when the operator says where the plain filesystem
-is, else `$TMPDIR`, else `.council-test-fs` beside this checkout.  The family's one narrow skip is a fixture lower sitting
-inside an overlay: on this box `/tmp` *is* the container root's overlay, so a run with `TMPDIR=/tmp` skips here by design
-rather than reporting green having tested nothing, and the ext4 ground beside the checkout is what makes the family run.
-"""
+"""The sandbox on the box it runs on: coverage, isolation, scratch, journal, sweep."""
 
 from __future__ import annotations
 
@@ -69,12 +58,7 @@ def tree(ground):
 
 
 def in_mapped_child(body, *args, mount_namespace=True):
-    """Fork, unshare, let the **parent** write the map, then run `body(*args)` inside.
-
-    The map write's only workable order — an unprivileged process cannot write its own `uid_map` — is the reason
-    the product splits supervisor from orchestrator.  The map is `0 <uid> 1`, so the child is root *inside* and keeps
-    its capabilities across `execve`; an identity map would drop them at every exec and no member could mount.
-    """
+    """Fork, unshare, let the **parent** write the map, then run `body(*args)` inside."""
     parent, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     os.set_inheritable(parent.fileno(), False)
     pid = os.fork()
@@ -125,11 +109,7 @@ def _drain(sock) -> bytes:
 
 
 def run_sandboxed(tree, plan, *, members=None, sandbox_mib=32):
-    """Run `plan(box, tell)` where the orchestrator's mounts have run, in the namespace they ran in.
-
-    `plan` stands where `run.py::_inside_namespace` stands; whatever it `tell()`s comes back
-    as JSON, and a crash in the child is an assertion failure out here, never a silence.
-    """
+    """Run the `plan` callback — a box and a report-to-parent function — in the namespace the orchestrator's mounts ran in."""
 
     def body():
         collected: list = []
@@ -147,12 +127,10 @@ HEADER = "import json, os, shutil, subprocess, sys\nPROBE = lambda **kw: print(j
 
 
 def probe(statements: str) -> str:
-    """Member-side statements whose `PROBE(...)` becomes the answer we get back."""
     return HEADER + statements
 
 
 def in_member(box, tree, file_base, source) -> dict:
-    """Take the member's own namespace as `file_base`, run `source` there, and report its `PROBE`."""
     read_fd, write_fd = os.pipe()
     os.set_inheritable(read_fd, False)
     os.set_inheritable(write_fd, True)  # the one fd the member may keep
@@ -233,13 +211,7 @@ PROBE(cwd=os.getcwd(), wrote=os.path.exists("written.txt"))
 
 
 def test_a_child_of_the_namespace_cannot_undo_the_bind_that_covers_the_project(tree):
-    """A member cannot take the project off itself, so the overlay always covers it.
-
-    The raw syscall is tried rather than `/usr/bin/umount`, whose own namespace check would answer `EPERM`
-    for reasons of its own.  Whether the kernel says `EPERM` (no power over the parent's mount) or `EBUSY`
-    (the member's own cwd is the mount, and the chdir puts it there) is not the point: what the sandbox
-    requires is that the overlay still covers the project after the attempt, which is what this asserts.
-    """
+    """A member cannot take the project off itself, so the overlay always covers it."""
     project = tree["project"]
     snippet = f"""
 PROJ_PATH = {project!r}
@@ -443,14 +415,7 @@ PROBE(tmpdir=os.environ.get('TMPDIR', ''), mktemp=here,
 
 
 def test_a_member_cannot_read_the_orchestrators_run_state(tree):
-    """Dumpability is cleared so `/proc` closes the run's own file objects.
-
-    A member is a same-uid child in one pid namespace, so `/proc` is the one hole a per-member mount namespace
-    does not plug.  Clearing dumpability is the run's only defence on `cwd`, `environ`, `exe` and `fd` — the four
-    that hold the members' pipes, the lower fd the journal runs on and the run directory — while `status`,
-    `cmdline` and `mountinfo` stay readable so the run is not blinded to itself.  The flag itself is unreadable
-    across a user namespace here, so the claim is asserted as access, which is what the sandbox actually promises.
-    """
+    """Dumpability is cleared so `/proc` closes the run's own file objects."""
 
     def plan(box, tell):
         orchestrator = os.getpid()
@@ -489,12 +454,7 @@ PROBE(closed=closed, readable=readable)
 
 
 def test_the_sweep_kills_a_stray_left_running_in_a_namespace_this_run_created(tree):
-    """The namespace sweep, on a stray that ignores `SIGTERM` and leaves its process group.
-
-    The namespace is handed over as an open descriptor rather than as an id the parent reads back: clearing dumpability
-    makes this process non-dumpable, and a non-dumpable process's `/proc/<pid>/ns/*` is `EACCES` to its own parent.  That
-    is the sweep's point — the reference the run holds *is* the key, and holding it is what makes the id unambiguous.
-    """
+    """The namespace sweep, on a stray that ignores `SIGTERM` and leaves its process group."""
 
     def plan(box, tell):
         slot, project, runs = box.slot_dir("seat1-a"), tree["project"], tree["runs"]
@@ -602,11 +562,7 @@ def test_the_sweep_leaves_alone_a_namespace_this_run_did_not_make():
 
 
 def _start_stray(tree, box, file_base, ready) -> int:
-    """A member's child that outlives its group kill and ignores SIGTERM (the sweep's case).
-
-    It reports its own namespace id over `ready` once the mounts are up: the parent cannot stat `/proc/<pid>/ns/mnt`
-    from outside the user namespace and guess, and a sweep of a namespace nobody created must kill nothing.
-    """
+    """A member's child that outlives its group kill and ignores SIGTERM (the sweep's case)."""
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -772,11 +728,6 @@ def _read_attribution(root):
 
 
 def _on_tmpfs(ground, read):
-    """Run a journal reader on a tmpfs the caller's mapped child mounted itself.
-
-    `mknod` of a device node and `mount(2)` of an overlay are both refused on this box's
-    overlay-backed `/tmp`, so a fixture sitting there would be the wrong filesystem.
-    """
     work = f"{ground}/fs"
     os.makedirs(f"{work}/mnt", exist_ok=True)
     mount_mod.tmpfs(f"{work}/mnt", size_mib=32)

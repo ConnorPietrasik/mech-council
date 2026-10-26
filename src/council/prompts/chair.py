@@ -1,5 +1,3 @@
-"""Chair prompts.  Text only."""
-
 from __future__ import annotations
 
 MERGE = """\

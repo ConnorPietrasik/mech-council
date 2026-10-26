@@ -1,8 +1,4 @@
-"""The engine suite's harness: the engine over a scripted port, with no pi and no sandbox.
-
-The port speaks the same shapes `port.Port` speaks — `RawAsk` in, structured data out of the real extractor — so these cases test
-the protocol, not a mock's invention.  Every ask is recorded, which is how "zero asks" and "exactly one defense ask" are assertable.
-"""
+"""The engine suite's harness: the engine over a scripted port, with no pi and no sandbox."""
 
 from __future__ import annotations
 
@@ -19,8 +15,6 @@ def payload(**kw) -> str:
 
 @dataclass
 class Ask:
-    """One recorded ask."""
-
     who: str  # an agent id, or "chair"
     phase: str
     round: int
@@ -30,11 +24,7 @@ class Ask:
 
 @dataclass
 class ScriptPort:
-    """A port whose replies are chosen by a function of the recorded ask.
-
-    `reply(ask)` returns either a JSON string, a dict, or a `RawAsk`.  A dict is
-    serialized; a `RawAsk` passes through, which is how a failure or a rejection is scripted.
-    """
+    """A port whose replies are chosen by a function of the recorded ask."""
 
     docket: Docket
     reply: object = None

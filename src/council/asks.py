@@ -1,15 +1,3 @@
-"""Every ask in the run is mediated through one of exactly two lanes.
-
-Agent asks take a slot of the `max_concurrency` pool; the chair has its own single slot **outside** that cap.  Sharing
-one pool is what makes the watchdog starvation-prone: with `max_concurrency` ≤ the number of wedged agents, every slot
-is held by exactly the work the watchdog exists to interrupt — so a digest can never queue behind agent work here.
-
-Both lanes own the same two rules: lenient extraction's two repair re-asks, and restart-and-re-ask — one
-restart, one re-ask, a second failure ends the run — and both record in-flight activity so the chair's digest
-has something to say.  A restart does not cancel a pending ask — it settles it with no message, which
-is how the re-ask and the second-failure exit reach the run: a member's ask has exactly one outcome owner.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,12 +16,6 @@ REPAIR_ASKS = 2  # the only repair count there is
 
 
 class AskUnusable(Exception):
-    """A member's **first** prompt settling on `stopReason: "error"` is a dead seat.
-
-    The seat is unusable, not unhelpful: exit 1, naming it, with the provider/model and the round it last reached.  Keyed
-    on the first prompt because the same test on a later ask is an ordinary ask failure on the restart-and-re-ask path.
-    """
-
     def __init__(self, label: str, provider: str | None, model: str | None, detail: str, prompts: int) -> None:
         super().__init__(
             f"{label} is unusable ({provider or 'default provider'}/{model or 'pi default'}): {detail} after {prompts} prompt(s)"
@@ -43,8 +25,6 @@ class AskUnusable(Exception):
 
 
 class AskLost(Exception):
-    """Restart-and-re-ask's second failure: a fresh spawn and one re-ask both came back with nothing."""
-
     def __init__(self, label: str, provider: str | None, model: str | None, round_: int, detail: str) -> None:
         super().__init__(f"{label} failed in round {round_}: {detail}")
         self.label, self.provider, self.model = label, provider, model
@@ -53,10 +33,8 @@ class AskLost(Exception):
 
 @dataclass
 class Outcome:
-    """One mediated ask: the text, or the reason there is none, and what it cost."""
-
     text: str = ""
-    failure: str | None = None  # set ⇒ restart-and-re-ask's second failure
+    failure: str | None = None  # this seat's ask failed terminally: a batch sets it, a single ask raises it instead
     data: object = None
     errors: list[str] = field(default_factory=list)
     rejected: bool = False  # a message arrived and extraction refused it → a gap
@@ -66,13 +44,10 @@ class Outcome:
 
 
 def needs_repair(parsed: object) -> bool:
-    """Lenient extraction's repairable half: no JSON at all, or fields that were present and invalid."""
     return bool(getattr(parsed, "invalid", False) or getattr(parsed, "errors", None))
 
 
 class Lanes:
-    """The pool, the chair's slot, and the in-flight registry the watchdog reads."""
-
     def __init__(self, council: Council, members: Members, console: Console) -> None:
         self.council = council
         self.members = members
@@ -90,7 +65,6 @@ class Lanes:
     async def ask_agent(
         self, agent_id: str, message: str, *, round_: int, kind: str, parse_kw: dict, phase: str = "round", classify_unusable: bool = False
     ) -> Outcome:
-        """A member ask: pool slot, restart-and-re-ask underneath, lenient extraction's repairs on top."""
         async with self.pool:
             return await self._mediated(
                 agent_id,
@@ -106,12 +80,6 @@ class Lanes:
     async def ask_seats(
         self, batch, *, round_: int, kind: str, phase: str, parse_for, classify_unusable: bool = False
     ) -> dict[str, Outcome]:
-        """A whole round, or one whole ladder pass, at the cap.
-
-        `parse_for(member_id)` builds that member's extractor, because a verdict is validated against *its*
-        author's known items.  One member's failure never abandons its siblings: every task is awaited
-        either way, and a member that died mid-ask gets the restart-and-re-ask that is its own to receive.
-        """
 
         async def guarded(agent, message):
             try:
@@ -136,7 +104,6 @@ class Lanes:
         parse_kw: dict | None = None,
         classify_unusable: bool = False,
     ) -> Outcome:
-        """The chair's own slot, outside `max_concurrency`, never queued behind agent work."""
         async with self.chair_slot:
             self.chair_busy = True
             try:
@@ -159,11 +126,6 @@ class Lanes:
     # -- the digest's rows --------------------------------------------------------
 
     def digest(self) -> list[dict]:
-        """Every in-flight member: last tool, previewed args, time since the last event.
-
-        The rows read the PiRpc's own activity, because that is the object the read pump updates.  A copy made when
-        the ask started would freeze `events` at zero and hand the chair a digest in which every member looks wedged.
-        """
         from .render import preview
 
         rows = []
@@ -203,7 +165,6 @@ class Lanes:
         timeout: float | None,
         classify_unusable: bool,
     ) -> Outcome:
-        """One ask, and the one place `AgentN` becomes a file_base: the two vocabularies meet at the process boundary and nowhere else."""
         file_base = self.members.file_base_for(agent_id)
         label = self.members.label_for(file_base)
         outcome = Outcome()
@@ -232,7 +193,7 @@ class Lanes:
             parsed = extract(kind, text, **parse_kw)
         outcome.text = text
         if needs_repair(parsed):
-            # The third failure rejects the *message*, and the gap ladder gaps on everything.
+            # A message that still will not parse after the repairs is rejected, not retried, and the gap ladder gaps on it.
             outcome.errors = list(getattr(parsed, "errors", []) or []) or ["no JSON object in the answer"]
             outcome.rejected = True
             self.console.event(
@@ -246,12 +207,6 @@ class Lanes:
     async def _prompt_with_restart(
         self, file_base: str, message: str, *, label: str, round_: int, timeout: float | None, outcome: Outcome, classify_unusable: bool
     ) -> str:
-        """One prompt, with restart-and-re-ask-once underneath it.
-
-        "No message arrived" and "a message that settled on `stopReason: error`" take the same
-        road, because restart-and-re-ask is a rule about the ask, not about the child.  The one
-        exception is the unusable-seat test, which spends exactly one prompt and ends the run.
-        """
         spec = self.members.spec_for(file_base)
         started = time.monotonic()
         detail = "no answer"

@@ -1,10 +1,4 @@
-"""The upper layer is the write journal.
-
-One fixed name is skipped: `.council-scratch`, the scratch bind's mount point, which is not a write.  Entries
-are read by **inode type, not name**: a deletion is a 0:0 character device recorded under the deleted
-file's own name on this kernel, and a file created and then deleted leaves no entry at all.  `up/` alone
-cannot tell created from modified, so the question is asked through the lower-layer fd the sandbox keeps.
-"""
+"""The upper layer is the write journal."""
 
 from __future__ import annotations
 
@@ -16,7 +10,6 @@ from .memberns import SCRATCH_NAME
 
 
 def listing(upper: str, *, skip: str = SCRATCH_NAME) -> dict[str, str]:
-    """`{relative path: dir | touched | deleted}` — everything that member touched."""
     out: dict[str, str] = {}
     if not os.path.isdir(upper):
         return out
@@ -65,12 +58,6 @@ def journal(upper: str, lower_fd: int, *, skip: str = SCRATCH_NAME) -> dict[str,
 
 
 def evidence_paths(text: str) -> list[str]:
-    """Candidate file paths inside a finding's prose, conservatively.
-
-    The review report's `sandbox_artifact` test needs the *paths* an item names, and members
-    write them in every shape: `cache.py:12`, `/project/src/x.py`, `` `src/y.py` ``. Anything
-    that looks like a path is a candidate; the check against the uppers is what decides.
-    """
     out: list[str] = []
     for token in re.split(r"[\s,;()\"'`\[\]{}<>|]+", text or ""):
         token = token.strip(".,:!?")
@@ -85,15 +72,6 @@ def evidence_paths(text: str) -> list[str]:
 
 
 def _artifact_owners(journal: list[dict], project: str) -> dict[str, str | None]:
-    """Journal paths that exist only in a member's upper, each with its owner or None.
-
-    Only a **created** path qualifies.  A modified or deleted one exists in the lower by definition — the project's own file, edited
-    or hidden in one seat's view — so a finding that names it is naming *project evidence*, and stamping it `sandbox_artifact` would
-    quietly demote a real finding.  And a created path that the lower also holds is the project's file recreated, not an invention.
-
-    A path two seats both created is still nobody's confirmation, so it keeps the
-    marker with no owner named: guessing which member wrote it would be the worse lie.
-    """
     holders: dict[str, set[str]] = {}
     for entry in journal:
         base = entry.get("file_base") or entry.get("member") or ""
@@ -108,11 +86,6 @@ def _artifact_owners(journal: list[dict], project: str) -> dict[str, str | None]
 
 
 def mark_sandbox_items(docket, journal: list[dict], *, project: str = "") -> list[str]:
-    """The review report's two markers, stamped on the items whose evidence earned them.
-
-    The renderer stays pure and the docket carries the fact, so the marker is computed once
-    here — where the run's own write journal and the lower layer both exist — and read everywhere else.
-    """
     from .infer import evidence_is_limit
 
     marked: list[str] = []
@@ -140,7 +113,6 @@ def mark_sandbox_items(docket, journal: list[dict], *, project: str = "") -> lis
 
 
 def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
-    """Per-member bytes for `run.json` and the console's sandbox line."""
     total = 0
     for root, dirs, files in os.walk(upper, followlinks=False):
         dirs[:] = [d for d in dirs if os.path.relpath(os.path.join(root, d), upper) != skip]
@@ -153,14 +125,9 @@ def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
 
 
 def exists_only_in_uppers(relative: str, uppers: list[str], lower_fd: int) -> str | None:
-    """The review report's `sandbox_artifact`: a path that exists only in some member's upper.
-
-    That file is that member's own artifact — no other member can create a
-    file in your view — and is never independent confirmation of anything.
-    """
+    """No other member can create a file in your view, so this is that member's own artifact, never independent confirmation."""
     if _exists_in_lower(lower_fd, relative):
         return None
     held = [upper for upper in uppers if upper and os.path.lexists(os.path.join(upper, relative))]
-    # Attribution needs uniqueness: with two uppers holding it, naming either would be
-    # a lie, and the review report marks the artifact without owning it to a member.
+    # Attribution needs uniqueness: with two uppers holding it, naming either is a guess, so the report marks the artifact without an owner.
     return held[0] if len(held) == 1 else None

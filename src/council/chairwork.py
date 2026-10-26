@@ -1,20 +1,3 @@
-"""The chair's own rules, which only a caller can apply.
-
-The lane cannot tell a digest from a publication pass, so these rules live here:
-
-* one slot, outside `max_concurrency`, so a digest can never queue behind agent work;
-* a publication pass is a member ask like any other — lenient extraction's two
-repair re-asks, then the chair's digest, then a restart and **one** re-run, then
-exit 1 naming the round and phase; the failure is still recorded as an *outcome*
-in `run.json` and the report, so it is never nothing but an exit code;
-* a **digest** unreadable after both repair re-asks is `keep_all`: it never blocks anything,
-and a round with no chair pass is exactly the round the watchdog exists for;
-* a digest is bounded by `WATCHDOG_PASS_TIMEOUT_S` — a constant, never a config key, and a
-different value from the merge pass's timeout;
-* the chair holds no roster ID and appears in no rendered docket: `chair` is not a
-value of any `id` field.
-"""
-
 from __future__ import annotations
 
 from .config import Council
@@ -23,20 +6,14 @@ from .deliberation.state import CHAIR_ID
 from .prompts.brief import Brief
 from .sandbox.mount import WATCHDOG_PASS_TIMEOUT_S
 
-REPAIR_ASKS = 2  # extraction's repair count, shared by both lanes
-
 
 class ChairUnusable(Exception):
-    """The publication pass failed twice, and the run ends naming the phase."""
-
     def __init__(self, phase: str, round_: int, detail: str) -> None:
         super().__init__(f"the chair's {phase} pass failed in round {round_}: {detail}")
         self.phase, self.round, self.detail = phase, round_, detail
 
 
 class Chair:
-    """Every chair ask in the run goes through here, and only here."""
-
     def __init__(self, council: Council, lanes, console: Console, brief: Brief) -> None:
         self.council = council
         self.lanes = lanes
@@ -47,17 +24,14 @@ class Chair:
     # -- publication passes ------------------------------------------------------
 
     async def merge(self, listing: str, *, round_: int) -> dict:
-        """`{groups: [...], questions: [...]}`, or `refused` with the reason."""
         message = self.brief.merge(mode=self.council.mode, listing=listing)
         return await self._publication(message, kind="merge", phase="merge", round_=round_)
 
     async def compare(self, listing: str, *, round_: int) -> dict:
-        """The plan-mode comparison pass.  Unreadable twice and the run ends: there is no docket without it."""
         message = self.brief.comparison(mode=self.council.mode, listing=listing)
         return await self._publication(message, kind="compare", phase="compare", round_=round_)
 
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:
-        """Two attempts, the second only after a digest and a restart."""
         refusal = "no JSON object"
         for attempt in (0, 1):
             outcome = await self.lanes.ask_chair(
@@ -81,7 +55,6 @@ class Chair:
     # -- the digest ---------------------------------------------------------
 
     async def digest(self, rows: list[dict]) -> dict | None:
-        """One pass over `rows`.  `None` means *keep everyone* — the watchdog's own floor."""
         if not rows:
             return None
         self.passes += 1

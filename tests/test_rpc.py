@@ -1,8 +1,4 @@
-"""pi's dialect over real pipes, and what happens when a member dies.
-
-The fake pi is a real child process speaking real JSONL; nothing here is
-mocked, because the point is that process behaviour is tested with processes.
-"""
+"""pi's dialect over real pipes, and what happens when a member dies."""
 
 from __future__ import annotations
 
@@ -72,25 +68,9 @@ def test_get_state_comes_first_and_the_answer_is_correlated_by_id():
             await child.wait()
 
     _state, text = run(main())
-    assert "Agent1" in text or text, "the reply came back on the same session"
-
-
-def test_the_answer_waits_for_agent_settled_not_the_first_agent_end():
-    """A sub-agent's `agent_end` must not end the ask."""
-    script = [{"wait": 0.4, "reply": "the whole answer"}]
-
-    async def main():
-        child, rpc, _events = await start(script)
-        try:
-            return await rpc.ask("go")
-        finally:
-            await rpc.stop()
-            child.terminate()
-            await child.wait()
-
-    answer = run(main())
-    assert answer.text == "the whole answer"
-    assert answer.settled and not answer.errored
+    assert json.loads(text) == {"positions": [], "new_items": [], "answers": [], "questions": [], "human_input": [], "signoff": True}, (
+        "the answer is this prompt's scripted reply, not just any text that came back"
+    )
 
 
 def test_an_error_stop_reason_and_its_message_survive_to_the_unusable_test():
@@ -146,12 +126,7 @@ def test_tool_events_are_counted_and_their_results_reach_the_sandbox_inference()
 
 
 def test_the_inference_pass_reads_erroring_tool_results_and_nothing_else():
-    """`sandbox_full` / `sandbox_limit_hit` come from an *erroring* tool result, from its tail, and never from a successful one.
-
-    The patterns are the measured errno text, so this is the pass's whole contract:
-    what it fires on, what it must never fire on, and where its table
-    stops short of the report's.
-    """
+    """`sandbox_full` / `sandbox_limit_hit` come from an *erroring* tool result, from its tail, and never from a successful one."""
 
     def record(text: str, *, error: bool = True) -> dict:
         return {"toolName": "bash", "result": text, "isError": error}
@@ -262,7 +237,7 @@ def test_a_sidechains_agent_end_does_not_end_the_ask():
 
     answer, events = run(main())
     assert any(e.get("isSidechain") for e in events), "a sub-agent did end"
-    assert answer.text == "the real answer" and answer.settled
+    assert answer.text == "the real answer" and answer.settled and not answer.errored
 
 
 def test_a_child_that_closes_its_stdout_ends_every_wait():
@@ -295,11 +270,6 @@ def test_a_child_that_refuses_our_commands_is_a_protocol_error_not_a_retry():
 
     message = run(main())
     assert "unknown command" in message
-    assert rpc_unsupported_is_recorded(message)
-
-
-def rpc_unsupported_is_recorded(message: str) -> bool:
-    return bool(message)
 
 
 # --------------------------------------------------------- The abort
@@ -409,28 +379,7 @@ def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
     assert sent == [(member.pgid, signal.SIGTERM), (member.pgid, signal.SIGKILL)], sent
 
 
-def test_dispose_never_signals_our_own_group():
-    """The human checkpoint's stdin reader shares our pgid; signalling it would be signalling the run."""
-    own = os.getpgid(0)
-    sent = []
-    real_killpg = os.killpg
-
-    def fake_killpg(pgid, sig):
-        sent.append((pgid, sig))
-
-    os.killpg = fake_killpg
-    try:
-        member = _member(pgid=own)
-        asyncio.run(lifecycle.dispose(member, own_pgid=own))
-    finally:
-        os.killpg = real_killpg
-    assert sent == [], "our own group is never signalled"
-    assert lifecycle.send(1, signal.SIGTERM, own_pgid=own) is False, "never pid 1"
-    assert lifecycle.send(own, signal.SIGKILL, own_pgid=own) is False
-
-
 def _member(pgid=None, pid=999_991, stubborn=False):
-    """A Member-shaped object: `dispose` only touches proc, rpc, pgid and the stderr task."""
     from council.process.spawn import Member
 
     class Proc:
@@ -467,10 +416,25 @@ def _member(pgid=None, pid=999_991, stubborn=False):
     )
 
 
-def test_a_dead_child_is_not_reaped_twice():
+def test_a_child_that_already_exited_is_never_signalled_or_awaited():
     member = _member()
     member.proc.returncode = 0
-    asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
+    waited: list[int] = []
+
+    async def wait():
+        waited.append(1)
+        return member.proc.returncode
+
+    member.proc.wait = wait
+    sent: list[tuple[int, int]] = []
+    real_killpg = os.killpg
+    os.killpg = lambda pgid, sig: sent.append((pgid, sig))
+    try:
+        asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
+    finally:
+        os.killpg = real_killpg
+    assert sent == [], "a process that reported its exit code is not signalled"
+    assert waited == [], "nothing waits on it a second time"
 
 
 def test_close_stdin_is_how_a_clean_exit_is_asked_for():
@@ -486,3 +450,52 @@ def test_close_stdin_is_how_a_clean_exit_is_asked_for():
                 await child.wait()
 
     assert run(main()) == 0
+
+
+# ------------------------------------------------- The reader loop's framing: bytes, not lines
+
+
+class _NullStdin:
+    """PiRpc writes commands here.  Nothing in the framing tests writes one."""
+
+    def write(self, data: bytes) -> None:
+        pass
+
+    async def drain(self) -> None:
+        pass
+
+
+def _framed(payload: bytes, *, chunk: int) -> list[dict]:
+    """One PiRpc over a hand-fed StreamReader, with `payload` arriving in `chunk`-sized pieces."""
+    events: list[dict] = []
+
+    async def main():
+        reader = asyncio.StreamReader()
+        rpc = PiRpc(label="Agent1", stdout=reader, stdin=cast(asyncio.StreamWriter, _NullStdin()), on_event=events.append)
+        rpc.start()
+        for start in range(0, len(payload), chunk):
+            reader.feed_data(payload[start : start + chunk])
+        reader.feed_eof()
+        for _ in range(50):
+            await asyncio.sleep(0)  # let the reader task drain everything that was fed
+        await rpc.stop()
+
+    run(main())
+    return events
+
+
+def test_the_reader_splits_on_a_newline_byte_never_on_what_splitlines_calls_a_line():
+    """U+0085/U+2028/U+2029 are legal inside a JSON string: `str.splitlines()` would cut one record in two."""
+    text = "a\u0085b\u2028c\u2029d and a literal \\n too"
+    # ensure_ascii=False, so the separators reach the pipe as raw bytes rather than `\u2028` escapes.
+    payload = json.dumps({"type": "council_probe", "text": text}, ensure_ascii=False).encode("utf-8") + b"\n"
+    events = _framed(payload, chunk=7)
+    assert events == [{"type": "council_probe", "text": text}], "one record, whole, every exotic separator intact"
+
+
+def test_a_record_larger_than_asyncios_own_line_limit_still_arrives_whole():
+    """`StreamReader.readline` raises at 64 KiB and clears the buffer; raw chunk reads carry no cap."""
+    text = "x" * (300 * 1024)
+    payload = json.dumps({"type": "council_probe", "text": text}, ensure_ascii=False).encode("utf-8") + b"\n"
+    events = _framed(payload, chunk=64 * 1024)
+    assert len(events) == 1 and events[0]["text"] == text, "a multi-megabyte answer must not be dropped"

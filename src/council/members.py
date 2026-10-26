@@ -1,9 +1,3 @@
-"""The member registry: who is alive, who restarted, which namespace each spawn reported.
-
-Nothing here knows pi's dialect and nothing here knows the protocol: it spawns through the launcher form, checks the
-child with `get_state`, and disposes it with the stdin→TERM→KILL escalation.  A restart is a blank session on purpose.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +12,7 @@ from .sandbox.setup import Sandbox
 
 
 class MemberGone(Exception):
-    """A member died or never spoke: restart-and-re-ask owns it, and its end is exit 1."""
+    pass
 
 
 @dataclass
@@ -37,8 +31,6 @@ class Members:
     # -- spawn ---------------------------------------------------------------
 
     def file_base_for(self, agent_id: str) -> str:
-        """`AgentN` is the protocol name; `file_base` is the filesystem one.  A member is asked by its ID and lives under
-        its file_base, and only this translation joins them — which is also why an ID can never reach a path by accident."""
         for spec in self.council.agents:
             if spec.id == agent_id:
                 return spec.file_base
@@ -92,7 +84,6 @@ class Members:
         return member
 
     async def start_all(self) -> None:
-        """No probe, no handshake pass — the real spawn *is* the check."""
         specs = [*self.council.agents, self.council.chair]
         results = await asyncio.gather(*(self._start_one(spec) for spec in specs), return_exceptions=True)
         for spec, result in zip(specs, results):
@@ -124,7 +115,6 @@ class Members:
         self.console.say(f"{label} up · {spec.provider or 'default provider'}/{model} · ns {member.namespace}")
 
     async def restart(self, file_base: str, *, why: str) -> spawn.Member:
-        """Abort → group-kill → fresh spawn.  Never once disposal has begun."""
         if self.stopping:
             raise MemberGone(f"{file_base}: restart dropped, the run is stopping")
         old = self.members.get(file_base)
@@ -147,7 +137,6 @@ class Members:
     # -- dispose -------------------------------------------------------------
 
     async def dispose_all(self) -> lifecycle.SweepResult:
-        """Dispose everything without restarting it, then the namespace sweep."""
         self.stopping = True
         held = list(self.members.values())
         # A restarted member leaves two records: the old spawn's ns fd is in

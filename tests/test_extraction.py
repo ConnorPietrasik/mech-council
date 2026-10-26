@@ -1,8 +1,4 @@
-"""The extraction suite — the leniency owed to model prose, and the cases where it must stop.
-
-Leniency is scoped to model output: a paraphrase is mapped, a value that maps
-to nothing invalidates *its own field* and is never invented by the parser.
-"""
+"""The extraction suite — the leniency owed to model prose, and the cases where it must stop."""
 
 from __future__ import annotations
 
@@ -228,7 +224,7 @@ def test_phase0_plan_mode_reads_the_approach_schema():
 
 def test_a_plan_with_no_claim_and_no_stages_is_a_repair():
     out = parse_phase0(json.dumps({"approach": {}}), mode="plan")
-    assert out.repaired or out.errors
+    assert out.repaired and out.errors == ["the plan carries no stages"], "the repair asks for the one thing missing, by name"
 
 
 # --------------------------------------------------------------------------- chair payloads

@@ -1,9 +1,3 @@
-"""The shared briefing blocks.  Text only — every builder here is pure.
-
-The independence rule is a rule about *text*: `phase0_briefing()` takes no seat, no slot and no roster, so it
-cannot leak an ID even by accident — byte-identical across every seat and matching no `Agent\\d+` anywhere.
-"""
-
 from __future__ import annotations
 
 SANDBOX = """\
@@ -59,8 +53,8 @@ ESCALATION = """\
 QUESTION_SHAPE = """\
 # Asking well
 
-Every `human_input` entry carries three fields besides the item it names, and the human
-reads them at a checkpoint while the run is stopped:
+Every `human_input` entry carries the decision, the context, and the answers you would
+accept, and the human reads them at a checkpoint while the run is stopped:
 
 - `question` — the decision in one line. Not a topic and not a summary of your finding:
   the thing you cannot decide from the code.
@@ -97,7 +91,6 @@ with the guess it stands for — never decided silently. An unanswered
 
 
 def _mode_text(mode: str):
-    """The mode's own text, from `prompts/` — the one place prompt text lives."""
     from . import plan as plan_text
     from . import review as review_text
 
@@ -109,11 +102,6 @@ def goal_line(goal: str | None) -> str:
 
 
 def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
-    """Byte-identical for every seat — no ID, no slot, no peer name.
-
-    Nothing in this function takes a seat, a slot or a roster, which is what makes the
-    byte-identical result a property of the code shape rather than of care taken while writing it.
-    """
     text = _mode_text(mode)
     return "\n".join(
         [
@@ -133,7 +121,6 @@ def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
 
 
 def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket: str, phase0_summary: str) -> str:
-    """Self-contained (restart-safe) — identity, framing, the whole docket, the task."""
     text = _mode_text(mode)
     return "\n".join(
         [
@@ -162,7 +149,6 @@ def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket
 
 
 def gap_ask(missing: list[str], *, reason: str, deliberate: bool) -> str:
-    """Each ladder ask names only what is still missing for that seat."""
     line = (
         "You were shown these open items and returned nothing for them: "
         f"{', '.join(missing)}.\n\n"
@@ -178,7 +164,6 @@ def gap_ask(missing: list[str], *, reason: str, deliberate: bool) -> str:
 
 
 def repair_ask(mode: str, phase: str, error: str, previous: str) -> str:
-    """Lenient extraction's repair re-ask: the error, the schema hint, and the truncated previous answer."""
     return "\n".join(
         [
             "Your last answer could not be read as structured output.",
@@ -210,7 +195,6 @@ def schema_hint(mode: str, *, phase: str) -> str:
 
 
 def merge_task(mode: str, listing: str) -> str:
-    """The chair's merge pass, both modes: the chair's own framing, the mode's own task line."""
     from . import chair
 
     return "\n".join([chair.MERGE, _mode_text(mode).MERGE_TASK, ANSWER_SHAPE, chair.MERGE_SCHEMA, "---", "## The new items", "", listing])
@@ -240,7 +224,6 @@ def watchdog_task(digest: str) -> str:
 
 
 def explain_ask(question: str, followup: str) -> str:
-    """The human asks the asker to explain itself.  The reply is a recommendation."""
     return "\n".join(
         [
             "The human reviewing your question has a follow-up before answering.",
@@ -255,7 +238,6 @@ def explain_ask(question: str, followup: str) -> str:
 
 
 def defense_ask(item_id: str, challenge: dict, question: str) -> str:
-    """The one defense ask, earned by a challenge with cited evidence."""
     return "\n".join(
         [
             f"Your `needs_human` on {item_id} was challenged with cited evidence.",

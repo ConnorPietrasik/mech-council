@@ -1,9 +1,3 @@
-"""The console line and `events.jsonl`, from one emitter.
-
-Every event name is snake_case and the file is append-only, so a consumer never breaks when a new event appears.  Console
-line and event record are emitted together: a fact never reaches the run directory without being said, or the reverse.
-"""
-
 from __future__ import annotations
 
 import json
@@ -14,8 +8,6 @@ from typing import BinaryIO
 
 
 class Console:
-    """The run's voice.  Pure output: no state the deliberation could depend on."""
-
     def __init__(self, *, run_dir: str | None = None, stream=None) -> None:
         self.stream = stream if stream is not None else sys.stdout
         self.events_path = os.path.join(run_dir, "events.jsonl") if run_dir else ""
@@ -25,12 +17,10 @@ class Console:
         self._written = 0
 
     def say(self, text: str) -> None:
-        """One console utterance."""
         self.lines.append(text)
         print(text, file=self.stream, flush=True)
 
     def note(self, text: str) -> None:
-        """A CLI contract override note or any other non-event chatter, still marked `note:`."""
         self.say(f"note: {text}")
 
     def event(self, name: str, **fields) -> None:
@@ -42,14 +32,12 @@ class Console:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def events(self) -> list[dict]:
-        """The records this console emitted, in order (the event stream's log, read back in tests)."""
         return list(self._events)
 
     def duration(self) -> float:
         return round(time.monotonic() - self.started, 1)
 
     def transcript_note(self) -> str:
-        """The artifact tree's honest note: with `off` there is nothing to point at but stderr."""
         if self._written:
             return f"{self._written} bytes of raw protocol"
         return "stderr only, under `agents/`"
@@ -59,7 +47,9 @@ class Console:
 
 
 class Transcripts:
-    """The two transcript levels and the console sink, with the lazy `agents/` dir."""
+    """The two sinks per member, closed only once nothing can still write into them.  Append mode, so a restart continues the
+    file rather than truncating the run's own record of it.
+    """
 
     def __init__(self, run_dir: str, level: str) -> None:
         self.run_dir = run_dir
@@ -94,8 +84,6 @@ class Transcripts:
 
 
 class MemberSinks:
-    """One member's two sinks: the verbatim stdout stream and its stderr file."""
-
     def __init__(self, manager: Transcripts, file_base: str) -> None:
         self.manager = manager
         self.file_base = file_base
@@ -112,7 +100,6 @@ class MemberSinks:
         self.manager.bytes_written += len(chunk)
 
     def append_stderr(self, chunk: bytes) -> None:
-        """`agents/` is created **lazily**: the default configuration has a defined sink."""
         handle = self.manager._err.get(self.file_base)
         if handle is None:
             os.makedirs(self.manager.agents_dir, exist_ok=True)

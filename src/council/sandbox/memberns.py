@@ -1,7 +1,5 @@
-"""The member's own namespace, performed by the launcher in itself.
-
-Five steps, and their order is load-bearing.  Runs inside `launcher.py`, in the process about
-to `execvp` pi: there is no second process and no fork between the mounts and the exec.
+"""`unshare(CLONE_NEWNS)` moves only the caller's own namespace, so the member's view is mounted by the launcher process, in
+itself, immediately before it execs — a helper could only ever mount a world pi does not enter.
 """
 
 from __future__ import annotations
@@ -24,10 +22,7 @@ class SetupFailure(Exception):
 
 
 def setup_member_namespace(*, project: str, runs_dir: str, slot_dir: str, mask_tmp: bool | None = None) -> int:
-    """Mount the member's world and report the namespace id (`/proc/self/ns/mnt` inode).
-
-    `mask_tmp=None` decides the one mask condition: mask host `/tmp` only when it holds neither `<project>` nor `<runs_dir>`.
-    """
+    """`mask_tmp=None` means: mask host `/tmp` only when it holds neither `<project>` nor `<runs_dir>`."""
     view = f"{slot_dir}/view"
     scratch = f"{slot_dir}/scratch"
     step = "unshare(CLONE_NEWNS)"

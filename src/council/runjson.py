@@ -1,9 +1,3 @@
-"""`run.json`: created with the run directory, finalized on the way out.
-
-Wire names are the field names, and it is plain JSON on disk, readable
-without the tool.  Reports read **this**, not regex-scraped log lines.
-"""
-
 from __future__ import annotations
 
 import json
@@ -45,8 +39,6 @@ class MemberRecord:
 
 @dataclass
 class RunManifest:
-    """The manifest, in its two phases: at creation and at finalize."""
-
     path: str
     data: dict = field(default_factory=dict)
     members: dict[str, MemberRecord] = field(default_factory=dict)
@@ -56,7 +48,6 @@ class RunManifest:
         return self.members
 
     def record_prompts(self, counts: dict[str, int]) -> None:
-        """The prompt count, per member, as finalized (the human-input record is derivable from here)."""
         for file_base, count in (counts or {}).items():
             record = self.members.get(file_base)
             if record is not None:
@@ -64,7 +55,6 @@ class RunManifest:
                 self.data.setdefault("members", {})[file_base] = record.as_dict()
 
     def record_namespace(self, file_base: str, namespace: int) -> None:
-        """**Every** spawn's namespace, one per spawn — a restart adds one, and every one of them is in the sweep set."""
         record = self.members.get(file_base)
         if record is not None and namespace not in record.namespaces:
             record.namespaces.append(namespace)
@@ -78,7 +68,6 @@ class RunManifest:
 
 
 def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str, orchestrator_pid: int) -> RunManifest:
-    """At creation: config, council, mode, goal, roster with IDs, settings, pi, pids, members."""
     members: dict[str, MemberRecord] = {}
     roster = []
     for spec in council.agents:
@@ -141,7 +130,6 @@ def finalize(
     report: str | None,
     **extra,
 ) -> None:
-    """The finalize: outcome + write journal + the sweep's honest pair, **every** time."""
     manifest.data.update(
         {
             "outcome": outcome,
@@ -166,6 +154,5 @@ def _write(manifest: RunManifest) -> None:
 
 
 def read(path: str) -> dict:
-    """Readable without the tool."""
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)

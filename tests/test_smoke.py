@@ -1,11 +1,4 @@
-"""The only family that spends tokens.
-
-Deselected by default (`-m 'not slow'`); run it after a pi upgrade with `-m slow`. Everything here goes through the real `pi`,
-the real launcher and the real sandbox, which is the point: the offline families prove the protocol, this one proves the wiring.
-
-The smoke test says it in first person for a reason — run from inside a council agent the nested guard refuses, so
-the smoke passes `--allow-nested`. Without that flag the smoke fails for the wrong reason and says nothing about pi.
-"""
+"""The only family that spends tokens."""
 
 from __future__ import annotations
 
@@ -23,7 +16,7 @@ from tests.support.ground import GROUND_SKIP_PHRASE, SKIP_MARKERS
 TOY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "testdata", "toy-project")
 RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
 
-#: only the token-spending case carries `slow`; the two wiring checks below are free.
+#: only the token-spending case carries `slow`; every other check in this file is free.
 
 
 def _run(argv: list[str], cwd: str, env: dict, timeout: int) -> subprocess.CompletedProcess:
@@ -72,12 +65,11 @@ def test_a_real_council_reviews_the_toy_project_and_exits_zero(tmp_path):
     assert manifest["survivor_pids"] == [], "a real run left a survivor behind"
 
 
-@pytest.mark.parametrize("council", ["review"])
-def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent(council):
+def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent():
     """The smoke test's own method claim: without `--allow-nested` the nested guard refuses, and says so."""
     marker = {"COUNCIL_RUN_DIR": "/tmp/not-a-real-run-dir", "COUNCIL_RUN_PATH": "/tmp/not-a-real-run-dir"}
     env = dict(os.environ, **marker, COUNCIL_RUNS_DIR="/tmp/council-smoke-guard")
-    result = _run([council, "--project", TOY], cwd=TOY, env=env, timeout=120)
+    result = _run(["review", "--project", TOY], cwd=TOY, env=env, timeout=120)
     # A refusal to convene is a setup failure (1), not a usage error (2) — the
     # flags were well-formed, and what the run refused to do was start.
     assert result.returncode == 1, result.stderr[-400:]
@@ -86,13 +78,7 @@ def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent(council):
 
 
 def test_the_sandbox_family_is_never_silently_empty():
-    """The harness rule is that the sandbox family *ran*, not that it exited 0.
-
-    A collection count is the honest form of that claim, and it is checked here rather than by running the suite
-    from inside a member: that would run this module again, inside a member, which would want to run the
-    suite again.  What can be observed without recursion is the failure this check guards against — a sandbox
-    family skipped because the fixture ground turned out to be an overlay, which exits 0 while proving nothing.
-    """
+    """The harness rule is that the sandbox family *ran*, not that it exited 0."""
     here = os.path.dirname(os.path.abspath(__file__))
     listing = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_sandbox.py", "--collect-only", "-q", "-p", "no:cacheprovider"],
@@ -107,12 +93,7 @@ def test_the_sandbox_family_is_never_silently_empty():
 
 
 def _skip_candidates(path: str) -> list[tuple[int, str]]:
-    """Every call and decorator in a file, with the source text it spans.
-
-    Parsed rather than scanned line by line: one marker lives in a call whose reason runs to the next
-    line, and reformatting a file must never be able to invent — or hide — a skip path.  The markers
-    still decide what counts, so this stays as strict as the text scan it replaces.
-    """
+    """Every call and decorator in a file, with the source text it spans."""
     with open(path, encoding="utf-8") as handle:
         src = handle.read()
     found: list[tuple[int, str]] = []
@@ -124,13 +105,7 @@ def _skip_candidates(path: str) -> list[tuple[int, str]]:
 
 
 def test_the_ground_skip_is_the_only_way_this_suite_proves_nothing():
-    """A test skipped for any other reason fails the suite.
-
-    Checked statically because the honest runtime version — run everything and count skips — is the suite
-    itself.  One skip exists: the sandbox family's fstype proxy in tests/test_sandbox.py.  Anything else
-    that skips would pass the suite while testing nothing, which is the exact failure mode that family
-    names.
-    """
+    """A test skipped for any other reason fails the suite."""
     here = os.path.dirname(os.path.abspath(__file__))
     offenders = []
     for name in sorted(os.listdir(here)):

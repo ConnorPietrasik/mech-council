@@ -1,9 +1,3 @@
-"""Mode adapters hold **data and hooks only** — no parsing, no prompts, no arithmetic.
-
-The registry is where a new mode is registered; config validation reads its literals
-from `config.MODES`, which is derived from here.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,13 +5,6 @@ from typing import Protocol
 
 
 class ModeAdapter(Protocol):
-    """Everything a mode contributes to the shared machinery.
-
-    Every member is a read-only property: an adapter is a frozen record that the machinery
-    reads and never writes, and a protocol member stated as a variable would ask for one
-    you could assign through — which no adapter is.
-    """
-
     @property
     def mode(self) -> str: ...
 
@@ -65,8 +52,7 @@ class BaseAdapter:
     report_sections: tuple[str, ...] = ()
     synonyms: dict = field(default_factory=dict)
 
-    # Hooks are injected by the engine, never imported by the adapter (the thin-adapter
-    # rule's grep-test forbids a mode module touching subprocess/asyncio/tomllib or I/O).
+    # Hooks are injected by the engine, never imported by the adapter: `modes/` stays data.
     def seed_sections(self) -> tuple[str, ...]:
         return self.report_sections
 

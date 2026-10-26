@@ -1,29 +1,11 @@
-"""One suggestion function — flags, config keys and council names alike.
-
-Reached only for a name the parser has already refused, so there is no "it matched, so stay silent" case: a
-normalized match is the hint's best answer, never a reason to withhold one.  It **suggests, never accepts**.
-
-The ladder, after normalizing both sides:
-
-1. exact normalized match → that name;
-2. prefix match either way round → that name, resolved against rule 3 below whenever a
-near-miss is *closer* than the prefix: a hint that names a real but wrong council is
-worse than no hint, because convening it is not harmless;
-3. Levenshtein over the normalized forms: ≤1 edit under 6 chars, ≤2 at 6 and above.
-
-No match at any step → no hint at all: the CLI contract's restraint is the point.
-"""
-
 from __future__ import annotations
 
 
 def normalize(name: str) -> str:
-    """Case folded, ``_``/``-`` dropped, leading dashes stripped."""
     return name.strip().lstrip("-").casefold().replace("_", "").replace("-", "")
 
 
 def distance(a: str, b: str) -> int:
-    """Plain Levenshtein over two strings."""
     if a == b:
         return 0
     if not a:
@@ -46,16 +28,10 @@ def distance(a: str, b: str) -> int:
 
 
 def threshold(form: str) -> int:
-    """≤1 edit for short tokens, ≤2 for ≥6 chars."""
     return 2 if len(form) >= 6 else 1
 
 
 def _closest(forms: list[str], probe: str) -> str:
-    """The element of a non-empty `forms` nearest to `probe`.
-
-    Every caller reaches here out from under an `if hits:` / `if near:` guard, so the empty
-    list is not a case this answers with `None`; it answers with the first nearest name.
-    """
     best, best_d = forms[0], distance(probe, forms[0])
     for form in forms[1:]:
         d = distance(probe, form)
@@ -65,11 +41,6 @@ def _closest(forms: list[str], probe: str) -> str:
 
 
 def suggest(refused: str, known: list[str] | tuple[str, ...]) -> str | None:
-    """The canonical spelling of the closest known name, or ``None``.
-
-    Two *known* names that normalize alike both print, joined by ``/``, rather than one being
-    picked (possible for council names, which are user text; not for the fixed flag and key sets).
-    """
     probe = normalize(refused)
     if not probe:
         return None

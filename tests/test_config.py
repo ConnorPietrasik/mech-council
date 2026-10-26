@@ -1,8 +1,4 @@
-"""The config loader and selection.
-
-The config loader's validation list is the case list, one assertion per rule
-with the message it owes; precedence and comments are the only additions.
-"""
+"""The config loader and selection."""
 
 from __future__ import annotations
 
@@ -11,6 +7,7 @@ import os
 import pytest
 
 from council import config as config_mod
+from council import suggest
 from council.cli import Args, ConfigError, UsageError
 
 REFERENCE_CONFIG = '''# council.toml — the reference config, taken verbatim by the loader.
@@ -266,3 +263,21 @@ def test_an_unresolvable_pi_leaves_nothing_behind(tmp_path, canary):
     with pytest.raises(ConfigError):
         convene(tmp_path, text)
     assert os.listdir(canary) == []
+
+
+# --------------------------------------------------------------------------- the "did you mean" hint
+
+
+def test_a_refused_name_is_matched_exactly_or_by_prefix_before_any_edit_distance():
+    known = ["max_rounds", "chair_timeout_sec", "sandbox_mib", "watchdog_sec"]
+    assert suggest.suggest("--max-rounds", known) == "max_rounds", "dashes, underscores and case are the same name"
+    assert suggest.suggest("--maxround", known) == "max_rounds", "a prefix matches either way round"
+
+
+def test_the_edit_distance_a_typo_is_allowed_scales_with_the_name():
+    known = ["goal", "docket", "max_rounds"]
+    assert suggest.suggest("gool", known) == "goal", "one edit for a short name"
+    assert suggest.suggest("gola", known) is None, "two is not a typo on a four-letter name"
+    assert suggest.suggest("dkcxet", known) == "docket", "at six characters two edits are allowed"
+    assert suggest.suggest("dkcxetx", known) is None, "three is not a typo, at six characters or at any other length"
+    assert suggest.suggest("", known) is None, "nothing to suggest a name for"

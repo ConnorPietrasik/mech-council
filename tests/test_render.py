@@ -1,17 +1,11 @@
-"""The renderers: pure functions of (state, context), so they compare exactly.
-
-The rules under test are the single renderer's: every line comes from the state, a closed item
-stays addressable, `you`/`[yours]` are per viewer, and nothing is worded from the console log.
-"""
+"""The renderers: pure functions of (state, context), so they compare exactly."""
 
 from __future__ import annotations
 
 from council.deliberation import dispositions, escalations, state
 from council.render import docket as docket_render
-from council.render import report_plan, report_review
+from council.render import preview, report_plan, report_review
 from council.render.context import ReportContext, RosterRow
-
-from .support.harness import payload  # noqa: F401  (keeps the fixture vocabulary shared)
 
 
 def build(mode="review", n=3, goal="g"):
@@ -136,12 +130,7 @@ def test_an_item_nobody_stanced_says_who_never_saw_it():
 
 
 def test_an_item_every_seat_declined_is_reported_as_a_decline_not_a_miss():
-    """A survived gap is an inert abstention, so the item is `unheard`.
-
-    The disposition rules' `unheard` row names this case itself — "including the case where
-    every seat abstained or declined" — so the item belongs under "Not fully vetted", named seat
-    by seat, and the run's own record reads as a decline rather than as an item nobody saw.
-    """
+    """A survived gap is an inert abstention, so the item is `unheard`."""
     docket = build()
     item(docket, "F1", "nobody would touch it")
     for agent in docket.roster:
@@ -185,7 +174,8 @@ def test_a_human_answer_is_attributed_to_the_human_never_to_a_seat():
     question.state, question.answer, question.answer_round = (state.ANSWERED, "the e2e suite", 2)
     text = report_review.render(docket, context())
     line = [row for row in text.splitlines() if "the e2e suite" in row][0]
-    assert "Agent" not in line.split("the e2e suite")[0].replace("Agent1", "F1") or "human" in line.lower()
+    assert "Agent" not in line, f"a seat is credited with the human's answer: {line}"
+    assert "the e2e suite" in text.split("## Open questions for the human")[1], "it is reported under the human's own section"
 
 
 def test_the_sandbox_journal_is_rendered_per_member_with_its_markers():
@@ -274,3 +264,28 @@ def test_the_plan_report_carries_no_review_only_sections():
     text = report_plan.render(docket, context(mode="plan"))
     assert "## Consensus findings" not in text
     assert "Decision points" in text
+
+
+# --------------------------------------------------------------------------- the digest's one-line preview
+
+
+def test_a_wrapped_command_previews_as_the_command_and_not_its_cd():
+    assert preview.collapse_cd("cd /srv/app && make test") == "make test"
+    assert preview.collapse_cd("cd /srv/app; make") == "make"
+    assert preview.collapse_cd("make test") == "make test", "a command with no cd is left exactly as it came"
+    assert preview.preview({"command": "cd /srv/app && make test"}, project="/srv/app", tool_name="bash") == "make test"
+    assert preview.preview({"command": "make test"}, project="/srv/app", tool_name="exec") == "make test"
+
+
+def test_a_preview_names_the_argument_that_matters_relative_to_the_project():
+    assert preview.preview({"path": "/srv/app/src/main.py", "offset": 10}, project="/srv/app") == "path=src/main.py"
+    assert preview.preview({"pattern": "tenant"}, project="") == "pattern=tenant"
+    assert preview.preview("free-form argument", project="") == "free-form argument"
+
+
+def test_a_long_preview_keeps_both_ends_because_the_tail_is_the_part_that_bites():
+    command = "npm test " + "x" * 400
+    shown = preview.preview({"command": command}, project="", tool_name="bash", limit=60)
+    assert shown.startswith("npm test xxxx"), "the head still says what was run"
+    assert shown.endswith("xxxx") and "…" in shown, "the tail survives, so a long target is still readable"
+    assert len(shown) <= 60

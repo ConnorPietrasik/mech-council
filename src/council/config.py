@@ -1,9 +1,3 @@
-"""The config loader: strict where lenient extraction is lenient, and the two never meet.
-
-`tomllib` polices neither keys nor types, so the loader owns the key set and the value types at every level; what it
-must not soften is `TOMLDecodeError`'s line/column, which belongs in the user-fixable line and never in a traceback.
-"""
-
 from __future__ import annotations
 
 import os
@@ -44,8 +38,6 @@ AGENT_KEYS = {"name": "str", "provider": "str", "model": "str", "persona": "str"
 
 @dataclass
 class MemberSpec:
-    """An agent or the chair: exactly the same key set."""
-
     name: str
     provider: str | None = None
     model: str | None = None
@@ -81,24 +73,16 @@ class Council:
 
     @property
     def adapter(self):
-        """The mode is a registry entry, reached through the council that named it."""
         from .modes import adapter_for
 
         return adapter_for(self.mode)
 
     @property
     def member_file_bases(self) -> list[str]:
-        """Every member, seat and chair alike: the sandbox's per-member overlay pairs are keyed on these."""
         return [agent.file_base for agent in self.agents] + [self.chair.file_base]
 
     @property
     def seat_ids(self) -> list[str]:
-        """Every seat's `AgentN` id, in roster order.
-
-        Convening assigns one to each seat and withholds it from the chair alone, so a seat
-        without an id is a council that was assembled without being convened.  That says so
-        rather than handing the run a roster with `None` printed on it.
-        """
         ids: list[str] = []
         for agent in self.agents:
             if agent.id is None:
@@ -108,7 +92,6 @@ class Council:
 
     @property
     def seat_names(self) -> dict[str, str]:
-        """`AgentN` → the human name the console and the reports print for that seat."""
         return dict(zip(self.seat_ids, [agent.name for agent in self.agents]))
 
 
@@ -131,8 +114,7 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
     return value
 
 
-#: The mode registry: config validation reads its literals from here, so a
-#: new mode is a registry entry plus an adapter, never a scattered literal.
+#: The mode names config validation accepts; `modes.REGISTRY` is what the machinery dispatches on.
 MODES: tuple[str, ...] = ("review", "plan")
 
 
@@ -200,8 +182,6 @@ def _flatten(source: dict, defaults: dict, where: str) -> dict:
 
 @dataclass
 class ConfigFile:
-    """A parsed `council.toml`: the councils it offers plus the shared `[defaults]`."""
-
     path: str
     defaults: dict = field(default_factory=dict)
     councils: dict[str, dict] = field(default_factory=dict)
@@ -211,7 +191,6 @@ class ConfigFile:
 
 
 def load_config(path: str) -> ConfigFile:
-    """Parse and file-level validate.  Nothing per-council is checked here."""
     if path.endswith(".json"):
         raise ConfigError(f"refusing {path!r}: the config is TOML (council.toml), never JSON")
     try:
@@ -243,7 +222,6 @@ def load_config(path: str) -> ConfigFile:
 
 
 def select_council(config: ConfigFile, name: str | None) -> str:
-    """Council selection: exact match, or the only council in the file.  Never a silent pick."""
     names = config.names()
     if name is None:
         if len(names) == 1:
@@ -261,7 +239,6 @@ def select_council(config: ConfigFile, name: str | None) -> str:
 
 
 def resolve_pi(explicit: str | None, project: str) -> tuple[str, str]:
-    """pi discovery: council → `[defaults]` → PATH, no env-var step."""
     if explicit:
         if "/" in explicit:
             candidate = explicit if os.path.isabs(explicit) else os.path.join(os.getcwd(), explicit)
@@ -287,8 +264,6 @@ def resolve_pi(explicit: str | None, project: str) -> tuple[str, str]:
 
 
 def convene(config: ConfigFile, name: str, args: Args, project: str, *, untrusted: bool = False) -> Council:
-    """Flatten precedence (flag → council → `[defaults]` → built-in) and validate the
-    convened council — the point where every per-council rule is a load-time check."""
     table = config.councils[name]
     flat = _flatten(table, config.defaults, f"[councils.{name}]")
     agents_raw = table.get("agents")

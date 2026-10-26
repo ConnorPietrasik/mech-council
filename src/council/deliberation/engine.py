@@ -1,14 +1,6 @@
-"""The one round loop, for both modes.
-
-No I/O here: no `asyncio`, no `subprocess`, no paths.  Every ask leaves through the injected `AskPort`, which
-is `asks.py` + the two lanes; the batch shape is what lets a whole round or a whole ladder run concurrently
-without this module knowing what concurrency is.  The adapters contribute data; all arithmetic is here.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from ..extraction import parse_phase0, parse_verdict
 from ..modes.base import adapter_for
@@ -40,17 +32,13 @@ from .termination import evaluate
 
 @dataclass
 class RawAsk:
-    """What came back from one mediated ask: a message, or the reason there is none."""
-
     text: str | None = None
-    failure: str | None = None  # restart-and-re-ask's second failure: run ends
+    failure: str | None = None  # the ask failed terminally; the loop turns it into an `Abort`
     rejected: bool = False  # it arrived and lenient extraction refused it
 
 
 @dataclass
 class CheckpointOutcome:
-    """The human checkpoint's result: who answered, who was skipped, and whether the run waited."""
-
     answers: dict[str, str] = field(default_factory=dict)
     # `H1: 2` selects an offered option: the answer is that option's own words, and the number records the selection.
     answer_options: dict[str, int] = field(default_factory=dict)
@@ -63,31 +51,7 @@ class CheckpointOutcome:
         return bool(self.answers)
 
 
-class AskPort(Protocol):
-    """The only way in and out of the loop."""
-
-    async def ask_seats(
-        self, batch: list[tuple[str, str]], *, round_: int, phase: str = "round", classify_unusable: bool = False
-    ) -> dict[str, RawAsk]: ...
-
-    async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round") -> RawAsk: ...
-
-    async def ask_chair(
-        self, message: str, *, kind: str, round_: int, timeout: float | None = None, classify_unusable: bool = False
-    ) -> RawAsk: ...  # not used
-
-    async def chair_merge(self, listing: str, *, round_: int) -> dict: ...
-
-    async def chair_compare(self, listing: str, *, round_: int) -> dict: ...
-
-    async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool) -> CheckpointOutcome: ...
-
-    async def restart(self, agent: str, why: str) -> None: ...
-
-
 class Abort(Exception):
-    """Restart-and-re-ask's second failure, or an unusable member: the run ends with `aborted`."""
-
     def __init__(self, reason: str, *, member: str = "", provider: str | None = None, model: str | None = None, round_: int = 0) -> None:
         super().__init__(reason)
         self.reason, self.member = reason, member
@@ -95,8 +59,6 @@ class Abort(Exception):
 
 
 class Engine:
-    """Phase 0 → publication → rounds → outcome.  One implementation, both modes."""
-
     def __init__(
         self,
         docket: Docket,
@@ -154,7 +116,6 @@ class Engine:
     # -- phase 0 --------------------------------------------------------------
 
     async def phase0(self) -> list[str]:
-        """One byte-identical briefing, every seat, no IDs."""
         assert self.brief is not None
         message = self.brief.phase0(mode=self.docket.mode, goal=self.goal, project=self.project)
         batch = [(agent, message) for agent in self.docket.roster]
@@ -192,10 +153,10 @@ class Engine:
                 # An `open_questions` entry is an item-less request raised at round 0.
                 raise_question(self.docket, text=question, asker=agent, item_id=None, blocking=False, round_=0)
             for entry in parsed.data.get("human_input") or []:
-                # Phase 0 raises **requests**, never escalations: an entry naming an item names one whose finding may
-                # not exist yet, so the item is dropped and the request is raised item-less — with the context and the
-                # options the brief asked for, which is the whole point of asking a seat for them this early.  It is
-                # item-less only until the same words come back naming an item, which is when it becomes the escalation.
+                # Phase 0 raises requests, never escalations: an entry naming an item names one whose finding may not
+                # exist yet, so the item is dropped and the request is raised item-less — with the context and the options
+                # the brief asked for.  It is item-less only until the same words come back naming an item, which is when
+                # it becomes the escalation.
                 if entry.get("question"):
                     raise_question(
                         self.docket,
@@ -218,14 +179,12 @@ class Engine:
     # -- publication ----------------------------------------------------------
 
     async def publish_review(self) -> None:
-        """The review publication: one dedup merge pass, validated structurally, before any docket."""
         if not self.docket.order:
             self.emit("chair_merge_skipped", reason="nothing to merge")
             return
         await self._merge_pass(round_=0, ids=list(self.docket.order))
 
     async def publish_plan(self) -> None:
-        """The plan publication: the chair maps the plans; conflicts and gaps seed the topics."""
         listing = self._approach_listing()
         comparison = await self.port.chair_compare(listing, round_=0)
         self.docket.agreed_points = comparison.get("agreed") or []
@@ -250,7 +209,6 @@ class Engine:
         )
 
     def _approach_listing(self) -> str:
-        """The chair's comparison input: one block per seat, headed by its ID and nothing else."""
         blocks = []
         for agent in self.docket.roster:
             approach = self.docket.approaches.get(agent)
@@ -362,7 +320,6 @@ class Engine:
             )
 
     def _answers(self, entries: list[dict], agent: str, round_: int) -> None:
-        """An answer matching no question is logged, never silently dropped."""
         for entry in entries:
             target = entry.get("to") or ""
             qid = (entry.get("question") or "").strip()
@@ -376,12 +333,6 @@ class Engine:
             qa.answered_round = round_
 
     def _latest_unanswered(self, *, answered_by: str, addressed_to: str):
-        """The question an answer belongs to when the answer named no `Q` id.
-
-        A live model writes "answering what Agent1 asked me" rather than `Q3`, and lenient extraction says that answer is kept
-        rather than dropped.  The only question it can be is the latest unanswered one `addressed_to` put to `answered_by` — both
-        sides are IDs, because a seat reads and writes IDs and never a roster name.
-        """
         matches = [qa for qa in self.docket.qa.values() if qa.asker == addressed_to and qa.to == answered_by and not qa.answer]
         return max(matches, key=lambda qa: qa.round, default=None)
 
@@ -399,7 +350,6 @@ class Engine:
             self.docket.qa_order.append(qa.id)
 
     def _human_input(self, entries: list[dict], asker: str, round_: int) -> None:
-        """An entry naming an item is an escalation request; one naming none is a question."""
         for entry in entries:
             item_id = entry.get("item")
             if item_id and item_id not in self.docket.items:
@@ -437,13 +387,6 @@ class Engine:
             self.emit("chair_question", id=question.id, effective="blocking", round=round_)
 
     def _re_or_raise(self, asker: str, *, item_id: str | None, entry: dict, round_: int):
-        """File one `human_input` entry: refresh the asker's own open question, or raise a new one.
-
-        A standing escalation owns exactly one open question, so a seat that re-asks with refreshed wording gets that
-        question **updated**.  Forking it would put two questions over one decision in front of the human — one of them
-        carrying the menu the entry offered, neither saying they are the same question — and answering either retires
-        the escalation and drops the other out of the ask set, leaving the one nobody answered recorded as asked.
-        """
         fields = {
             "text": entry["question"],
             "context": entry.get("context", ""),
@@ -456,7 +399,6 @@ class Engine:
         return raise_question(self.docket, asker=asker, item_id=item_id, round_=round_, **fields)
 
     def _owned_open_question(self, item_id: str | None, asker: str):
-        """The asker's own still-open question on this item, when its standing escalation has one."""
         if not item_id:
             return None
         escalation = self.docket.escalations.get((item_id, asker))
@@ -468,7 +410,6 @@ class Engine:
         return question
 
     def _recheck_class(self, question, round_: int) -> None:
-        """An effective-class change is a console line and signature movement."""
         now = effective_class(self.docket, question)
         before = self._class_of.get(question.id)
         self._class_of[question.id] = now
@@ -478,11 +419,6 @@ class Engine:
     # -- gap ladder -----------------------------------------------------
 
     async def _gap_ladder(self, round_: int, rejected: list[str], *, mechanical: bool) -> None:
-        """One ladder per (seat, round), at most 4 asks for the seat-round.
-
-        A rejected message is gapped on **everything** it was shown; a seat whose ask failed outright is not here at all
-        (restart-and-re-ask owns that), and the budget survives a restart because it lives on the seat-round, not on the child.
-        """
         pending = {}
         for agent in self.docket.roster:
             missing = gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
@@ -534,7 +470,6 @@ class Engine:
                     del pending[agent]
 
     def _apply_gap(self, agent: str, chunk: list[str], result: RawAsk, round_: int) -> list[str]:
-        """Merge a gap answer into the seat's verdict; return what is *still* missing."""
         if result.rejected:
             return list(chunk)
         data = parse_verdict(
@@ -574,7 +509,6 @@ class Engine:
         return still
 
     def _decline(self, agent: str, missing: list[str], round_: int) -> None:
-        """A gap that survives its ladder becomes a `declined` record, never a failure."""
         items = [entry for entry in missing if entry != "backing"]
         for item_id in items:
             self.docket.stances.setdefault(item_id, {})[agent] = Stance(stance=ABSTAIN, round=round_, declined=True)
@@ -585,7 +519,6 @@ class Engine:
     # -- challenge / defense ------------------------------------------
 
     async def _challenge_pass(self, round_: int) -> None:
-        """One challenge earns exactly one defense ask; an unchallenged round costs zero."""
         for (item_id, asker), escalation in list(self.docket.escalations.items()):
             if escalation.state != STANDING:
                 continue
@@ -618,7 +551,6 @@ class Engine:
             self.emit("escalation_demoted", item=item_id, asker=asker, round=round_)
 
     def _apply_defense(self, item_id: str, asker: str, result: RawAsk, round_: int) -> str | None:
-        """A defense merges into the round's verdict the way a gap answer does."""
         if result.rejected:
             return ""
         data = parse_verdict(
@@ -640,10 +572,9 @@ class Engine:
                 self.emit(event, **fields)
         for entry in data.get("human_input") or []:
             if entry.get("item") == item_id and entry.get("question"):
-                # A defense is a verdict like any other: the menu the seat offered the human rides with it, or the
-                # schema that asked for the menu is a lie in exactly the one ask where the seat argued for the ask.  And
-                # the defense is the ask that *invites* refreshed question text, so it is where forking bites: the
-                # refreshed wording updates the escalation's own question rather than opening a second, bare one.
+                # A defense is a verdict like any other, so the menu the seat offered rides with it — the schema asks for one, and this is
+                # the ask where a seat most wants to offer it.  It is also the ask that *invites* refreshed question text, so it is where
+                # forking bites: the refreshed wording updates the escalation's own question instead of opening a second, bare one.
                 question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
                 if escalation is not None:
@@ -659,7 +590,6 @@ class Engine:
     # -- merge passes ---------------------------------------------------------
 
     async def _merge_new_items(self, round_: int) -> None:
-        """In-round dedup in **both** modes, before the gap ladder so gaps cite canonical IDs."""
         fresh = [i for i in self.docket.order if not self.docket.items[i].closed and self.docket.items[i].opened_round == round_]
         if not fresh:
             return  # the pass runs only in rounds where new items arrived
@@ -680,7 +610,6 @@ class Engine:
         self.emit("chair_merge", round=round_, groups=applied)
 
     def _apply_merge(self, groups: list[dict]) -> tuple[int | None, str]:
-        """The merge plan's structural validation, reached by **both** modes: any inconsistency refuses the **whole** plan."""
         seen: set[str] = set()
         usable = []
         for group in groups:
@@ -747,7 +676,6 @@ class Engine:
     # -- the whole run ---------------------------------------------------------
 
     async def run(self) -> str:
-        """Phase 0 → publication → rounds → outcome.  Returns one of `state.OUTCOMES`."""
         await self.phase0()
         if self.docket.mode == "plan":
             await self.publish_plan()
@@ -770,7 +698,7 @@ class Engine:
         if outcome is not None:
             return outcome
         if self.checkpoint_moved:
-            # **an answer buys a round** — unconditionally, ahead of the round limit, and as a full round.  Re-evaluating
+            # an answer buys a round — unconditionally, ahead of the round limit, and as a full round.  Re-evaluating
             # here would let the answer itself settle the run and throw away the round it paid for.
             self.previous_signature = signature(self.docket)
             self.checkpoint_moved = False
@@ -797,7 +725,6 @@ class Engine:
         return GO
 
     def _mark_unasked(self) -> list[str]:
-        """Mark every still-unanswered ask-set question `unasked`; return their ids."""
         from .termination import unsettled_questions
 
         marked = []
@@ -808,7 +735,6 @@ class Engine:
         return marked
 
     async def _checkpoint(self, round_: int, *, terminal: bool, provisional: str = "", stale: bool = False):
-        """The checkpoint: the listing always prints; only the wait is conditional."""
         from .escalations import effective_class
         from .termination import unsettled_questions
 
@@ -834,15 +760,11 @@ class Engine:
             skipped=len(outcome.skipped),
             terminal=terminal,
         )
-        # Every selection is resolved against the menu it was chosen from **before** any answer lands on the docket.  A
-        # number the menu never held was never shown to the human, so it names nothing — that is a bug in the port, and the
-        # run says which bug.  What it does **not** do is end the run: the answer arrived as the human's own line and keeps
-        # its authority, only the provenance is dropped, and a run that spent every token it spent to contradict the console
-        # line the human already read ("answered — the answer is authoritative") would trade a bad integer for a bad result.
-        # The record stays honest either way: `answer_option` 0 says the answer came in the human's words, not off a menu.
-        # The last check is the one that makes the record more than plausible: the numbered line has to **be** the answer, so
-        # a menu that moved between the console line and this moment cannot silently credit the human with choosing a line
-        # they never read.
+        # Every selection is resolved against the menu it was chosen from, before any answer lands on the docket.  A number the menu never
+        # held was never shown, so it names nothing: that is a bug in the port and the run says which, but it does not end the run — the
+        # answer arrived as the human's own line and keeps its authority, and only the provenance is dropped (`answer_option` 0 says so).
+        # The last check is what makes the record more than plausible: the numbered line has to *be* the answer, so a menu that moved
+        # between the console line and here cannot silently credit the human with choosing a line they never read.
         selections: dict[str, int] = {}
         for qid, number in outcome.answer_options.items():
             question = self.docket.questions.get(qid)
@@ -884,7 +806,7 @@ class Engine:
             question.answer, question.answer_round = answer, round_
             number = selections.get(qid) or 0
             if number:
-                # The Checkpoint resolved this index against **this** menu, the run is parked while the human answers so
+                # The Checkpoint resolved this index against this menu, the run is parked while the human answers so
                 # nothing files a question in between, and the check above proved line `number` is this answer — so this
                 # names the very line the human was shown.
                 question.answer_option = number
@@ -913,7 +835,6 @@ class Engine:
         return None
 
     def _retire_covered(self, question, round_: int, *, answered: bool) -> None:
-        """Answering or skipping **retires** every escalation the question covers."""
         for (item_id, asker), escalation in list(self.docket.escalations.items()):
             if escalation.question_id != question.id and (item_id != question.item_id or asker not in question.askers):
                 continue
@@ -924,21 +845,11 @@ class Engine:
 
 
 def _partial(docket: Docket, agent: str, round_: int) -> bool:
-    """The gap ladder's mechanical cause: a verdict that covered *some* items and not others."""
     answered = sum(1 for item_id in [i for i in docket.order] if (r := docket.stance(item_id, agent)) and r.round == round_)
     return 0 < answered < len(docket.open_items())
 
 
 def _answers_challenge(defense: str, question: str) -> bool:
-    """A defense stands unless it brought nothing new to the item.
-
-    Every demote trigger is a version of "the asker said nothing": an empty answer (which includes a lenient extraction rejection),
-    or **the question repeated back**. So the mechanical test is whether the defense says anything the question did not say.
-
-    The challenger's own words are deliberately *not* the yardstick: overlap with them fires on a pure repeat whenever
-    the challenger quoted the question, and requiring that overlap would demote a defense that answers the cited evidence
-    in other words — turning "a human must decide" into "the council proceeded", the worse of the two errors here.
-    """
     said = _tokens(defense)
     return bool(said - _tokens(question))
 
@@ -948,11 +859,6 @@ def _tokens(text: str) -> set[str]:
 
 
 def _merge_entry(item) -> str:
-    """One merge-listing entry: the ID, the claim, what breaks and when, and the evidence.
-
-    The chair judges **the same defect or two causes**, and the cause lives in `detail` — a listing of claim and evidence alone asks it to
-    merge on the wording.  The ID leads because it is what the chair echoes back, and no reporter is named anywhere in here.
-    """
     lines = [f"- {item.id}: {item.claim}"]
     if item.detail:
         lines.append(f"    what breaks: {item.detail}")
@@ -962,7 +868,6 @@ def _merge_entry(item) -> str:
 
 
 def _stage_name(stage) -> str:
-    """Lenient extraction's plan stages are `{name, detail}`; a bare string is still accepted."""
     if isinstance(stage, dict):
         return str(stage.get("name") or stage.get("title") or "")
     return str(stage)

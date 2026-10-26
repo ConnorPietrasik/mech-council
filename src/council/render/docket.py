@@ -1,13 +1,3 @@
-"""Per-viewer docket rendering, written once.
-
-The shared skeleton (items, stances with their round and `declined` flag, who holds no current stance, closed one-liners **with their
-IDs**, the human checkpoint's open requests with their effective class) is here; a mode adds *sections*, never a second renderer.
-
-**A seat never reads a name.**  This renderer takes no roster names at all — there is no parameter that could carry them — so a peer reads
-`AgentN` and nothing else.  The numeric ID exists to keep the council's epistemics numeric: a claim is weighed on its evidence, not on
-whether it came from "Senior" or from "Newbie".  Names belong to the human's renderers (`report_*`, the checkpoint), which own captions.
-"""
-
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
@@ -15,11 +5,8 @@ from ..deliberation.escalations import effective_class
 from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, Docket, Question
 from ..modes.base import adapter_for
 
-CLOSED_LINE = "closed"
-
 
 def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]] | None = None) -> str:
-    """The docket as `viewer` sees it: `you` for itself, `[yours]` on its own entries, a bare `AgentN` for every peer."""
     adapter = adapter_for(docket.mode)
     noun = adapter.item_noun_plural
     out: list[str] = [f"Docket for {viewer} — round {docket.round}", ""]
@@ -125,7 +112,6 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
 
 
 def _visible_questions(docket: Docket) -> list[Question]:
-    """Open requests only — a withdrawn/retired/demoted escalation is never shown."""
     from ..deliberation.termination import unsettled_questions
 
     return unsettled_questions(docket)
@@ -159,5 +145,4 @@ def _backing_section(docket: Docket, viewer: str) -> list[str]:
 
 
 def _who(ids: list[str], viewer: str) -> str:
-    """The `you` rewrite: the viewer's own ID reads `you`, every peer reads its bare numeric ID."""
     return ", ".join("you" if i == viewer else i for i in ids) or "(nobody)"

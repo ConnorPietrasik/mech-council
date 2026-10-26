@@ -1,8 +1,4 @@
-"""The engine over a scripted port.
-
-One case per gap-ladder cause and per direction-rule condition, plus the traps this suite names: `abstain` and `no_preference`
-are stances and never gaps, a second ask failure ends the run, and the checkpoint always runs before the termination check.
-"""
+"""The engine over a scripted port."""
 
 from __future__ import annotations
 
@@ -86,11 +82,7 @@ def test_phase_0_briefing_is_byte_identical_and_names_no_one():
 
 
 def test_no_agent_ever_reads_a_name():
-    """The numeric ID is the bias control: a seat weighs a claim's evidence, never its reporter's reputation.
-
-    `Brief` holds no roster names and `docket.render` takes none, so this only fails if a name finds a way back in — which is
-    why it reads **every** ask of the run, seats and chair alike.
-    """
+    """The numeric ID is the bias control: a seat weighs a claim's evidence, never its reporter's reputation."""
     import asyncio
 
     def reply(ask):
@@ -155,11 +147,6 @@ def test_the_merge_listing_carries_the_detail_the_chair_judges_causes_on():
 
 
 def test_a_phase_0_human_input_request_arrives_with_its_context_and_options():
-    """The phase-0 brief asks for `human_input` with `context` and `options`, so the run must not quietly drop them.
-
-    Phase 0 raises **requests**, never escalations: the entry's item is dropped (the finding it names may not exist
-    yet) and the request arrives item-less, deferred, with everything the seat offered the human to choose from.
-    """
     import asyncio
 
     def reply(ask):
@@ -195,14 +182,7 @@ def test_a_phase_0_human_input_request_arrives_with_its_context_and_options():
 
 
 def test_a_phase_0_one_liner_the_seat_later_escalates_still_stops_the_run():
-    """Phase 0 raises the request item-less; the escalation that re-sends those words brings the item with it.
-
-    `QUESTION_SHAPE` tells a seat to put the decision in one line, and a seat re-sends its own line when it escalates it.
-    Dedup makes those one question, so the question has to take the item: `effective_class` answers `deferred` for an
-    item-less question **before it counts a single stance**, and an escalation that can never be effective-blocking never
-    stops the run — the council would grind to the round limit with two of three seats holding `needs_human` and the
-    human never once asked.
-    """
+    """Phase 0 raises the request item-less; the escalation that re-sends those words brings the item with it."""
     import asyncio
 
     from council.deliberation.escalations import effective_class
@@ -267,14 +247,7 @@ def test_an_answer_that_took_an_option_records_the_line_it_took():
 
 
 def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stands():
-    """A selection the menu could not have produced is a bug in the port, and the run says which bug — and carries on.
-
-    The number was never shown to the human, so it records nothing: `human_input.json` says the answer came in the
-    human's own words, which is true.  The **answer** is the human's own line and keeps its authority, so the run does
-    not end over a bad integer — it would have spent every token the deliberation cost and contradicted the console line
-    the human already read.  The event names the question, the number and the menu's size, because `internal error:
-    IndexError` tells the operator nothing.
-    """
+    """A selection the menu could not have produced is a bug in the port, and the run says which bug — and carries on."""
     import asyncio
 
     def reply(ask):
@@ -302,11 +275,7 @@ def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stand
 
 
 def test_a_negative_option_number_names_no_line_and_costs_the_run_nothing():
-    """`options[-2]` would otherwise record the wrong line as the human's choice, silently — and still end no run.
-
-    The answer here (`b`) is the very line `options[-2]` points at, so a silent clamp would look correct in this run and
-    be wrong in the next one: what is recorded is that the human wrote their own answer, which is what actually happened.
-    """
+    """`options[-2]` would otherwise record the wrong line as the human's choice, silently — and still end no run."""
     import asyncio
 
     def reply(ask):
@@ -331,11 +300,7 @@ def test_a_negative_option_number_names_no_line_and_costs_the_run_nothing():
 
 
 def test_a_selection_whose_line_is_not_the_answer_records_no_line():
-    """`answer_option` claims the human chose a particular line, so that line had to **be** the answer.
-
-    A port that pairs `"the only way"` with option 2 would otherwise write a menu line the human never read into
-    `human_input.json` — and the bounds check alone cannot see it, because 2 is a legal index.
-    """
+    """`answer_option` claims the human chose a particular line, so that line had to **be** the answer."""
     import asyncio
 
     def reply(ask):
@@ -361,11 +326,7 @@ def test_a_selection_whose_line_is_not_the_answer_records_no_line():
 
 
 def test_a_seat_standing_by_its_ask_moves_nothing_on_the_docket():
-    """A seat re-sending its entry verbatim is standing by the ask, not updating it.
-
-    `question_updated` is the machine channel's word for the ask set having moved; filing the same words, context and
-    menu again moves nothing, so it must say nothing.
-    """
+    """A seat re-sending its entry verbatim is standing by the ask, not updating it."""
     import asyncio
 
     decision = "does policy allow this?"
@@ -404,13 +365,7 @@ def test_a_seat_standing_by_its_ask_moves_nothing_on_the_docket():
 
 
 def test_answered_words_do_not_silence_a_new_escalation():
-    """A majority escalation reaches the human even when its exact words were answered about another item.
-
-    Round 1: two of three seats escalate F1 with a one-liner, the run waits, the human answers.  Round 2: F1 is agreed and
-    the same two words escalate a new item.  Dedup used to chain that escalation onto the answered question, which took it
-    out of the ask set for good (`unsettled_questions` reads `ASKED`) and judged it against the answered question's item —
-    so the run closed `consensus` over two seats holding `needs_human` nobody had ever been asked about.
-    """
+    """A majority escalation reaches the human even when its exact words were answered about another item."""
     import asyncio
 
     decision = "which tenant key?"
@@ -575,7 +530,6 @@ def test_an_answer_at_the_terminal_checkpoint_buys_a_full_round():
 
     outcome, port, records = asyncio.run(main())
     assert any(r["event"] == "answer_buys_a_round" for r in records)
-    assert outcome in ("consensus", "needs_human", "round_limit_reached", "stalemate")
     rounds = sorted({ask.round for ask in port.asks if ask.phase == "round"})
     assert rounds == [1, 2], f"a full round after the answer, not a partial one: {rounds}"
 
@@ -630,7 +584,7 @@ def test_abstain_and_no_preference_are_stances_and_never_gaps():
     assert not any(r["event"] == "gap_declined" for r in records)
 
 
-def test_a_silent_seat_is_asked_once_per_round_and_the_ladder_caps_at_four():
+def test_a_seat_that_answers_the_gap_with_a_non_answer_is_recorded_declined():
     import asyncio
 
     def reply(ask):
@@ -650,8 +604,7 @@ def test_a_silent_seat_is_asked_once_per_round_and_the_ladder_caps_at_four():
         return port, records
 
     port, records = asyncio.run(main())
-    gap_asks = port.count(who="Agent2", phase="gap")
-    assert 0 < gap_asks <= 4, f"the ladder is capped at four, saw {gap_asks}"
+    assert port.count(who="Agent2", phase="gap") == 1, "one gap ask, then its silence is recorded"
     assert any(r["event"] == "gap_declined" and r["member"] == "Agent2" for r in records), "an exhausted ladder records declined"
 
 
@@ -897,11 +850,7 @@ def test_plan_mode_objects_loudly_when_two_seats_name_different_directions():
 
 
 def test_an_answer_naming_its_addressee_instead_of_a_q_id_still_lands():
-    """Lenient extraction's "never silently dropped", on the shape a live model actually writes.
-
-    The offline fake always quotes the `Q` id, so this path — an answer that names the colleague who asked instead — was only ever
-    reached by a real pi, which crashed the run.  The answer belongs to the latest unanswered question that seat put to this one.
-    """
+    """Lenient extraction's "never silently dropped", on the shape a live model actually writes."""
     import asyncio
 
     def reply(ask):
@@ -953,7 +902,6 @@ def test_an_answer_naming_nobody_is_logged_and_kept_out_of_the_docket():
 
 
 def _escalation_and_defense(asked=None, **defend):
-    """A challenged escalation, with the asker's defense scripted by `defend` (`asked` is its `human_input`)."""
     import asyncio
 
     def reply(ask):
@@ -1011,11 +959,7 @@ def test_a_defense_that_answers_in_other_words_keeps_the_escalation_standing():
 
 
 def test_a_defense_offering_the_human_a_menu_keeps_it():
-    """A defense is a verdict, and the round schema asks every verdict for `context` and `options`.
-
-    The defense is the one ask where a seat argues *for* its own escalation, so it is the likeliest place to name the
-    candidates — and the checkpoint is where the human reads them.
-    """
+    """A defense is a verdict, and the round schema asks every verdict for `context` and `options`."""
     built, _records = _escalation_and_defense(
         asked=[
             {
@@ -1036,13 +980,7 @@ def test_a_defense_offering_the_human_a_menu_keeps_it():
 
 
 def test_a_defense_that_rephrases_updates_its_own_question_and_never_opens_a_second():
-    """One escalation is one question, however many times its asker rewords it.
-
-    The defense prompt invites refreshed question text, and a refreshed line no longer matches the one the escalation was
-    raised with, so raising a *new* entry here would ask the human the same thing twice — the bare copy and the copy
-    carrying the menu — with nothing on either line saying they are one decision.  Answering either retires the
-    escalation, which drops the other out of the ask set and leaves a question nobody answered recorded as asked.
-    """
+    """One escalation is one question, however many times its asker rewords it."""
     from council.deliberation.termination import unsettled_questions
 
     built, _records = _escalation_and_defense(
@@ -1067,12 +1005,7 @@ def test_a_defense_that_rephrases_updates_its_own_question_and_never_opens_a_sec
 
 
 def test_a_rephrased_reask_that_is_not_a_defense_also_updates_rather_than_forks():
-    """The same rule on the round path: a seat standing by its escalation with new words moves its own question.
-
-    A seat may phrase the escalation in its `needs_human` note and phrase the `human_input` entry differently in the same
-    verdict; those are one act, and the ledger keys escalations by (item, asker) — it cannot represent two open questions
-    for one seat's standing escalation anyway.
-    """
+    """The same rule on the round path: a seat standing by its escalation with new words moves its own question."""
     import asyncio
 
     def reply(ask):

@@ -1,12 +1,3 @@
-"""The launcher: `council --setup-seat --slot <file_base> -- <pi_cli> …`
-
-This process **is** the member: it mounts its own namespace in itself, reports on the
-spawn pipe, and then `execvp`s exactly what followed the `--` — no second process, no fork
-between the mounts and the exec.  Everything it needs beyond `--slot` arrives in the
-launcher's own env, erased before the exec, so pi never sees a path it could infer a mount
-from — and never sees the slot name it would key `slot<N>` off.
-"""
-
 from __future__ import annotations
 
 import os
@@ -29,7 +20,6 @@ def _report(payload: str) -> None:
 
 
 def setup_seat_main(argv: list[str]) -> int:
-    """The `--setup-seat` half of `__main__`: mount, report, exec.  Never returns on success."""
     slot, rest = _parse(argv)
     project = os.environ.get("COUNCIL_LAUNCH_PROJECT", "")
     runs_root = os.environ.get("COUNCIL_LAUNCH_RUNS_ROOT", "")

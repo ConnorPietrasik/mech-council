@@ -1,14 +1,3 @@
-"""The human checkpoint: the ask set, the wait rule, the answer lines, `explain`.
-
-The parsing is a pure function (the deliberation units tests it directly); the flow
-below is the only place the run stops for a person.  **Waiting has no timeout and no
-auto-skip**: a parked checkpoint is not in-flight work, so no watchdog tick arises
-from it, no seat is judged stuck, and no deadline applies however long the human takes.
-
-Answers are **not** recorded at arrival: an answer received before a checkpoint
-is applied before the checks; one arriving after it lands on the next one.
-"""
-
 from __future__ import annotations
 
 import re
@@ -17,22 +6,16 @@ from .deliberation.engine import CheckpointOutcome
 from .deliberation.escalations import effective_class
 from .deliberation.state import Docket, Question
 
-#: The human checkpoint's own examples include `h2 = later`, so the id and the
-#: separator are both tolerant.
+#: The id and the separator are both tolerant.
 _ANSWER = re.compile(r"^\s*(h\d+)\s*[:=]\s*(.*)$", re.DOTALL | re.IGNORECASE)
 _EXPLAIN = re.compile(r"^\s*(?:explain|ask)\s+(h\d+)\s*(?:[:=]\s*(.*))?$", re.DOTALL | re.IGNORECASE)
 _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
-#: `skip H1`, `skip h1, h2` — the whole line has to be ids, so `skip the cache one` cannot pass for a command.
+#: `skip H1`, `skip h1 h2` — the whole line has to be ids, so `skip the cache one` cannot pass for a command.
 _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
-#: A line that opens like a command is a command that failed to parse, and gets the grammar said back to it.  Left to
-#: the fallback it would be recorded as an authoritative answer to whichever question happens to be open first, which
-#: is the one thing a checkpoint must never do with a line it did not understand.  The cost is deliberate and small: an
-#: answer that merely *begins* with "skip" or "none" is refused until it is written `H1: <text>`, and a refused line is
-#: visible and correctable while a misread one is authoritative, retires escalations and buys a round nobody worked for.
+#: A line that opens like a command is a command that failed to parse, and gets the grammar said back to it.
 _COMMAND_HEAD = re.compile(r"^\s*(?:(?:skip|none)\b|(?:explain|ask)\s+h\d+)", re.IGNORECASE)
-#: `2` takes option 2, and **nothing else does**: a number with any word after it is the human's own answer.  A note
-#: syntax would have to guess what `2, but only for new installs` or `1-2 weeks` meant, and that guess is authoritative.
-#: A number is a selection only when the question offered that many — otherwise `H1: 30` is an answer of "30".
+#: `2` takes option 2, and nothing else does: a number with any word after it is the human's own answer.  A number is a selection only
+#: when the question offered that many — otherwise `H1: 30` is an answer of "30".
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
 
 #: What a line that opened like a command and did not parse is told instead of being taken for an answer.
@@ -43,11 +26,6 @@ _GRAMMAR = (
 
 
 class Line:
-    """One checkpoint line: `answer`, `explain`, `skip` (`ids` empty declines every open one), `error` or `end`.
-
-    For `error` — a line that tried to be a command — `text` is the correction to say back, and it is never an answer.
-    """
-
     __slots__ = ("id", "ids", "kind", "text")
 
     def __init__(self, kind: str, id: str = "", text: str = "", ids: tuple[str, ...] = ()) -> None:
@@ -57,10 +35,9 @@ class Line:
 def parse_line(text: str) -> Line:
     """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
 
-    An empty line ends the checkpoint.  Anything else is an answer to the first still-unanswered question: a human
-    mid-typing should not have to remember IDs, and a guessed ID beats a dropped answer.  What is **not** an answer is
-    a line that opens like a command and does not parse: it gets the grammar, because an answer the human never typed
-    settles a question they were never asked.
+    A bare line answers the first still-unanswered question: a human mid-typing should not have to remember IDs, and a guessed
+    ID beats a dropped answer.  A line that opens like a command and does not parse gets the grammar said back instead, because
+    an answer the human never typed settles a question they were never asked.
     """
     if not (text or "").strip():
         return Line("end")
@@ -79,10 +56,6 @@ def parse_line(text: str) -> Line:
 
 
 def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool) -> str:
-    """What the human reads at a checkpoint: id, item, effective class, asker, question, context, a numbered menu.
-
-    The menu is numbered because the cheap reply is typing a number — un-number it and `H1: 2` means nothing.
-    """
     from .render.text import caption
 
     if not listing:
@@ -109,13 +82,6 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
 
 
 def take_selection(text: str, question: Question) -> tuple[str, int]:
-    """Resolve a line of digits against the options this question offers.
-
-    Returns `(answer, option number)`; the number is `0` when the human answered in their own words, which is every line
-    that is not digits alone and any number off the end of the menu — `30` where four options were offered is the answer
-    `30`, and `2, only for new installs` is that whole sentence, as an answer.  To take an option **and** qualify it the
-    human answers in their own words: nothing authoritative gets assembled from a guess about what the words meant.
-    """
     match = _SELECTION.match(text or "")
     if not match or not question.options:
         return text, 0
@@ -126,8 +92,6 @@ def take_selection(text: str, question: Question) -> tuple[str, int]:
 
 
 class Checkpoint:
-    """The wait itself.  `explain` is the only thing that puts an ask back in flight."""
-
     def __init__(self, docket: Docket, reader, *, console, names: dict[str, str], ask_seat=None) -> None:
         self.docket = docket
         self.reader = reader
@@ -148,7 +112,6 @@ class Checkpoint:
             # one way a question ends a run unanswered and unasked — into an answer the human never gave.
             return result
         if not self.reader.interactive:
-            # the non-interactive stdin choice: EOF or not-a-tty declines everything, logged, and the run proceeds.
             self.console.say("stdin is not interactive: every question is declined for this run, and the report lists them")
             result.skipped = sorted({q.id for q in ask_set})
             return result
@@ -177,8 +140,8 @@ class Checkpoint:
                     if one not in pending and one not in result.answers:
                         self.console.say(f"no open question {one}; the open ones are {', '.join(sorted(pending)) or '(none)'}")
                         continue
-                    # The last line about a question is the human's word on it: a decline takes back an answer given
-                    # earlier at this checkpoint, so `answers` and `skipped` never both name one question.
+                    # Last line wins, the rule the `answer` branch states with its consequence: a decline takes back an
+                    # answer given earlier at this checkpoint.
                     took_back = result.answers.pop(one, None) is not None
                     result.answer_options.pop(one, None)
                     skipped.add(one)
@@ -195,12 +158,8 @@ class Checkpoint:
                 if qid not in self.docket.questions:
                     self.console.say(f"no question {qid}; the open ones are {open_ids}")
                     continue
-                # The last line the human types about a question is their word on it: an answer takes back a decline
-                # given earlier at this checkpoint, exactly as a decline takes back an answer.  What may never happen is
-                # one question landing in `answers` *and* `skipped` — the engine applies answers first and skips after,
-                # so the pair leaves a question the report lists as unanswered holding an answer that retired its
-                # escalation and bought the round.  A question this checkpoint never held is not a change of mind: an
-                # answer for it buys a round on something no longer on the table.
+                # The last line the human types about a question is their word on it: an answer takes back an earlier decline, exactly as a
+                # decline takes back an answer.
                 if qid not in pending and qid not in skipped and qid not in result.answers:
                     self.console.say(f"no open question {qid}; the open ones are {open_ids}")
                     continue
@@ -233,8 +192,6 @@ class Checkpoint:
         return None
 
     async def _explain(self, qid: str, question: str) -> str | None:
-        """The asker's reply is a **recommendation** — no stance changes, no escalation
-        settles — and it is the only ask in flight while the run is parked."""
         target = self.docket.questions.get(qid)
         if target is None:
             self.console.say(f"no question {qid}")

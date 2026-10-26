@@ -1,9 +1,3 @@
-"""The spawn shape: the launcher form, its env, and the namespace fd the sweep is keyed on.
-
-Every member process — seat and chair alike — is one call, and nothing else in the design spawns anything.  The
-launcher is this tool's own entry point resolved once at load, never `sys.argv[0]` and never a PATH guess.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -18,16 +12,14 @@ from ..sandbox import mount
 
 
 class LauncherSetupError(Exception):
-    """The member's namespace never came up, so it never execed and the run ends as a setup failure."""
+    pass
 
 
 def launcher_argv() -> tuple[str, ...]:
-    """This tool's own entry point, resolved once at load."""
     return (sys.executable, "-m", "council")
 
 
 def pi_argv(spec: MemberSpec, pi_cli: str, *, file_base: str, untrusted: bool) -> list[str]:
-    """pi's spawn configuration.  `pi_cli` is execed exactly as resolved; these flags are all the run adds."""
     argv = [pi_cli, "--mode", "rpc", "--no-session", "--no-approve" if untrusted else "--approve", "--name", f"council-{file_base}"]
     if spec.provider and spec.model:
         argv += ["--provider", spec.provider, "--model", spec.model]
@@ -37,7 +29,6 @@ def pi_argv(spec: MemberSpec, pi_cli: str, *, file_base: str, untrusted: bool) -
 
 
 def member_env(*, base: dict[str, str], run_dir: str, run_path: str, project: str, slot_dir: str, runs_root: str) -> dict[str, str]:
-    """The member env: the orchestrator's, plus exactly three council vars."""
     env = dict(base)
     env["COUNCIL_RUN_DIR"] = os.path.basename(run_path.rstrip("/"))
     env["COUNCIL_RUN_PATH"] = run_path
@@ -50,8 +41,6 @@ def member_env(*, base: dict[str, str], run_dir: str, run_path: str, project: st
 
 @dataclass
 class Member:
-    """One live member process: the child, its RPC session, and its namespace record."""
-
     file_base: str
     id: str | None
     pid: int
@@ -84,7 +73,6 @@ async def spawn(
     on_tool_result=None,
     env: dict[str, str] | None = None,
 ) -> Member:
-    """Spawn one member through the launcher form and wait for its namespace report."""
     argv = (
         list(launcher_argv())
         + ["--setup-seat", "--slot", file_base, "--"]
@@ -135,8 +123,8 @@ async def spawn(
         )
     ns_fd = os.open(f"/proc/{proc.pid}/ns/mnt", os.O_RDONLY)
     if proc.stdout is None or proc.stdin is None:
-        # Both are PIPEd, so this only fires if the spawn's own shape changed.  It is checked here,
-        # not left to `PiRpc`, because the fd just opened and the child both have to be released.
+        # Both are PIPEd, so this only fires if the spawn's shape changed; it is checked here because the new fd
+        # and the child both have to be released.
         os.close(ns_fd)
         await _reap(proc)
         raise LauncherSetupError(f"{file_base}: the launcher came up without its pipes")
@@ -158,7 +146,6 @@ async def spawn(
 
 
 async def _read_report(read_fd: int, proc: asyncio.subprocess.Process) -> tuple[str, object]:
-    """The ns report: the launcher reports the failing syscall + errno, or its namespace id."""
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -194,7 +181,6 @@ async def _read_report(read_fd: int, proc: asyncio.subprocess.Process) -> tuple[
 
 
 async def _drain_stderr(proc: asyncio.subprocess.Process, member: Member, transcript) -> None:
-    """pi's stderr half: always captured, never swallowed (the console sink)."""
     stream = proc.stderr
     if stream is None:
         return
@@ -219,7 +205,6 @@ async def _reap(proc: asyncio.subprocess.Process) -> None:
 
 
 def unknown_model_warning(chunk: bytes) -> str:
-    """pi's only signal for an unknown model, surfaced as a warning."""
     text = chunk.decode("utf-8", "replace")
     for line in text.splitlines():
         if "not found for provider" in line and line.lstrip().startswith("Model"):

@@ -1,8 +1,4 @@
-"""The deliberation units, pure: no I/O, no pi, no clock.
-
-The disposition rules' judgment table and the escalation rules' ledger states are
-the case lists; the invariant rows assert what the tables cannot say by themselves.
-"""
+"""The deliberation units, pure: no I/O, no pi, no clock."""
 
 from __future__ import annotations
 
@@ -112,8 +108,8 @@ def test_every_open_item_yields_exactly_one_state():
 
 
 def test_no_open_item_derives_short_a_stance_except_unseen():
-    """The invariant in the other direction: while a seat holds no current stance, the
-    only state reachable is `unseen`; once every seat has one, `unseen` is unreachable."""
+    """The invariant in the other direction: with a seat holding no current stance and nothing escalated or
+    disputed, the only state reachable is `unseen`; once every seat has one, `unseen` is unreachable."""
     docket = docket_with(3)
     stance(docket, "F1", "Agent1", AGREE)
     stance(docket, "F1", "Agent2", ABSTAIN)
@@ -248,12 +244,7 @@ def test_an_item_less_question_is_never_blocking_however_many_ask():
 
 
 def test_the_entry_that_names_an_item_gives_the_deduped_question_its_item():
-    """The same words, first as a request and then as an escalation: the item comes with the escalation.
-
-    Naming an item is the stronger act — it is what makes a question able to stop the run — and a seat re-sending its own
-    one-liner is the ordinary way a phase-0 request becomes an escalation.  Leaving the deduped entry item-less would
-    strand it: `effective_class` answers `deferred` for an item-less question before it counts a single stance.
-    """
+    """The same words, first as a request and then as an escalation: the item comes with the escalation."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(docket, text="which tenant key?", asker="Agent1", item_id=None, blocking=False, round_=0)
     assert escalations.effective_class(docket, question) == "deferred", "no item, so never a way to hold the run"
@@ -279,11 +270,7 @@ def test_an_item_is_adopted_once_and_never_lost():
 
 
 def test_options_union_across_askers_and_never_replace():
-    """The text belongs to the first asker; the menu belongs to everybody.
-
-    Two seats asking one thing and offering different candidates describe a wider space than either saw alone, so the
-    union is what the human sees — deduplicated on the question's own key, first wording winning.
-    """
+    """The text belongs to the first asker; the menu belongs to everybody."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(
         docket,
@@ -309,13 +296,7 @@ def test_options_union_across_askers_and_never_replace():
 
 
 def test_a_reasking_seat_replaces_its_own_menu_and_leaves_a_peers_alone():
-    """The menu is each asker's own to revise: a re-ask retires the candidates **it** offered, and nobody else's.
-
-    Options used to accumulate forever, so a seat that changed its mind left the candidate it abandoned on the numbered
-    menu — and the human taking that line makes it the authoritative answer for something its own author no longer
-    offers.  Provenance is the only thing that tells the two seats apart, so the menu carries it: Agent1's re-ask touches
-    Agent1's lines and nothing else, and a candidate it repeats keeps its number.
-    """
+    """The menu is each asker's own to revise: a re-ask retires the candidates **it** offered, and nobody else's."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(
         docket,
@@ -355,11 +336,7 @@ def test_a_reask_offering_no_menu_takes_it_from_nobody():
 
 
 def test_a_verbatim_reask_changes_nothing_and_says_no_more_than_that():
-    """`updated` is a fact about the docket, and the event log is the machine channel that reads it.
-
-    A seat standing by its ask re-sends the entry verbatim, round after round.  Read as an update, that writes
-    `question_updated` for a question nobody moved.
-    """
+    """`updated` is a fact about the docket, and the event log is the machine channel that reads it."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(
         docket,
@@ -385,12 +362,7 @@ def test_a_verbatim_reask_changes_nothing_and_says_no_more_than_that():
 
 
 def test_a_settled_question_is_not_a_home_for_a_new_ask():
-    """An answered entry is the answer to **that** decision; the same words about a new decision are a new question.
-
-    Dedup used to land a fresh escalation on the answered entry, and `unsettled_questions` reads `ASKED` and nothing
-    else: the new ask was never put to the human, `effective_class` judged it against the *old* question's item, and the
-    run could close `consensus` over a majority escalation it had never asked anybody about.
-    """
+    """An answered entry is the answer to **that** decision; the same words about a new decision are a new question."""
     docket = docket_with(3, items=2)
     stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which tenant key?")
     first = docket.questions[docket.escalations[("F1", "Agent1")].question_id]
@@ -462,7 +434,7 @@ def test_file_bases_are_their_own_vocabulary():
     assert naming.seat_file_base(2, "Coworker") == "slot2-coworker"
     assert naming.seat_file_base(12, "Big Name!") == "slot12-big-name"
     assert naming.chair_file_base() == "chair"
-    assert naming.slugify("  ../weird/../name ") not in ("",)
+    assert naming.slugify("  ../weird/../name ") == "weird-name", "path noise collapses to one separator, ends trimmed"
     assert "/" not in naming.slugify("a/b") and ".." not in naming.slugify("a/..b")
 
 

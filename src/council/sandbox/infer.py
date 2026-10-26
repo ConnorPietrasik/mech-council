@@ -1,9 +1,7 @@
-"""The sandbox inference pass — one compiled alternation, run in the RPC pump and nowhere else.
-
-Filtered to `isError` (pi sets it for every non-zero shell exit) and matched against the
-text **tail**: successful output is never scanned, and the pass never runs in the chair's
-watchdog, so neither `watchdog_sec = 0` nor the gap between ticks can change what the run
-reports.  The console line says it is an inference, because that is what it is.
+"""Inference answers two questions with two mechanisms, because the failure has two faces.  Quietly full: a write fails and the
+tool result says `ENOSPC`, and nothing else about the view changes — reads and `ls` still succeed, so a seat that hits the cap
+without saying so is invisible here.  Loudly denied: the seat quotes `EPERM`/`EACCES`/`EROFS`/`ENOTCONN` back, and that is
+matched in its *own* prose, because the seat wrote the refusal down instead of a finding.
 """
 
 from __future__ import annotations
@@ -33,12 +31,14 @@ _TAIL = 2048
 
 
 def evidence_is_limit(text: str) -> bool:
-    """Does this evidence *describe* an overlay refusal rather than the project?"""
+    """Does this evidence *describe* an overlay refusal rather than the project?  The table is an errno *whitelist*, not a
+    prefix match: `EOPNOTSUPP` means 'overlayfs cannot sit here' — an operator's mount mistake, not the cap — and a broad
+    `E\\w{3,4}` would match `EBUSY` and `ENOSPC` anywhere in prose, which are project facts.
+    """
     return bool(_LIMIT_EVIDENCE.search(text or ""))
 
 
 def scan(tool_result: dict) -> str | None:
-    """`sandbox_full` / `sandbox_limit_hit` from one decoded `tool_execution_end`."""
     if not tool_result.get("isError"):
         return None  # successful output is never scanned
     text = _tail(flatten_result(tool_result.get("result")), _TAIL)
@@ -52,7 +52,6 @@ def scan(tool_result: dict) -> str | None:
 
 
 def flatten_result(result: object) -> str:
-    """pi's `result` is `{"content": [{"type": "text", "text": …}], …}`."""
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
@@ -69,22 +68,3 @@ def flatten_result(result: object) -> str:
 
 def _tail(text: str, limit: int) -> str:
     return text[-limit:] if len(text) > limit else text
-
-
-def cap_spent(sandbox_dir: str) -> bool:
-    """The per-round `statvfs` backstop: a spent cap no member quoted the errno for."""
-    try:
-        info = os_statvfs(sandbox_dir)
-    except OSError:
-        return False
-    return info is not None and info[0] * info[1] <= 64  # ≤ 64 KiB free of the cap
-
-
-def os_statvfs(path: str):
-    import os
-
-    try:
-        info = os.statvfs(path)
-    except OSError:
-        return None
-    return (info.f_frsize, info.f_bavail)

@@ -1,14 +1,3 @@
-"""The watchdog: the tick, the suppression rule, and the enforcement of one pass.
-
-Three rules make a watchdog necessary at this size, and worth stating as facts: an agent whose provider call
-dies is **settled**, not failed; pi emits no event while a provider buffers its response; and there is no
-per-tool timeout at all.  A silent round is therefore never evidence of health — and the absence of events is
-the only signal the watchdog has, which is why the digest is keyed on in-flight asks rather than on silence.
-
-The chair-work itself (`chairwork.Chair`) owns the slot, the timeout and the
-repair re-asks; this module owns when a pass happens and what its verdict does.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -35,21 +24,14 @@ class Watchdog:
     deferred: int = 0
 
     def start(self) -> None:
-        """`watchdog_sec = 0` disables the tick, nothing else.
-
-        A disabled watchdog is a different failure story, not a better one: a wedged
-        member hangs the run silently and the exit is Ctrl-C's 130 with no diagnosis.
-        """
         if self.council.watchdog_sec <= 0:
             self.console.say("watchdog disabled (watchdog_sec = 0): a wedged member will hang the run with no diagnosis")
             return
         self.task = asyncio.create_task(self._loop(), name="watchdog")
 
     async def stop(self) -> None:
-        """Cancelled, **not** awaited.
-
-        Aborting it would await a response that never comes: a chair mid-parse
-        when the last member settles has nothing left to decide about.
+        """Cancel the loop; never abort the chair's pass — a cancelled await mid-way would report `ChairUnusable` for a pass
+        that was merely interrupted.
         """
         self.stopped.set()
         if self.task is not None and not self.task.done():
@@ -75,7 +57,6 @@ class Watchdog:
             await self.pass_once()
 
     async def pass_once(self) -> dict | None:
-        """One tick: suppress, digest, enforce.  Returns the parsed pass, if there was one."""
         if self.lanes.chair_busy:
             # A pass in flight suppresses a new tick; it never queues one behind it.
             self.deferred += 1
@@ -93,11 +74,6 @@ class Watchdog:
         return parsed
 
     async def enforce(self, parsed: dict) -> None:
-        """`keep` never interrupts the ask it is about; `restart` is restart-and-re-ask verbatim.
-
-        The restart owns the in-flight ask: abort, settle, re-spawn.  The lane that asked is already waiting for
-        that settle, so the re-ask and the second-failure exit reach the run through the member that owns the ask.
-        """
         for decision in parsed.get("decisions") or []:
             # `parse_watchdog` normalises to agent/action/reason; the chair's own field
             # names (`agent` or `id`, `reason` or `note`) are its extraction's business.
@@ -133,7 +109,6 @@ class Watchdog:
             self.console.say(f"watchdog: {file_base} could not be restarted: {failure}")
 
     def _file_base(self, label: str) -> str | None:
-        """`keep`/`restart` apply to one member, so an unknown id applies to nobody."""
         for spec in self.council.agents:
             if label in (spec.id, spec.file_base, spec.name):
                 return spec.file_base

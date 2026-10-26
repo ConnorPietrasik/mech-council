@@ -1,5 +1,3 @@
-"""The stalemate rule's round signature — "stalemate = no movement", from data only."""
-
 from __future__ import annotations
 
 from .dispositions import derive
@@ -8,11 +6,6 @@ from .state import ANSWERED, Docket
 
 
 def signature(docket: Docket) -> tuple:
-    """The stalemate signature, mode-generic: the only plan-only input is the backing map.
-
-    A withdrawal, a demotion, an effective-class change and a stance turning `declined` are each
-    movement; so is every answer, which is why the signature is recorded *before* the checkpoint.
-    """
     items = []
     for item_id in docket.order:
         item = docket.items[item_id]
@@ -46,7 +39,6 @@ def signature(docket: Docket) -> tuple:
 
 
 def stalemate(docket: Docket, current: tuple, previous: tuple | None, checkpoint_moved: bool) -> bool:
-    """Identical consecutive signatures after round 1, and no checkpoint movement."""
     if docket.round <= 1 or previous is None or checkpoint_moved:
         return False
     return current == previous

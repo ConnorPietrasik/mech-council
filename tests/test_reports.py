@@ -1,9 +1,4 @@
-"""What a run leaves behind, and what it says while it does.
-
-The console's line inventory, the transcript levels, and the four artifacts the run directory owes, read as an operator
-reads them: `run.json` is the machine-readable record the reports themselves are built from, `events.jsonl` is append-only,
-`human_input.json` holds every question whatever became of it, and an aborted run still writes a report that says so.
-"""
+"""What a run leaves behind, and what it says while it does."""
 
 from __future__ import annotations
 
@@ -118,6 +113,10 @@ def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
     for question in asked:
         for field_name in ("id", "askers", "raised_round", "question", "effective", "state", "answer", "recommendation", "markers"):
             assert field_name in question, f"{question['id']} is missing {field_name}"
+        # The questions records print `item` and `question` for what the docket calls `item_id` and `text` — the same two
+        # renames the `escalations` records make over their own fields.  A record carrying the docket's names instead is how
+        # a consumer reads the wrong field.
+        assert not {"item_id", "text"} & set(question), f"{question['id']} carries the docket's field names, not the wire's"
     assert asked[0]["item"] is None, "a phase-0 open question is item-less"
 
 
@@ -185,7 +184,9 @@ def test_an_aborted_run_still_writes_a_report_that_explains_itself(cli, project)
     assert result.manifest["finished"], "an abort finalizes run.json like any other exit"
     report = result.report()
     assert "aborted" in report.lower()
-    assert "aborted_reason" in result.manifest or "aborted" in report.lower()
+    assert "# Why nothing ran" in report, "the minimal report explains itself rather than announcing an outcome"
+    reason = report.split("# Why nothing ran", 1)[1].strip().splitlines()[0]
+    assert len(reason) > 10, f"no reason given: {reason!r}"
 
 
 # ------------------------------------------------------ The review report's two markers
@@ -200,7 +201,6 @@ def _docket_with_item(evidence: str):
 
 
 def _journal(created: dict[str, list[str]], modified: dict[str, list[str]] | None = None):
-    """A write journal shaped exactly like the sandbox's: one entry per member."""
     modified = modified or {}
     return [
         {
@@ -229,11 +229,7 @@ def test_an_item_naming_a_file_only_a_member_wrote_is_marked_as_an_artifact(tmp_
 
 
 def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
-    """The bug this case exists to keep dead: `modified` is not `created`.
-
-    A seat that edits `src/app.py` and cites line 12 is citing the project's own file.  Stamping that `sandbox_artifact` would
-    present a real finding as an artifact of the sandbox, which is the one thing the review report's marker must never do.
-    """
+    """The bug this case exists to keep dead: `modified` is not `created`."""
     from council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
@@ -282,11 +278,7 @@ def test_an_item_whose_evidence_is_an_overlay_refusal_is_a_limit_not_a_finding(t
 
 
 def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(project, tmp_path):
-    """The owed steps are independent — one failing may not cancel the rest.
-
-    A renderer that raises on some docket shape is a bug in the report, and the run used to trade the report *and* the
-    finalized `run.json` for it.  The operator gets a document that says what happened, and the manifest still closes.
-    """
+    """The owed steps are independent — one failing may not cancel the rest."""
     import os
     from unittest import mock
 

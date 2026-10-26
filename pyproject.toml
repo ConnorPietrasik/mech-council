@@ -15,14 +15,6 @@ classifiers = ["Programming Language :: Python :: 3.14"]
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-timeout"]
-# The two bars stated below, so `pip install -e ".[test,dev]"` is one command and not a
-# second document nobody keeps current.  Pinned exactly, on purpose: ruff's minor number is
-# its breaking-change number (formatter style, rule sets, dropped Python versions all move
-# there), so a floating ruff turns `ruff format --check` red on files nobody touched.  The
-# ruff side is enforced below by `required-version`, which binds even a global `ruff` on
-# someone's PATH; mypy has no such switch, so `python -m mypy` from this venv is what makes
-# the pin real.  Neither is importable by the product — these are tools you run, not
-# dependencies council has.
 dev = ["ruff==0.17.2", "mypy==2.4.0"]
 
 [project.scripts]
@@ -32,16 +24,6 @@ council = "council.cli:main"
 where = ["src"]
 
 [tool.mypy]
-# One bar, stated in the file instead of in someone's shell history, so bare `mypy` runs the
-# gate.  `check_untyped_defs` is on because the suite's helpers carry annotations one at a
-# time: a function with none should not be a loophole the checker walks past.  The two
-# `warn_*` codes keep every `type: ignore` and every `cast` honest — the lint set's rule
-# against a dead `noqa`, on this side of the toolchain.  `--strict` is not this project's
-# bar: it wants 958 annotations first.  `--warn-unreachable` is off for the two sites it
-# would delete: the launcher's `return 1` after `execvp`, which is the guard that reports a
-# failed exec rather than falling off the end, and the engine's defensive re-signature after
-# the checkpoint — reachable-looking, currently not, and the switch settles that by erasure
-# rather than by decision.
 files = ["src", "tests"]
 python_version = "3.14"
 check_untyped_defs = true
@@ -49,30 +31,12 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [tool.ruff]
-# The same version as the `dev` extra, and stated here because that extra only binds someone
-# who installs it: an editor's ruff, or one off PATH, is otherwise free to drift, and a
-# version change is a style change.  Bumping is a deliberate act — see README's
-# "Lint and types" for the order to do it in.
 required-version = "==0.17.2"
 line-length = 140
-# `testdata/toy-project` is the fixture a council reviews: its bug is the subject, so
-# neither the linter nor the formatter gets a vote on it.
 extend-exclude = ["testdata"]
-# Unconditional, so an explicit `ruff check testdata` or an editor running the file
-# directly is still refused.
 force-exclude = true
 
 [tool.ruff.lint]
-# A chosen set, not the default one.  Real defects: pyflakes (F), syntax errors (E9),
-# E4's import placement, E7's statement smells — a bare `except`, a comparison against
-# `None`/`True`/`False`, an ambiguous name — and W605, because an invalid escape sequence
-# is a `SyntaxWarning` today and a `SyntaxError` later.  Then the house shape: E501 is the
-# width the formatter is set to and still fires where the formatter cannot split, and
-# W291/W292/W293 are the whitespace the formatter already cleans, so a check never
-# contradicts a format.  Then four cheap habits: sorted imports (I), no dead `noqa`
-# (RUF100), subprocess intent stated (PLW1510), and a handle either closed in place or
-# declared long-lived (SIM115).  Everything else the default set would have brought was
-# a matter of taste.
 select = ["E4", "E7", "E9", "F", "I", "E501", "W291", "W292", "W293", "W605",
           "RUF100", "PLW1510", "SIM115"]
 
@@ -84,7 +48,6 @@ select = ["E4", "E7", "E9", "F", "I", "E501", "W291", "W292", "W293", "W605",
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not slow' -p no:cacheprovider"
-cache_dir = "/tmp/.council-pytest-cache"
 timeout = 120
 timeout_method = "signal"
 markers = [

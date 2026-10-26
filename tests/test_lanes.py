@@ -1,13 +1,9 @@
-"""The two lanes, restart-and-re-ask, and the chair's digest.
-
-Fakes stand in for the *child process* only: the lanes, the repairs, the restart accounting and
-the watchdog's enforcement are the real ones, because those are what the chair and the two-lane
-rule promise.  The process behaviour around them is `test_rpc.py` and `test_sandbox.py`.
-"""
+"""The two lanes, restart-and-re-ask, and the chair's digest."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import cast
 
@@ -51,7 +47,6 @@ class FakeRpc:
         return Answer(text=item.get("text", ""), stop_reason=item.get("stop", "stop"), error_message=item.get("error", ""), settled=True)
 
     async def abort(self):
-        """The abort *settles* the ask in flight — that is how a restart ends one."""
         self.aborts += 1
         inflight = getattr(self, "inflight", None)
         if inflight is not None and not inflight.done():
@@ -131,7 +126,7 @@ def council(n=2, *, concurrency=2, watchdog=0):
         watchdog_sec=watchdog,
         chair_timeout_sec=60,
         max_concurrency=concurrency,
-        transcripts="errors",
+        transcripts="off",
         sandbox_mib=64,
         pi_cli="pi",
         pi_version="1.4.0",
@@ -168,9 +163,7 @@ def lanes(*, n=2, concurrency=2, script=None, watchdog=0, script_defaults=False)
     return Lanes(board, cast(Members, members), cast(RunConsole, console)), members, console, board
 
 
-def verdict(text="ok"):
-    import json
-
+def verdict():
     return json.dumps({"positions": [], "new_items": [], "answers": [], "questions": [], "human_input": [], "signoff": True})
 
 
@@ -227,7 +220,7 @@ def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
     run(main())
 
 
-def test_the_agent_pool_caps_concurrency_but_never_serialises_the_chair():
+def test_the_seat_pool_lets_the_two_seats_answer_together():
     async def main():
         board, _members, _console, _ = lanes(
             concurrency=2,
@@ -245,35 +238,32 @@ def test_the_agent_pool_caps_concurrency_but_never_serialises_the_chair():
             parse_for=lambda a: {"mode": "review", "me": a, "known_items": set()},
         )
         elapsed = time.monotonic() - started
-        assert len(outcomes) == 2 and elapsed < 0.55, "the two seats ran together"
-        serial = await board.ask_seats(
-            [("Agent1", "go"), ("Agent2", "go")],
-            round_=2,
-            kind="verdict",
-            phase="round",
-            parse_for=lambda a: {"mode": "review", "me": a, "known_items": set()},
-        )
-        assert len(serial) == 2
+        assert len(outcomes) == 2 and elapsed < 0.55, "the two seats ran together, not one after the other"
 
     run(main())
 
 
-def test_the_digest_rows_read_the_live_activity_not_a_snapshot():
-    """A frozen digest would report every member at zero events: all wedged, none so."""
+def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
+    """The chair judges who is wedged from these rows: a seat that is not being asked is not in them, and a seat that
+    has moved since its ask began reads as moved.
+    """
 
     async def main():
-        board, _members, _console, _ = lanes(concurrency=2, script={"seat1-one": [{"hang": 5, "text": verdict()}]})
+        board, members, _console, _ = lanes(concurrency=2, script={"seat1-one": [{"hang": 5, "text": verdict()}]})
         task = asyncio.create_task(
             board.ask_agent("Agent1", "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
         )
         await asyncio.sleep(0.1)
+        # A peer that is idle but has activity of its own, and a wedge that has taken two more events since it began.
+        members.members["seat2-two"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
+        members.members["seat1-one"].rpc.activity.events = 2
         rows = board.digest()
         task.cancel()
         return rows
 
     rows = run(main())
-    assert len(rows) == 1 and rows[0]["agent"] == "seat1-one"
-    assert "elapsed" in rows[0] and rows[0]["events"] == 0
+    assert [row["agent"] for row in rows] == ["seat1-one"], "only the seat being asked is in the digest"
+    assert rows[0]["events"] == 2, "the row carries the activity as it stands, not as it was when the ask began"
 
 
 # --------------------------------------------------------- Lenient extraction's repairs
@@ -316,17 +306,6 @@ def test_needs_repair_distinguishes_the_repairable_from_themerely_empty():
 
 
 # -------------------------------------------------- The restart-and-re-ask path
-
-
-def ask_once(board):
-    """A first ask that came back with nothing — restart-and-re-ask's territory."""
-    return {
-        "round_": 3,
-        "kind": "verdict",
-        "phase": "round",
-        "parse_kw": {"mode": "review", "me": "seat1-one", "known_items": set()},
-        "message": "go",
-    }
 
 
 def test_a_failed_ask_restarts_once_and_re_asks_once():
@@ -396,7 +375,9 @@ def test_a_transport_failure_takes_the_restart_path_not_the_unusable_exit():
         return outcome, members.members["seat1-one"].restarts
 
     outcome, restarts = run(main())
-    assert restarts == 1 and outcome.data is not None
+    assert restarts == 1, "one restart, not a retry loop"
+    assert not outcome.data.invalid and not outcome.data.errors, "the restarted attempt's reply parsed"
+    assert outcome.data.data["signoff"] is True, "and it carries the verdict the seat sent, not an empty outcome"
 
 
 def test_one_seat_dying_does_not_abandon_its_siblings():
@@ -413,7 +394,9 @@ def test_one_seat_dying_does_not_abandon_its_siblings():
 
     outcomes = run(main())
     assert outcomes["Agent1"].failure and not outcomes["Agent2"].failure
-    assert outcomes["Agent2"].data is not None
+    assert not outcomes["Agent2"].data.invalid and outcomes["Agent2"].data.data["signoff"] is True, (
+        "the surviving seat got its own answer back whole"
+    )
 
 
 # ----------------------------------------------------------------- The chair's watchdog
@@ -517,4 +500,4 @@ def test_stop_cancels_a_pass_in_flight_rather_than_awaiting_it():
 
     elapsed, task = run(main())
     assert elapsed < 2, f"stopping waited for the chair ({elapsed:.1f}s)"
-    assert task is None or task.cancelled() or task.done()
+    assert task is not None and task.done(), "the tick loop is finished, not left running behind the exit"

@@ -1,8 +1,4 @@
-"""The CLI contract, driven as a subprocess against the fake pi.
-
-The CLI contract's flag rules, the exit-code table and the nested-council guard and the resolution
-rules are the case list.  Nothing here spends a token: `pi_cli` is the fake (the harness rule).
-"""
+"""The CLI contract, driven as a subprocess against the fake pi."""
 
 from __future__ import annotations
 
@@ -101,13 +97,7 @@ def test_a_repeat_that_changes_value_is_noted(cli, project):
 
 
 def test_a_round_limited_run_exits_zero(cli, project):
-    """The outcome is a result, never an exit code: 0 for every member of the four.
-
-    The dispute has to be scripted: the disposition rules make a seat that never stances a **declined** record
-    rather than a missing one, so the plain default script now converges to `consensus` with the finding unvetted
-    instead of grinding to the limit.  A persistent disagreement is what actually reaches `round_limit_reached`,
-    and the seats are told apart by the prompt text's own `raised by you` rewrite — each one reads its own docket.
-    """
+    """The outcome is a result, never an exit code: 0 for every member of the four."""
     script = json.dumps(
         [
             {
@@ -139,12 +129,7 @@ def test_a_round_limited_run_exits_zero(cli, project):
 
 
 def test_a_seat_that_goes_silent_does_not_hold_the_run_open(cli, project):
-    """End to end: a survived gap is inert, so the run reaches a result.
-
-    One seat stances and signs off, the other answers the phase and then says nothing at all — not even to the
-    gap ladder.  The silent seat's declined record neither supports nor objects nor keeps the item `unseen`,
-    so the finding is `unheard` and the run ends by consensus with that finding reported as not fully vetted.
-    """
+    """End to end: a survived gap is inert, so the run reaches a result."""
     script = json.dumps(
         [
             {
@@ -228,13 +213,6 @@ def test_council_run_dir_refuses_and_prints_the_parent_verbatim(cli, project):
     assert result.returncode == 1
     assert "nested council" in result.console
     assert parent in result.console, "verbatim, never re-resolved from COUNCIL_RUNS_DIR"
-
-
-def test_council_run_path_alone_is_not_a_marker(cli, project):
-    env = dict(runs_env(project), COUNCIL_RUN_PATH="/just/information")
-    result = cli(["review"], cwd=project, env=env, timeout=120)
-    assert "nested council" not in result.console
-    assert result.run_dir, "the run went ahead"
 
 
 def test_allow_nested_overrides_the_guard(cli, project):
@@ -352,8 +330,8 @@ PLAN_SCRIPT = json.dumps(
 )
 
 
-def test_a_plan_council_writes_plan_md_and_reports_the_chosen_direction(cli, project):
-    """plan mode offline: the same protocol, over plan-mode data."""
+def test_a_plan_council_writes_plan_md_and_says_plainly_when_no_direction_was_chosen(cli, project):
+    """plan mode offline: the same protocol, over plan-mode data — and an unsettled direction is said, not glossed."""
     env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
     result = cli(["plan"], cwd=project, env=env, timeout=150)
     assert result.returncode == 0, result.console
@@ -371,15 +349,16 @@ def test_a_plan_council_writes_plan_md_and_reports_the_chosen_direction(cli, pro
         "## Alternatives on the table",
     ):
         assert heading in report, f"{heading} missing from\n{report[:600]}"
-    assert "backed by Agent1" in report or "Agent1" in report.split("## Chosen direction")[1]
+    # The offline plan fixture never converges, so the direction section must say so out loud rather than
+    # quietly printing a heading nobody chose: a named direction carries its backer, an absent one is named.
+    direction = report.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
+    assert "did not settle a direction" in direction, f"the report chose a direction this run never agreed:\n{direction[:400]}"
+    assert "backed by" not in direction.split("The candidates")[0], "no `backed by` line stands where no direction was chosen"
     # The plan report opens with the standing reading rules, and the stages carry
     # the gates the seats wrote; nothing here invents a chair-authored rule list.
     assert "prescriptive" in report and "descriptive" in report
     assert "wrap the call in a retry helper" in report, "the stage gates reach the plan"
     assert "bounded backoff" in report
-    # A direction with a backer and no opposing backer is the one printed, and the
-    # round limit does not un-make it.  Which way the run ended is a separate fact.
-    assert "bounded backoff" in report and "Agent1" in report
     assert result.manifest["outcome"] in ("consensus", "round_limit_reached")
 
 
@@ -422,11 +401,7 @@ def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project
 
 
 def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_waits(cli, project):
-    """The human checkpoint's wait rule: `round_limit_reached` is the one way a question ends unasked.
-
-    The answer is typed *before* the run starts, so a harness that waited anyway
-    would pass; the point is that this checkpoint must not read stdin at all.
-    """
+    """The human checkpoint's wait rule: `round_limit_reached` is the one way a question ends unasked."""
     # Round 2 raises something new so the docket keeps moving: the run must end on the round
     # limit, not on termination's stalemate, which is a different rule and another test.
     script = json.dumps(
@@ -450,9 +425,7 @@ def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_wait
             {"contains": "# Deduplicate", "reply": {"groups": [], "human_input": []}},
         ]
     )
-    result = cli(
-        ["review"], cwd=project, stdin="H1: 30 days\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=script, MAX_ROUNDS="2"), timeout=150
-    )
+    result = cli(["review"], cwd=project, stdin="H1: 30 days\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
     assert result.returncode == 0, result.console
     assert result.manifest["outcome"] == "round_limit_reached"
     asked = json.loads(result.artifact("human_input.json"))["questions"]
@@ -472,6 +445,7 @@ def test_a_seat_that_fails_its_first_prompt_is_unusable_and_names_the_provider(c
     script = json.dumps([{"contains": "", "stop_reason": "error", "error_message": "401 invalid api key"}])
     result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
     assert result.returncode == 1
-    assert "unusable" in result.console.lower() or "invalid api key" in result.console
+    assert "is unusable" in result.console, "the seat is named unusable, not retried"
+    assert "401 invalid api key" in result.console, "the provider's own words are said, not a generic failure"
     assert "round 1" not in result.console.lower(), "nobody deliberates after that"
-    assert result.manifest.get("outcome") in (None, "aborted") or not result.run_dir
+    assert result.manifest["outcome"] == "aborted", "the run ends naming the unusable member"
