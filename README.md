@@ -67,7 +67,7 @@ printed last after a blank line.
 1. **Phase 0.** Every seat gets the *same bytes* — no names, no IDs — and reports findings
    (review) or a proposed approach (plan).
 2. **Merge.** The chair deduplicates: two seats describing one defect produce one item with
-   two reporters
+   two reporters.
 3. **Rounds.** Every seat is shown every open item and must take a stance — `agree`,
    `disagree`, `needs_human`, `abstain` — with evidence or a note. An item needs a majority
    to be `agreed`; an objection with cited evidence reopens a settled one. A seat that stops answering gets asked, once, and
@@ -102,7 +102,7 @@ declined takes it back, and declining one you answered withdraws the answer.
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
 | `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and the sweep's survivors. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question whatever became of it: asker, effective class, answer or skip, and the escalations each one retired. |
+| `human_input.json` | Every question and whatever became of it: asker, effective class, answer or skip, and the escalations each one retired. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else

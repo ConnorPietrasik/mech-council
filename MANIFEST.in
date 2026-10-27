@@ -1,0 +1,4 @@
+# The suite runs from an unpacked sdist: `tests/support` holds the scripted fake pi and the
+# namespace harness, `testdata/toy-project` is what the slow smoke test reviews.
+recursive-include tests *.py
+recursive-include testdata *.py *.toml *.md

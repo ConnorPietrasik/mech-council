@@ -286,7 +286,7 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     from mech_council.deliberation.state import Docket, Item
     from mech_council.startup import convene
 
-    _, launch = convene(["review"], environ=no_user_config(COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
+    _, launch = convene(["review", "-p", project], environ=no_user_config(COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
     council = launch.council
     run_dir = tmp_path / "run"
     run_dir.mkdir()
