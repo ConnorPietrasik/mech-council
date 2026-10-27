@@ -54,7 +54,7 @@ class Args:
 HELP = """\
 usage: mech-council [<council>] [flags]
 
-Run one named council from the project's council.toml.  A council may `extends = "<name>"`
+Run one named council from the project's council.toml, over the user's.  A council may `extends = "<name>"`
 another for its roster, chair and knobs; a `_` name is what one inherits from, never
 something you convene.
 
@@ -63,7 +63,7 @@ positional arguments:
 
 flags:
   -p, --project <path>     project directory (default: the invoking cwd)
-  -c, --config <file>      council.toml to convene from (default: <project>/council.toml)
+  -c, --config <file>      the only council.toml to read (default: <project>/council.toml over $XDG_CONFIG_HOME/council/council.toml)
   -r, --rounds <N>         round limit (whole number, no cap)
   -g, --goal <text>        the goal the seats are briefed with
   -t, --transcripts <lvl>  off (default) or full
@@ -178,8 +178,43 @@ def _runs_root_from_env(environ: dict[str, str]) -> str:
     return os.path.realpath(os.path.join(home, ".cache", "council", "runs"))
 
 
+def _user_config_path(environ: dict[str, str]) -> str | None:
+    """The council.toml of the invoking user, or None when there is no home that could hold one.  The XDG
+    rules are the runs root's: a relative $COUNCIL_CONFIG counts from the invoking cwd, a relative
+    $XDG_CONFIG_HOME is invalid and ignored."""
+    raw = environ.get("COUNCIL_CONFIG") or ""
+    if raw:
+        return os.path.realpath(raw if os.path.isabs(raw) else os.path.join(environ.get("CWD", os.getcwd()), raw))
+    config_home = environ.get("XDG_CONFIG_HOME") or ""
+    # Ignored means ignored: an invalid $XDG_CONFIG_HOME leaves the default below in force, as it does for the runs root.
+    if config_home and os.path.isabs(config_home):
+        return os.path.realpath(os.path.join(config_home, "council", "council.toml"))
+    home = environ.get("HOME") or ""
+    return os.path.realpath(os.path.join(home, ".config", "council", "council.toml")) if home else None
+
+
+def config_candidates(explicit: str | None, project: str, environ: dict[str, str]) -> tuple[list[str], str | None]:
+    """The files to read, lowest precedence first, and which of them is a project's own.  `--config` is the
+    whole config and nothing layers under it, so it is never the project's layer."""
+    if explicit:
+        return [os.path.realpath(explicit)], None
+    paths = list(dict.fromkeys([path for path in (_user_config_path(environ), os.path.join(project, "council.toml")) if path]))
+    return paths, os.path.join(project, "council.toml")
+
+
 def is_within(path: str, parent: str) -> bool:
     return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
+def check_platform(plat: str | None = None) -> str | None:
+    """The refusal for a host that has no user and mount namespaces to sandbox a member with."""
+    plat = sys.platform if plat is None else plat  # read live, so a patched platform is honored however late it is set
+    if plat == "linux":
+        return None
+    return (
+        f"this is not Linux ({plat!r}): every member is sandboxed with Linux user and mount namespaces, and there are none here. "
+        "Run the council on Linux — a VM, or a container mounted to only the project directory."
+    )
 
 
 def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | None:

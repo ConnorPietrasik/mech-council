@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from .conftest import DEFAULT_CONFIG, FAKE_PI, write_project_config
+from .conftest import DEFAULT_CONFIG, FAKE_PI, no_user_config, write_project_config
 
 pytestmark = [pytest.mark.timeout(200)]
 
@@ -49,6 +49,7 @@ def test_run_json_carries_every_field_of_its_two_phases(finished):
     created = [
         "created",
         "config_path",
+        "config_layers",
         "council",
         "mode",
         "goal",
@@ -285,7 +286,7 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     from mech_council.deliberation.state import Docket, Item
     from mech_council.startup import convene
 
-    _, launch = convene(["review"], environ=dict(os.environ, COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
+    _, launch = convene(["review"], environ=no_user_config(COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
     council = launch.council
     run_dir = tmp_path / "run"
     run_dir.mkdir()

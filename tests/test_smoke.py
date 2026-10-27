@@ -13,6 +13,8 @@ import pytest
 
 from tests.support.ground import FIXTURE_ROOT, GROUND_SKIP_PHRASE, SKIP_MARKERS, fstype_under
 
+from .conftest import no_user_config
+
 TOY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "testdata", "toy-project")
 RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
 
@@ -43,7 +45,7 @@ def _run(argv: list[str], cwd: str, env: dict, timeout: int) -> subprocess.Compl
 def test_a_real_council_reviews_the_toy_project_and_exits_zero(tmp_path):
     """Planted bugs, 2 seats + a chair, 2 rounds, transcripts off → exit 0."""
     runs = str(tmp_path / "runs")
-    env = dict(os.environ, COUNCIL_RUNS_DIR=runs)
+    env = no_user_config(COUNCIL_RUNS_DIR=runs)
     result = _run(["review", "--project", TOY, "--allow-nested", "--rounds", "2"], cwd=TOY, env=env, timeout=2400)
     assert result.returncode == 0, f"exit {result.returncode}\n{result.stderr[-2000:]}"
 
@@ -68,7 +70,7 @@ def test_a_real_council_reviews_the_toy_project_and_exits_zero(tmp_path):
 def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent():
     """The smoke test's own method claim: without `--allow-nested` the nested guard refuses, and says so."""
     marker = {"COUNCIL_RUN_DIR": "/tmp/not-a-real-run-dir", "COUNCIL_RUN_PATH": "/tmp/not-a-real-run-dir"}
-    env = dict(os.environ, **marker, COUNCIL_RUNS_DIR="/tmp/council-smoke-guard")
+    env = no_user_config(**marker, COUNCIL_RUNS_DIR="/tmp/council-smoke-guard")
     result = _run(["review", "--project", TOY], cwd=TOY, env=env, timeout=120)
     # Well-formed flags refused at startup: a setup failure (1), not a usage error (2).
     assert result.returncode == 1, result.stderr[-400:]

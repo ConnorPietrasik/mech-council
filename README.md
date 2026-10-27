@@ -17,7 +17,7 @@ you get a report with the findings.
   pi's RPC mode over pipes — one long-lived child per seat, JSONL in both directions.
 - **Linux with unprivileged user and mount namespaces.** Each member runs in its own
   namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
-  `--privileged` or a seccomp profile that allows `unshare(2)`.
+  `--privileged` or a seccomp profile that allows `unshare(2)`. Anywhere else it refuses, in a sentence, before it reads your config.
 
 If the kernel won't cooperate, you'll get a descriptive error. To check a container before convening anything, run the sandbox
 family (`pytest tests/test_sandbox.py -q`): it builds the real sandbox — namespaces, overlays, masks, the exit sweep — through
@@ -26,12 +26,34 @@ the product's own code.
 ## Install
 
 ```sh
-python -m venv .venv && . .venv/bin/activate
-pip install -e .            # console script: mech-council
+pip install mech-council
 mech-council --help
 ```
 
+From a clone, install it editable instead: `pip install -e ".[test,dev]"`.
+
 ## Quick start
+
+Put the smallest council in `<project>/council.toml` — or once in `~/.config/council/council.toml`, for
+every project. Two seats and a chair; `provider` and `model` are optional, and without them a seat takes
+whatever pi is configured with.
+
+```toml
+[councils.review]
+mode = "review"
+goal = "Find what should be fixed in this project."
+
+[councils.review.chair]
+name = "Chair"
+
+[[councils.review.agents]]
+name = "Metic"
+persona = "You hunt correctness bugs."
+
+[[councils.review.agents]]
+name = "Senior"
+persona = "Smallest change that satisfies the goal."
+```
 
 ```sh
 mech-council review            # or: mech-council -g "focus on the parser" review
@@ -91,7 +113,7 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 | Code | Meaning |
 |---|---|
 | `0` | A result was written — including `needs_human` and `round_limit_reached`. |
-| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal. |
+| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a non-Linux host. |
 | `2` | Usage error. |
 | `130`/`143` | Interrupted. Every child is disposed, every namespace swept, and `run.json` finalized first. |
 
@@ -100,6 +122,23 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 `[defaults]` sets knobs; `[councils.<name>]` overrides them. Flags beat both. Precedence, lowest
 first: built-in default, `[defaults]`, the `extends` chain (nearest ancestor first), the council,
 the flags.
+
+### Which files are read
+
+Two: `$COUNCIL_CONFIG`, else `$XDG_CONFIG_HOME/council/council.toml`, else
+`~/.config/council/council.toml` — and then `<project>/council.toml`. The project's file replaces any
+council of the same name and patches `[defaults]` key by key, and `extends` reaches a parent stated in
+either, so a repo keeps only its own diff:
+
+```toml
+[councils.review-staged]
+extends = "review"                             # the roster lives in the user's file
+goal = "Another agent staged these; did they do a good job?"
+```
+
+`--config` names the only file read; nothing layers under it. And a project's own file may not state a
+`pi_cli` living inside that project — the config a clone brings cannot name the executable every member
+runs — so that knob belongs in the user's file.
 
 | Knob | Default | Meaning |
 |---|---|---|
@@ -221,4 +260,4 @@ Copyright (C) 2026 Connor Pietrasik <connorgpietrasik@gmail.com>
 
 This program is free software: you can redistribute it and/or modify it under the terms of
 the GNU General Public License as published by the Free Software Foundation, either version
-3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
+3 of the License, or (at your option) any later version. See [LICENSE](https://github.com/ConnorPietrasik/mech-council/blob/master/LICENSE).

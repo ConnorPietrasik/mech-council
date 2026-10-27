@@ -4,14 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mech-council"
-version = "0.1.0"
 description = "A council of coding agents that review a project or plan a task together."
+readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Connor Pietrasik", email = "connorgpietrasik@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = []
 classifiers = ["Programming Language :: Python :: 3.14"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/ConnorPietrasik/mech-council"
+Repository = "https://github.com/ConnorPietrasik/mech-council"
+Issues = "https://github.com/ConnorPietrasik/mech-council/issues"
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-timeout"]
@@ -22,6 +28,10 @@ mech-council = "mech_council.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Single-sourced: `--version` reads the same attribute.
+[tool.setuptools.dynamic]
+version = { attr = "mech_council.__version__" }
 
 [tool.mypy]
 files = ["src", "tests"]

@@ -55,18 +55,31 @@ def _try(func, *args) -> None:
 # ---------------------------------------------------------------------------
 
 
+def no_user_config(**extra: str) -> dict[str, str]:
+    """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run.  A test that
+    wants a user layer writes one into `$XDG_CONFIG_HOME` it was given; a test that does not must not find
+    the one whoever runs the suite keeps in their home."""
+    out = dict(os.environ, **extra)
+    out.pop("COUNCIL_CONFIG", None)
+    out["XDG_CONFIG_HOME"] = os.path.join(FIXTURE_ROOT, "no-user-config")  # a directory nothing ever creates
+    return out
+
+
 @pytest.fixture
 def child_env(ground):
-    """A scrubbed env: no inherited run marker, throwaway pi state, offline."""
-    env = dict(os.environ)
+    """A scrubbed env: no inherited run marker, throwaway pi state, an empty user config, offline."""
+    env = no_user_config()
     for key in ("COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):
         env.pop(key, None)
     env["PI_CODING_AGENT_DIR"] = os.path.join(ground, "pi-state")
+    # The user layer, this time a directory a test may write into.
+    env["XDG_CONFIG_HOME"] = os.path.join(ground, "xdg-config")
     env["PI_OFFLINE"] = "1"
     env["PI_SKIP_VERSION_CHECK"] = "1"
     env["COUNCIL_RUNS_DIR"] = os.path.join(ground, "canary")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     os.makedirs(env["PI_CODING_AGENT_DIR"], mode=0o700, exist_ok=True)
+    os.makedirs(env["XDG_CONFIG_HOME"], mode=0o700, exist_ok=True)
     return env
 
 

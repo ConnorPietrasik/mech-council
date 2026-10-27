@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TypeIs
 
 from . import suggest
-from .cli import Args, ConfigError, UsageError
+from .cli import Args, ConfigError, UsageError, is_within
 
 BUILTIN_DEFAULTS: dict[str, object] = {
     "mode": "review",
@@ -79,6 +79,8 @@ class Council:
     #: The councils whose tables merged into this one, nearest first.
     extends: list[str] = field(default_factory=list)
     config_path: str = ""
+    #: Every file the config was read from, lowest precedence first.
+    config_layers: list[str] = field(default_factory=list)
     untrusted: bool = False
     project: str = ""
 
@@ -283,7 +285,7 @@ def _resolve(config: ConfigFile, name: str, trail: tuple[str, ...] = ()) -> tupl
     if parent not in config.councils:
         hint = suggest.suggest(parent, list(config.councils))
         extra = f" (did you mean {hint!r}?)" if hint else ""
-        raise ConfigError(f"council {name!r} extends {parent!r}, which is not a council in {config.path}{extra}")
+        raise ConfigError(f"council {name!r} extends {parent!r}, which is not a council in {config.where}{extra}")
     if parent in path:
         raise ConfigError(f"councils cannot extend in a cycle: {' → '.join([*path, parent])}")
     inherited, chain = _resolve(config, parent, path)
@@ -331,14 +333,55 @@ class ConfigFile:
     path: str
     defaults: dict = field(default_factory=dict)
     councils: dict[str, dict] = field(default_factory=dict)
+    #: Every file read, lowest precedence first, with the raw table of each: a merged council's own keys
+    #: come from one of them, and the messages and `run.json` have to be able to say which.
+    paths: list[str] = field(default_factory=list)
+    project_layer: str | None = None
+    raw: dict[str, dict] = field(default_factory=dict)
 
     def names(self) -> list[str]:
         """The convenable councils: a `_` name is a template, which `extends` reaches and selection
         never does, and which may state less than a whole council."""
         return [name for name in self.councils if not str(name).startswith(TEMPLATE_PREFIX)]
 
+    @property
+    def where(self) -> str:
+        """The files councils were read from, for the messages raised before one is chosen."""
+        return " and ".join(self.paths or [self.path])
+
+    def supplied_by(self, name: str) -> str:
+        """The highest-precedence file that states this council's own table."""
+        for path in reversed(self.paths or [self.path]):
+            if name in (self.raw.get(path, {}).get("councils") or {}):
+                return path
+        return self.path
+
 
 def load_config(path: str) -> ConfigFile:
+    """One file, whole: it must state councils and nothing shadows it."""
+    return _read(path, require_councils=True)
+
+
+def load_layers(paths: list[str], *, project_layer: str | None = None) -> ConfigFile:
+    """The files merged, lowest precedence first.  A later file replaces a same-named council outright and
+    patches `[defaults]` key by key, so `extends` reaches a parent stated in any one of them."""
+    read = [path for path in paths if os.path.isfile(path)]
+    if not read:
+        if len(paths) == 1:
+            load_config(paths[0])  # raises: the one-file refusal, verbatim
+        raise ConfigError(f"no council.toml anywhere: no {' and no '.join(paths)}")
+    merged = ConfigFile(path=read[-1], paths=read, project_layer=project_layer if project_layer in read else None)
+    for path in read:
+        layer = _read(path, require_councils=False)
+        merged.defaults = {**merged.defaults, **layer.defaults}
+        merged.councils = {**merged.councils, **layer.councils}
+        merged.raw.update(layer.raw)
+    if not merged.councils:
+        raise ConfigError(f"{merged.where} declare no councils: add a [councils.<name>] table")
+    return merged
+
+
+def _read(path: str, *, require_councils: bool) -> ConfigFile:
     if path.endswith(".json"):
         raise ConfigError(f"refusing {path!r}: the config is TOML (council.toml), never JSON")
     try:
@@ -358,41 +401,57 @@ def load_config(path: str) -> ConfigFile:
     for key, value in defaults.items():
         kind = SCALAR_KEYS[key][0]
         _check(value, kind, "[defaults]", key)
-    councils_raw = raw.get("councils")
-    if not isinstance(councils_raw, dict) or not councils_raw:
+    councils_raw = raw.get("councils") or {}
+    if not isinstance(councils_raw, dict) or (not councils_raw and require_councils):
         raise ConfigError(f"{path} declares no councils: add a [councils.<name>] table")
     for key, table in councils_raw.items():
         if not str(key).strip():
             raise ConfigError(f"{path}: a council name (its table key) must not be empty")
         if not isinstance(table, dict):
             raise ConfigError(f"council {key!r} must be a table")
-    return ConfigFile(path=path, defaults=defaults, councils=councils_raw)
+    return ConfigFile(path=path, defaults=defaults, councils=councils_raw, paths=[path], raw={path: raw})
 
 
 def select_council(config: ConfigFile, name: str | None) -> str:
     names = config.names()
     if not names:
-        raise UsageError(f"{config.path} states no council to convene: every [councils.<name>] there starts with '_' and is a template")
+        raise UsageError(f"{config.where} states no council to convene: every [councils.<name>] there starts with '_' and is a template")
     if name is None:
         if len(names) == 1:
             return names[0]
-        raise UsageError(f"{'/'.join(names)} are all in {config.path}: name the council to convene")
+        raise UsageError(f"{'/'.join(names)} are all in {config.where}: name the council to convene")
     if name in names:
         return name
     if name in config.councils:
-        raise UsageError(f"council {name!r} in {config.path} is a template: it is there to be extended, not convened")
+        raise UsageError(f"council {name!r} in {config.where} is a template: it is there to be extended, not convened")
     hint = suggest.suggest(name, names)
     extra = f" (did you mean {hint}?)" if hint else ""
-    raise UsageError(f"no council {name!r} in {config.path}{extra}: it offers {', '.join(names)}")
+    raise UsageError(f"no council {name!r} in {config.where}{extra}: it offers {', '.join(names)}")
 
 
-def resolve_pi(explicit: str | None, project: str) -> tuple[str, str]:
+def _pi_cli_stated_by_project(config: ConfigFile, chain: list[str]) -> bool:
+    """Whether the auto-discovered project file is what asked for this `pi_cli`, in its own table, in a
+    template it extends, or in `[defaults]`."""
+    raw = config.raw.get(config.project_layer or "", {})
+    if "pi_cli" in (raw.get("defaults") or {}):
+        return True
+    councils = raw.get("councils") or {}
+    return any("pi_cli" in (councils.get(name) or {}) for name in chain)
+
+
+def resolve_pi(explicit: str | None, project: str, *, from_project: bool = False) -> tuple[str, str]:
     if explicit:
         if "/" in explicit:
             candidate = explicit if os.path.isabs(explicit) else os.path.join(os.getcwd(), explicit)
             if not (os.path.isfile(candidate) and os.access(candidate, os.X_OK)):
                 raise ConfigError(f"pi_cli {explicit!r} is not an executable file")
             resolved = os.path.realpath(candidate)
+            if from_project and is_within(resolved, project):
+                # A council.toml that arrives with a clone must not hand over an executable that arrived with it.
+                raise ConfigError(
+                    f"pi_cli {explicit!r} is inside the project that stated it, which cannot name the executable every "
+                    "member runs: put it in the user council.toml, or convene your own file with --config"
+                )
         else:
             found = shutil.which(explicit)
             if not found:
@@ -454,7 +513,7 @@ def convene(config: ConfigFile, name: str, args: Args, project: str, *, untruste
     chair.id = None
     chair.file_base = chair_file_base()
 
-    pi_cli, pi_version = resolve_pi(flat["pi_cli"], project)
+    pi_cli, pi_version = resolve_pi(flat["pi_cli"], project, from_project=_pi_cli_stated_by_project(config, [name, *chain]))
     council = Council(
         name=name,
         mode=str(flat["mode"]),
@@ -470,7 +529,8 @@ def convene(config: ConfigFile, name: str, args: Args, project: str, *, untruste
         pi_cli=pi_cli,
         pi_version=pi_version,
         extends=chain,
-        config_path=config.path,
+        config_path=config.supplied_by(name),
+        config_layers=list(config.paths),
         untrusted=untrusted,
         project=project,
     )

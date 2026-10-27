@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -220,6 +221,197 @@ def test_allow_nested_overrides_the_guard(cli, project):
     result = cli(["review", "--allow-nested"], cwd=project, env=env, timeout=120)
     assert "nested council" not in result.console
     assert result.run_dir
+
+
+# ------------------------------------------------------- The platform guard
+
+
+def refused_elsewhere(child_env, cwd, args):
+    """The real entry point with `sys.platform` replaced: the guard reads it when it runs, so the child is macOS for its whole life."""
+    harness = "import sys\nsys.platform = 'darwin'\nfrom mech_council.cli import main\nsys.exit(main(sys.argv[1:]))\n"
+    return subprocess.run(
+        [sys.executable, "-c", harness, *args], check=False, cwd=cwd, env=child_env, capture_output=True, text=True, timeout=60
+    )
+
+
+def test_a_platform_without_namespaces_refuses_before_anything_is_read(child_env, tmp_path):
+    """The first impression on an unsupported host: a sentence that names the way out, not `unshare(0x…)` from inside the sandbox."""
+    result = refused_elsewhere(child_env, str(tmp_path), ["review"])
+    assert result.returncode == 1
+    console = (result.stdout + result.stderr).lower()
+    assert "linux" in console and "darwin" in console, console
+    assert "namespaces" in console and "vm" in console, console
+    assert "config" not in console and "unshare" not in console, f"nothing is read before the refusal: {console}"
+
+
+def test_version_and_help_answer_on_any_platform(child_env, tmp_path):
+    for flag in ("-V", "--help"):
+        result = refused_elsewhere(child_env, str(tmp_path), [flag])
+        assert result.returncode == 0, f"{flag}: {result.stderr}"
+        assert "mech-council" in result.stdout
+
+
+# ------------------------------------------------------- The config layers
+
+
+ONE_COUNCIL = """\
+[defaults]
+{knob}max_rounds = 1
+watchdog_sec = 0
+
+[councils.review]
+goal = "{goal}"
+
+[councils.review.chair]
+name = "Chair"
+
+[[councils.review.agents]]
+name = "Metic"
+
+[[councils.review.agents]]
+name = "Senior"
+"""
+
+
+def one_council(goal: str, pi: str | None = FAKE_PI) -> str:
+    """A convenable `review` council that reports its own goal, in either layer's voice."""
+    return ONE_COUNCIL.format(goal=goal, knob=f'pi_cli = "{pi}"\n' if pi else "")
+
+
+def user_at(ground: str) -> dict:
+    """An env whose user config is `<ground>/council.toml`, which is where `write_project_config` writes."""
+    return {"COUNCIL_CONFIG": os.path.join(ground, "council.toml")}
+
+
+def bare(ground: str) -> str:
+    """A project with source in it and no council.toml of its own."""
+    path = os.path.join(ground, "bare")
+    os.makedirs(os.path.join(path, "src"), exist_ok=True)
+    with open(os.path.join(path, "hello.py"), "w", encoding="utf-8") as handle:
+        handle.write("print('hello')\n")
+    return path
+
+
+def test_a_council_kept_in_the_user_config_convenes_a_project_that_has_none(cli, ground):
+    """The point of the user layer: state the council once, convene it in every project."""
+    write_project_config(ground)
+    result = cli(["review"], cwd=bare(ground), env=user_at(ground), timeout=150)
+    assert result.returncode == 0, result.console
+    assert os.path.join(ground, "council.toml") in result.console, "the narration names the file it convened from"
+    assert result.manifest["config_layers"] == [os.path.join(ground, "council.toml")]
+
+
+def test_the_project_layer_replaces_a_same_named_council_and_says_so(cli, project, ground):
+    write_project_config(ground, one_council("the goal nobody should see"))
+    write_project_config(project, one_council("the goal of this project"))
+    result = cli(["review"], cwd=project, env=user_at(ground), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["goal"] == "the goal of this project"
+    assert "the goal nobody should see" not in result.console, "the whole table is replaced, not merged"
+    assert "replaces any council of the same name" in result.console, "the shadowing is stated, not assumed"
+
+
+def test_the_project_layer_extends_a_roster_kept_in_the_user_config(cli, project, ground):
+    write_project_config(ground)  # the reference project config: a roster and a chair, stated once
+    write_project_config(project, '[councils.review-staged]\nextends = "review"\ngoal = "Did the staged work land?"\n')
+    result = cli(["review-staged"], cwd=project, env=user_at(ground), timeout=150)
+    assert result.returncode == 0, result.console
+    assert [row["name"] for row in result.manifest["roster"]] == ["Metic", "Senior"], "the roster came from the user layer"
+    assert result.manifest["extends"] == ["review"] and result.manifest["goal"] == "Did the staged work land?"
+
+
+def test_no_config_anywhere_names_both_places_it_looked(cli, ground):
+    env = {"XDG_CONFIG_HOME": os.path.join(ground, "no-user-config")}
+    result = cli(["review"], cwd=bare(ground), env=env)
+    assert result.returncode == 1
+    for path in (os.path.join(ground, "no-user-config", "council", "council.toml"), os.path.join(bare(ground), "council.toml")):
+        assert path in result.console, f"the refusal should name {path}"
+
+
+def test_config_names_the_only_file_read(cli, project, ground):
+    write_project_config(ground)  # this one offers a `plan` council, and --config must not see it
+    write_project_config(project, one_council("g"))
+    result = cli(["plan", "-c", os.path.join(project, "council.toml")], cwd=project, env=user_at(ground))
+    assert result.returncode == 2
+    assert "no council 'plan'" in result.console
+    assert os.path.join(ground, "council.toml") not in result.console
+
+
+def test_a_project_council_may_not_name_a_pi_that_arrived_with_the_project(cli, project):
+    planted = os.path.join(project, "pi-harness.py")
+    shutil.copyfile(FAKE_PI, planted)
+    os.chmod(planted, 0o755)
+    write_project_config(project, one_council("g", pi=planted))
+    result = cli(["review"], cwd=project)
+    assert result.returncode == 1
+    assert "inside the project" in result.console and "user council.toml" in result.console, result.console
+
+
+def test_the_same_executable_is_fine_once_your_own_config_names_it(cli, project, ground):
+    planted = os.path.join(project, "pi-harness.py")
+    shutil.copyfile(FAKE_PI, planted)
+    os.chmod(planted, 0o755)
+    write_project_config(ground, one_council("g", pi=planted))
+    write_project_config(project, one_council("g", pi=None))
+    result = cli(["review"], cwd=project, env=user_at(ground), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["pi_cli"] == os.path.realpath(planted)
+
+
+def home_layer(ground: str) -> str:
+    """A `$HOME` holding `~/.config/council/council.toml`: where the councils of someone who set nothing at all live."""
+    home = os.path.join(ground, "home")
+    directory = os.path.join(home, ".config", "council")
+    os.makedirs(directory, exist_ok=True)
+    write_project_config(directory, one_council("convened from the home default"))
+    return home
+
+
+def test_the_home_default_convenes_a_project_that_has_none(cli, ground):
+    """The README's promise, with nothing set but `$HOME` — the case no `COUNCIL_CONFIG` or `XDG_CONFIG_HOME` test reaches."""
+    home = home_layer(ground)
+    result = cli(["review"], cwd=bare(ground), env={"HOME": home}, extra_scrub=("XDG_CONFIG_HOME", "COUNCIL_CONFIG"), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["config_layers"] == [os.path.join(home, ".config", "council", "council.toml")]
+    assert result.manifest["goal"] == "convened from the home default"
+
+
+def test_an_invalid_xdg_config_home_is_ignored_and_the_home_default_still_convenes(cli, ground):
+    """`XDG_CONFIG_HOME=.config` is invalid, so it is ignored rather than fatal: the home default stays the user layer
+    instead of the run refusing over a project file that was never the one at fault."""
+    home = home_layer(ground)
+    result = cli(["review"], cwd=bare(ground), env={"HOME": home, "XDG_CONFIG_HOME": ".config"}, timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["goal"] == "convened from the home default"
+
+
+@pytest.mark.parametrize(
+    "council_config, xdg, home, expected",
+    [
+        # $COUNCIL_CONFIG wins when it is set at all, relative or not …
+        ("cfg.toml", "xdg", "home", "cfg.toml"),
+        # … unset → $XDG_CONFIG_HOME/council/council.toml …
+        (None, "xdg", "home", os.path.join("xdg", "council", "council.toml")),
+        # … unset and empty alike …
+        (None, "", "home", os.path.join("home", ".config", "council", "council.toml")),
+        # … unset → the home default, asserted so a change is a visible edit …
+        (None, None, "home", os.path.join("home", ".config", "council", "council.toml")),
+        # … and a relative $XDG_CONFIG_HOME is invalid, so the default is used anyway, as for the runs root …
+        (None, "relative-xdg", "home", os.path.join("home", ".config", "council", "council.toml")),
+        # … with a relative one and no home there is nothing that could hold a council
+        (None, "relative-xdg", None, None),
+    ],
+)
+def test_user_config_resolution(ground, council_config, xdg, home, expected):
+    from mech_council.cli import _user_config_path
+
+    env = {"CWD": ground}
+    for key, name in (("COUNCIL_CONFIG", council_config), ("XDG_CONFIG_HOME", xdg), ("HOME", home)):
+        if name is None:
+            continue
+        # A relative `$XDG_CONFIG_HOME` stays relative on purpose, and an empty one stays empty.
+        env[key] = name if name in ("", "relative-xdg") else os.path.join(ground, name)
+    assert _user_config_path(env) == (None if expected is None else os.path.realpath(os.path.join(ground, expected)))
 
 
 # -------------------------------------------------- The runs-root resolution

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 
 import pytest
 
@@ -509,6 +510,62 @@ def test_comments_are_comments(tmp_path):
     assert council.goal == "a # keeps working"
 
 
+# --------------------------------------------------------------------------- the config layers
+
+
+def layer(tmp_path, name: str, text: str) -> str:
+    """One layer of the config: a `council.toml` in a directory of its own, as the user's and the project's are."""
+    directory = os.path.join(str(tmp_path), name)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "council.toml")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+def convene_layers(tmp_path, paths, name, **kw):
+    loaded = config_mod.load_layers(paths, project_layer=paths[-1])
+    return config_mod.convene(loaded, config_mod.select_council(loaded, name), Args(**kw), str(tmp_path))
+
+
+def test_a_later_layer_replaces_a_same_named_council_whole(tmp_path):
+    user = layer(tmp_path, "user", body().replace('goal = "g"', 'goal = "the user goal"'))
+    council = convene_layers(tmp_path, [user, layer(tmp_path, "proj", body())], "review")
+    assert council.goal == "g", "a same-named council is replaced, not merged: the project's goal is the whole table's"
+    assert council.config_path == os.path.join(str(tmp_path), "proj", "council.toml")
+
+
+def test_defaults_patch_key_by_key_across_layers(tmp_path):
+    user = layer(tmp_path, "user", body().replace("[defaults]\n", "[defaults]\nmax_rounds = 4\n"))
+    council = convene_layers(tmp_path, [user, layer(tmp_path, "proj", body())], "review")
+    assert council.max_rounds == 4, "a [defaults] key the project layer omits survives from the user layer"
+
+
+def test_a_layer_of_nothing_but_defaults_leaves_the_council_where_it_was(tmp_path):
+    user = layer(tmp_path, "user", body())
+    project = layer(tmp_path, "proj", "[defaults]\nmax_rounds = 3\n")
+    council = convene_layers(tmp_path, [user, project], "review")
+    assert council.max_rounds == 3 and council.config_path == user, "a defaults-only layer states no council of its own"
+
+
+def test_a_council_only_the_user_states_is_still_convenable_and_extends_crosses_the_layers(tmp_path):
+    user = layer(tmp_path, "user", body())
+    project = layer(tmp_path, "proj", '[councils.narrow]\nextends = "review"\ngoal = "narrower"\n')
+    council = convene_layers(tmp_path, [user, project], "narrow")
+    assert [agent.name for agent in council.agents] == ["A", "B"], "the roster came from the other layer"
+    assert council.goal == "narrower" and council.extends == ["review"]
+    assert council.config_layers == [user, project]
+
+
+def test_the_layers_that_do_not_exist_are_not_read(tmp_path):
+    user = layer(tmp_path, "user", body())
+    missing = os.path.join(str(tmp_path), "proj", "council.toml")
+    loaded = config_mod.load_layers([user, missing], project_layer=missing)
+    assert loaded.paths == [user] and loaded.project_layer is None
+    with pytest.raises(ConfigError, match="no council.toml anywhere"):
+        config_mod.load_layers([missing, os.path.join(str(tmp_path), "nowhere", "council.toml")])
+
+
 # --------------------------------------------------------------------------- selection
 
 
@@ -535,6 +592,18 @@ def test_pi_cli_resolution(tmp_path):
         config_mod.resolve_pi(os.path.join(str(tmp_path), "nope"), str(tmp_path))
     with pytest.raises(ConfigError, match="not on PATH"):
         config_mod.resolve_pi("definitely-not-a-cli-here", str(tmp_path))
+
+
+def test_a_project_layer_pi_cli_may_not_live_inside_the_project(tmp_path):
+    """The one config a clone brings with it cannot name the executable every member runs."""
+    project = os.path.realpath(str(tmp_path))
+    planted = os.path.join(project, "pi-harness.py")
+    shutil.copyfile(PI, planted)
+    os.chmod(planted, 0o755)
+    with pytest.raises(ConfigError, match="inside the project"):
+        config_mod.resolve_pi(planted, project, from_project=True)
+    assert config_mod.resolve_pi(planted, project)[0] == os.path.realpath(planted), "your own config may name it"
+    assert config_mod.resolve_pi(PI, project, from_project=True)[0] == os.path.realpath(PI), "and a project may name one outside itself"
 
 
 def test_an_unresolvable_pi_leaves_nothing_behind(tmp_path, canary):

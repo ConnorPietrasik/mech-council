@@ -23,15 +23,17 @@ class Launch:
 def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[cli.Args, Launch]:
     environ = dict(os.environ if environ is None else environ)
     args = cli.parse_args(argv)
+    if refusal := cli.check_platform():
+        raise ConfigError(refusal)  # before anything is read: a stranger's first impression is this line
     if message := cli.check_nested_guard(args.allow_nested, environ):
         raise ConfigError(message)
     project = cli.resolve_project(args.project)
     if not os.path.isdir(project):
         raise UsageError(f"--project is not a directory: {args.project!r}")
-    config_path = args.config or os.path.join(project, "council.toml")
     if args.config and not os.path.isfile(args.config):
         raise UsageError(f"--config is not a file: {args.config!r}")
-    loaded = config_mod.load_config(config_path)
+    paths, project_layer = cli.config_candidates(args.config, project, environ)
+    loaded = config_mod.load_layers(paths, project_layer=project_layer)
     name = config_mod.select_council(loaded, args.council)
     council = config_mod.convene(loaded, name, args, project, untrusted=args.untrusted)
     runs_dir = cli._runs_root_from_env(environ)
@@ -40,6 +42,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     if cli.is_within(os.path.join(runs_dir, run_name), project):
         raise ConfigError(f"the run directory would land inside the project: {os.path.join(runs_dir, run_name)} is under {project}")
     notes = list(args.notes)
+    notes += _layer_notes(loaded)
     notes += _trust_notes(council, args)
     return args, Launch(
         council=council,
@@ -61,6 +64,13 @@ def _check_runs_root(runs_dir: str, project: str) -> None:
 def _run_name(project: str) -> str:
     stamp = time.strftime("%Y%m%dT%H%M%S")
     return f"{stamp}-{naming.slugify(os.path.basename(project.rstrip('/'))) or 'project'}"
+
+
+def _layer_notes(loaded: config_mod.ConfigFile) -> list[str]:
+    if len(loaded.paths) < 2 or loaded.project_layer not in loaded.paths:
+        return []
+    others = " and ".join(path for path in loaded.paths if path != loaded.project_layer)
+    return [f"{loaded.project_layer} replaces any council of the same name in {others}"]
 
 
 def _trust_notes(council: config_mod.Council, args: cli.Args) -> list[str]:

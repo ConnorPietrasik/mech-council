@@ -91,6 +91,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
     data = {
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "config_path": council.config_path,
+        "config_layers": list(council.config_layers),
         "council": council.name,
         "extends": list(council.extends),
         "mode": council.mode,
