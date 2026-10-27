@@ -47,27 +47,32 @@ You deduplicate findings and never review code yourself. Be conservative: merge 
 findings that describe the same underlying defect.
 """
 
-[councils.review-staged]
-mode = "review"
+[councils.review-staged]                      # the same council, a narrower scope
+extends = "review"
 goal = "Another agent staged these changes; did they do a good job? (`git diff --cached`)"
 
-[[councils.review-staged.agents]]
-name = "Metic"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-
-[[councils.review-staged.agents]]
-name = "Coworker"
-
 [councils.review-staged.chair]
-name = "Chair"
+persona = """
+You chair a review of changes that are staged and not yet committed.
+"""
 
-[councils.plan]
-mode = "plan"
-goal = "Make a plan for the implementation of the next TODO item"
+[councils.review-fast]                        # two of the three seats, same personas
+extends = "review"
+goal = "A fast pass: the defects you would fix today."
 max_rounds = 3
 
-[[councils.plan.agents]]
+[[councils.review-fast.agents]]
+name = "Coworker"
+drop = true
+
+[[councils.review-fast.agents]]
+name = "Metic"
+persona = "One line per finding: the file, the line, the defect."
+
+# A template: a `_` name is there to be extended, never convened, and never convenes by itself.
+[councils._planners]
+
+[[councils._planners.agents]]
 name = "Metic"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
@@ -75,14 +80,20 @@ persona = """
 You are a meticulous planner.
 """
 
-[[councils.plan.agents]]
+[[councils._planners.agents]]
 name = "Senior"
 
-[councils.plan.chair]
+[councils._planners.chair]
 name = "Chair"
 persona = """
 You are the chair of a planning council.
 """
+
+[councils.plan]                               # a template's roster, its own goal and limit
+extends = "_planners"
+mode = "plan"
+goal = "Make a plan for the implementation of the next TODO item"
+max_rounds = 3
 '''
 
 
@@ -99,6 +110,8 @@ def convene(tmp_path, text: str, name: str = "review", **kw):
     chosen = config_mod.select_council(loaded, name)
     return config_mod.convene(loaded, chosen, Args(**kw), str(tmp_path))
 
+
+PI = os.path.abspath(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py"))
 
 BODY = """\
 [defaults]
@@ -120,7 +133,7 @@ name = "B"
 
 def body(**replacements) -> str:
     """The smallest convenable council, with one line added or edited per case."""
-    text = BODY.format(pi=os.path.abspath(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py")))
+    text = BODY.format(pi=PI)
     for find, with_ in replacements.items():
         assert find in text, find
         text = text.replace(find, with_)
@@ -133,16 +146,29 @@ def body(**replacements) -> str:
 def test_the_reference_config_loads_and_convenes_every_council(tmp_path):
     path = write(tmp_path, REFERENCE_CONFIG)
     loaded = config_mod.load_config(path)
-    assert loaded.names() == ["review", "review-staged", "plan"]
+    assert loaded.names() == ["review", "review-staged", "review-fast", "plan"], "a `_` template is not a council you convene"
     review = config_mod.convene(loaded, "review", Args(), str(tmp_path))
     assert [a.name for a in review.agents] == ["Metic", "Senior", "Coworker"]
     assert review.chair.provider == "omnissiah"
     assert review.max_rounds == 6 and review.max_concurrency == 3
+    assert review.extends == []
     staged = config_mod.convene(loaded, "review-staged", Args(), str(tmp_path))
-    assert staged.max_rounds == 6, "[defaults] reaches a council stating nothing"
+    assert staged.extends == ["review"]
+    assert [(a.name, a.provider, a.persona) for a in staged.agents] == [(a.name, a.provider, a.persona) for a in review.agents]
+    assert staged.mode == "review", "the mode is inherited with everything else"
+    assert staged.goal == "Another agent staged these changes; did they do a good job? (`git diff --cached`)"
+    assert review.goal == "See if there is anything here that should be fixed or improved."
+    assert staged.chair.persona == "You chair a review of changes that are staged and not yet committed.\n"
+    assert staged.chair.model == review.chair.model, "a chair patch replaces the keys it states"
+    assert staged.max_rounds == 6, "[defaults] reaches a council stating nothing, inherited or not"
+    fast = config_mod.convene(loaded, "review-fast", Args(), str(tmp_path))
+    assert [a.name for a in fast.agents] == ["Metic", "Senior"], "drop retires a seat, the rest keep their order"
+    assert fast.agents[0].persona == "One line per finding: the file, the line, the defect."
+    assert fast.agents[1].persona == review.agents[1].persona, "an untouched seat is inherited whole"
+    assert fast.max_rounds == 3, "a council key beats [defaults]"
     plan = config_mod.convene(loaded, "plan", Args(), str(tmp_path))
-    assert plan.max_rounds == 3, "a council key beats [defaults]"
-    assert plan.mode == "plan" and plan.agents[1].persona is None
+    assert plan.extends == ["_planners"] and plan.mode == "plan"
+    assert plan.agents[1].persona is None
 
 
 def test_convening_assigns_ids_slots_and_file_bases(tmp_path):
@@ -153,6 +179,181 @@ def test_convening_assigns_ids_slots_and_file_bases(tmp_path):
     assert council.chair.id is None and council.chair.file_base == "chair"
     assert council.member_file_bases == ["slot1-a", "slot2-b", "chair"]
     assert council.adapter.item_noun_plural == "findings"
+
+
+# --------------------------------------------------------------------------- extends: one council's roster, another council's goal
+
+CHAIN = """\
+[defaults]
+pi_cli = "{pi}"
+max_rounds = 6
+
+[councils._base]                                  # a template: no mode, no goal, convenes nothing
+watchdog_sec = 90
+
+[[councils._base.agents]]
+name = "A"
+persona = "pa"
+
+[[councils._base.agents]]
+name = "B"
+persona = "pb"
+
+[councils._base.chair]
+name = "Chair"
+persona = "pc"
+
+[councils.mid]
+extends = "_base"
+max_rounds = 4
+
+[councils.mid.chair]
+name = "Chairman"
+
+[councils.leaf]
+extends = "mid"
+goal = "g"
+"""
+
+
+def chain(**replacements) -> str:
+    """The three-deep chain — template, middle, leaf — with one substitution per case."""
+    text = CHAIN.format(pi=PI)
+    for find, with_ in replacements.items():
+        assert find in text, find
+        text = text.replace(find, with_, 1)
+    return text
+
+
+def convene_chain(tmp_path, name, **replacements):
+    return convene(tmp_path, chain(**replacements), name)
+
+
+def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
+    leaf = convene_chain(tmp_path, "leaf")
+    assert leaf.extends == ["mid", "_base"], "the chain is recorded, nearest first"
+    assert [(a.name, a.persona) for a in leaf.agents] == [("A", "pa"), ("B", "pb")]
+    assert leaf.chair.name == "Chairman" and leaf.chair.persona == "pc", "the chair merges key by key"
+    assert leaf.watchdog_sec == 90, "a knob stated two hops up still reaches the leaf"
+    assert leaf.max_rounds == 4, "an ancestor beats [defaults], and the leaf inherits that"
+    assert leaf.mode == "review" and leaf.max_concurrency == 4, "unstated everywhere: [defaults], then the built-in"
+    assert convene_chain(tmp_path, "mid").extends == ["_base"]
+    # Slots and file bases are assigned after the merge, so an inherited roster needs no bookkeeping.
+    assert [a.file_base for a in leaf.agents] == ["slot1-a", "slot2-b"]
+
+
+def test_flags_still_beat_the_whole_chain(tmp_path):
+    leaf = convene(tmp_path, chain(), "leaf", goal="--goal wins", rounds=1, transcripts="full")
+    assert (leaf.goal, leaf.max_rounds, leaf.transcripts) == ("--goal wins", 1, "full")
+
+
+def test_a_child_patches_the_inherited_seats_by_name(tmp_path):
+    text = chain().replace(
+        '[councils.leaf]\nextends = "mid"\ngoal = "g"',
+        '[councils.leaf]\nextends = "mid"\ngoal = "g"\n\n'
+        '[[councils.leaf.agents]]\nname = "B"\npersona = "patched"\n\n'
+        '[[councils.leaf.agents]]\nname = "A"\ndrop = true\n\n'
+        '[[councils.leaf.agents]]\nname = "C"\npersona = "new seat"\n',
+    )
+    leaf = convene(tmp_path, text, "leaf")
+    assert [(a.name, a.persona) for a in leaf.agents] == [("B", "patched"), ("C", "new seat")], "dropped, patched, appended"
+
+
+def test_a_drop_that_names_no_inherited_seat_says_so(tmp_path):
+    """`drop` is a patch verb: it needs an inherited seat to retire, and it leaves the chair alone."""
+    nowhere = chain().replace('goal = "g"', 'goal = "g"\n\n[[councils.leaf.agents]]\nname = "Z"\ndrop = true', 1)
+    with pytest.raises(ConfigError, match=r"drops 'Z', which inherits no seat of that name"):
+        convene(tmp_path, nowhere, "leaf")
+    not_a_bool = chain().replace('goal = "g"', 'goal = "g"\n\n[[councils.leaf.agents]]\nname = "A"\ndrop = 1', 1)
+    with pytest.raises(ConfigError, match=r"\[councils\.leaf\.agents\]\[1\]\.drop wants true or false, got int"):
+        convene(tmp_path, not_a_bool, "leaf")
+    chair = chain().replace(
+        '[councils.leaf]\nextends = "mid"\ngoal = "g"',
+        '[councils.leaf]\nextends = "mid"\ngoal = "g"\n\n[councils.leaf.chair]\ndrop = true',
+    )
+    with pytest.raises(ConfigError, match=r"\[councils\.leaf\.chair\] drops the chair"):
+        convene(tmp_path, chair, "leaf")
+
+
+def test_a_patch_states_each_seat_once(tmp_path):
+    """A seat is stated once per council; to rebuild an inherited one, `drop` it first and state it again."""
+
+    def patched(*entries: str) -> str:
+        head = '[councils.leaf]\nextends = "mid"\ngoal = "g"'
+        return chain().replace(head, head + "".join(entries))
+
+    twice = patched(
+        '\n\n[[councils.leaf.agents]]\nname = "B"\npersona = "one"\n',
+        '\n\n[[councils.leaf.agents]]\nname = "B"\nmodel = "m"\n',
+    )
+    with pytest.raises(ConfigError, match=r"patches 'B' twice"):
+        convene(tmp_path, twice, "leaf")
+    rebuilt = patched(
+        '\n\n[[councils.leaf.agents]]\nname = "B"\ndrop = true\n',
+        '\n\n[[councils.leaf.agents]]\nname = "B"\npersona = "reborn"\n',
+    )
+    assert [(a.name, a.persona) for a in convene(tmp_path, rebuilt, "leaf").agents] == [("A", "pa"), ("B", "reborn")]
+
+
+def test_a_drop_that_retires_nothing_is_still_stripped(tmp_path):
+    """The `drop` verb never survives the merge, so `drop = false` costs nothing wherever it is written."""
+    text = chain().replace('name = "A"\npersona = "pa"', 'name = "A"\npersona = "pa"\ndrop = false')
+    for name in ("mid", "leaf"):
+        assert [a.name for a in convene(tmp_path, text, name).agents] == ["A", "B"], name
+
+
+def test_a_template_composes_with_the_council_that_extends_it(tmp_path):
+    """A template may state less than a council: the council that inherits it is what has to add up."""
+    text = (
+        f'[defaults]\npi_cli = "{PI}"\n\n'
+        '[councils._half]\n\n[[councils._half.agents]]\nname = "A"\n\n'
+        '[councils.half]\nextends = "_half"\ngoal = "g"\n\n'
+        '[[councils.half.agents]]\nname = "C"\n\n'
+        '[councils.half.chair]\nname = "Chair"\n'
+    )
+    loaded = config_mod.load_config(write(tmp_path, text))
+    half = config_mod.convene(loaded, "half", Args(), str(tmp_path))
+    assert [a.name for a in half.agents] == ["A", "C"] and half.chair.name == "Chair"
+    assert loaded.names() == ["half"], "a file of templates convenes the one real council in it"
+    assert config_mod.select_council(loaded, None) == "half"
+    with pytest.raises(UsageError, match="is a template: it is there to be extended, not convened"):
+        config_mod.select_council(loaded, "_half")
+
+
+def test_a_file_of_nothing_but_templates_convenes_nothing(tmp_path):
+    """A file of only templates holds no council to convene, and says that rather than offering an empty list."""
+    text = f'[defaults]\npi_cli = "{PI}"\n\n[councils._bench]\n\n[[councils._bench.agents]]\nname = "A"\n'
+    loaded = config_mod.load_config(write(tmp_path, text))
+    assert loaded.names() == []
+    for named in (None, "_bench", "bench"):
+        with pytest.raises(UsageError, match="states no council to convene") as raised:
+            config_mod.select_council(loaded, named)
+        assert "template" in str(raised.value), str(raised.value)
+
+
+def test_only_the_chain_you_asked_for_has_to_be_right(tmp_path):
+    """A council nobody extends is not read: the file convenes while another table is nonsense."""
+    text = chain() + '\n[councils.sideways]\nmode = "sideways"\nextends = "nowhere"\n\n[councils._unused]\nagents = 3\n'
+    assert [a.name for a in convene(tmp_path, text, "leaf").agents] == ["A", "B"]
+
+
+def test_a_real_council_is_an_ordinary_parent(tmp_path):
+    """Extending a council you also convene is the normal case; templates are the optional extra."""
+    text = (
+        chain()
+        .replace('extends = "_base"', 'extends = "review"')
+        .replace('[councils.leaf]\nextends = "mid"\ngoal = "g"', '[councils.leaf]\nextends = "mid"')
+        .replace(
+            "[councils.mid]",
+            '[councils.review]\nextends = "_base"\ngoal = "the whole tree"\nmax_rounds = 9\n\n[councils.mid]',
+        )
+    )
+    leaf = convene(tmp_path, text, "leaf")
+    assert leaf.extends == ["mid", "review", "_base"]
+    assert leaf.goal == "the whole tree", "a real council's goal comes with its roster"
+    assert leaf.max_rounds == 4, "and a nearer ancestor still wins"
+    review = convene(tmp_path, text, "review")
+    assert review.max_rounds == 9 and review.goal == "the whole tree", "the parent is still convenable itself"
 
 
 # -------------------------------------------------- The config loader's validation list
@@ -181,6 +382,85 @@ def test_convening_assigns_ids_slots_and_file_bases(tmp_path):
             "'chairTimeoutSec' in [councils.review] (did you mean chair_timeout_sec?",
         ),
         (body().replace("[defaults]", "[defaults]\nmaxrounds = 4"), "unknown config key 'maxrounds'"),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "rewiew"', 1),
+            "extends 'rewiew', which is not a council in",
+        ),
+        (body().replace('goal = "g"', 'goal = "g"\nextends = 4', 1), "[councils.review].extends wants a string, got int"),
+        (body().replace('goal = "g"', 'goal = "g"\nextends = "review"', 1), "cannot extend in a cycle: review → review"),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "y"', 1) + '\n[councils.y]\nextends = "review"\n',
+            "cannot extend in a cycle: review → y → review",
+        ),
+        (body().replace('name = "A"', 'name = "A"\ndrop = true', 1), "drops a seat, but [councils.review] extends no council"),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1)
+            + '\n[councils._p]\n[[councils._p.agents]]\nname = "A"\nnickname = "x"\n',
+            "unknown config key 'nickname' in [councils._p.agents][1]",
+        ),
+        (
+            # A patched roster is still inherited, so a broken ancestor is an error even with a roster of its own.
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1) + "\n[councils._p]\nagents = 3\n",
+            "[councils._p.agents] is not a list of seat tables; agents are written [[councils._p.agents]]",
+        ),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1) + '\n[councils._p]\n[councils._p.agents]\nname = "A"\n',
+            "[councils._p.agents] is a single table; agents are written [[councils._p.agents]]",
+        ),
+        (
+            body()
+            .replace('goal = "g"', 'goal = "g"\nagents = 3', 1)
+            .replace('[[councils.review.agents]]\nname = "A"\n\n[[councils.review.agents]]\nname = "B"\n', ""),
+            "[councils.review.agents] is not a list of seat tables",
+        ),
+        (
+            # A knobs-only template inherits no seat to retire, so the verb is named, not an unknown seat key.
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_knobs"', 1)
+            + '\n[councils._knobs]\nwatchdog_sec = 90\n\n[[councils.review.agents]]\nname = "Z"\ndrop = true\n',
+            "[councils.review.agents] drops 'Z', which inherits no seat of that name to drop",
+        ),
+        (
+            # A bad value in an inherited seat names the ancestor that carries it, not the council that inherited it.
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1)
+            + '\n[councils._p]\n[[councils._p.agents]]\nname = "A"\npersona = 7\n',
+            "config key [councils._p.agents][1].persona wants a string",
+        ),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1) + '\n[councils._p]\n[[councils._p.agents]]\npersona = "x"\n',
+            "[councils._p.agents][1] needs a non-empty 'name'",
+        ),
+        (
+            # The same for the chair, which `_members` would otherwise report in the inheriting table.
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1) + '\n[councils._p]\n[[councils._p.chair]]\nname = "Chair"\n',
+            "[councils._p.chair] is written [[...]]",
+        ),
+        (
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1) + "\n[councils._p]\nchair = 3\n",
+            "[councils._p.chair] is int, not a table",
+        ),
+        (
+            # A chair patch states no name, so only the merged chair can lack one — and it is named as a table.
+            body(**{'[councils.review.chair]\nname = "Chair"': "[councils.review.chair]"}),
+            "[councils.review.chair] needs a non-empty 'name'",
+        ),
+        (
+            body()
+            .replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1)
+            .replace('[councils.review.chair]\nname = "Chair"', "[councils.review.chair]")
+            + '\n[councils._p]\n[councils._p.chair]\npersona = "p"\n',
+            "[councils.review.chair] needs a non-empty 'name'",
+        ),
+        (
+            body(**{'[councils.review.chair]\nname = "Chair"': '[councils.review.chair]\nname = "Chair"\nmodel = 7'}),
+            "config key [councils.review.chair].model wants a string",
+        ),
+        (
+            # Only the merged seat can be judged for this, since a patch may complete an inherited one.
+            body().replace('goal = "g"', 'goal = "g"\nextends = "_p"', 1)
+            + '\n[councils._p]\n[[councils._p.agents]]\nname = "A"\nprovider = "p"\n\n[[councils._p.agents]]\nname = "B"\n',
+            "[councils.review.agents][1] states 'provider' without 'model' — pi refuses to start a seat configured that way "
+            "[the roster merges _p → review: it can be stated in any of them]",
+        ),
     ],
 )
 def test_each_validation_rule_says_so(tmp_path, text, wanted):
@@ -259,7 +539,7 @@ def test_pi_cli_resolution(tmp_path):
 
 def test_an_unresolvable_pi_leaves_nothing_behind(tmp_path, canary):
     """The startup ordering: a config-stage failure creates no run directory anywhere."""
-    text = body().replace(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py"), "no-such-pi-cli")
+    text = body().replace(PI, "no-such-pi-cli")
     with pytest.raises(ConfigError):
         convene(tmp_path, text)
     assert os.listdir(canary) == []

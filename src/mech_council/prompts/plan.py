@@ -69,9 +69,59 @@ ROUND_SCHEMA = """\
 ```
 """
 
-EXTRA_BRIEFING = ""
-MERGE_TASK = (
-    "Decision points raised since the last merge are listed below. Say which "
-    "are the same decision asked twice — merging wording or scope is not "
-    "merging."
-)
+# `common.round_briefing`'s per-mode slot: prose only plan's seats read.
+EXTRA_BRIEFING = """\
+# Unanswered questions
+
+An unanswered question the council judged **deferred** goes into the plan's assumptions
+with the guess it stands for — never decided silently. An unanswered
+**effective-blocking** question is a "do NOT guess": name it and stop.
+"""
+MERGE_TASK = """\
+Decision points raised since the last merge are listed below. Say which ask the **same
+decision twice**; merging wording or scope is not merging, because it is the decision that
+matches, not the sentence stating it.
+
+- Two entries naming two forks that merely share a word are two decision points.
+- Each entry prints the decision, then its `the answers it admits:` line and its `evidence:`
+  line. Read all three — decisions that read alike often separate on an answer one admits and
+  the other does not.
+"""
+
+# The comparison pass is plan's own, so none of it is shared with `chair.py` the way the merge rules are.
+
+COMPARE = """\
+# Compare the plans, do not write one
+
+You are the chair of a planning council. You compare the planners' independent plans and
+build the decision map; you never plan anything yourself.
+
+- `agreed`: points the plans share, with the agents sharing them.
+- `conflicts`: one entry per **same decision answered differently**, with each agent's
+  position. Do not invent conflicts between plans that merely differ in wording or scope;
+  a conflict is the same decision answered differently.
+- `uncovered`: what the council's goal needs and no plan covers.
+- Judge plans by consequence: mechanism is fair game, naming and phrasing are not worth a
+  round.
+- A conflict you hand to the human carries `context` — what is at stake between the two
+  answers — and `options`: each seat's answer **in that seat's own words**, which is the one
+  thing this pass has and nobody else does. Quote the plans; never improve their wording.
+- Echo the agent IDs exactly; make none up.
+"""
+
+COMPARISON_TASK = "The plans are below, one per seat, in their own words. Map them.\n"
+
+COMPARISON_SCHEMA = """\
+```json
+{
+  "agreed": [{"point": "…", "agents": ["Agent1", "Agent2"]}],
+  "conflicts": [{"claim": "the decision in one line",
+                 "positions": [{"agent": "Agent1", "claim": "its answer"},
+                               {"agent": "Agent2", "claim": "its answer"}]}],
+  "uncovered": ["…"],
+  "human_input": [{"question": "…", "context": "what is at stake between them",
+                   "options": ["Agent1's answer in Agent1's words", "Agent2's answer in Agent2's words"],
+                   "blocking": true}]
+}
+```
+"""

@@ -596,7 +596,7 @@ class Engine:
         await self._merge_pass(round_=round_, ids=fresh)
 
     async def _merge_pass(self, round_: int, ids: list[str]) -> None:
-        listing = "\n".join(_merge_entry(self.docket.items[i]) for i in ids)
+        listing = "\n".join(_merge_entry(self.docket.items[i], self.adapter.detail_label) for i in ids)
         merged = await self.port.chair_merge(listing, round_=round_)
         self._chair_questions(merged.get("questions") or [], CHAIR_ID, round_)
         applied, reason = self._apply_merge(merged.get("groups") or [])
@@ -858,10 +858,10 @@ def _tokens(text: str) -> set[str]:
     return {word for word in "".join(c if c.isalnum() else " " for c in (text or "").casefold()).split() if len(word) > 3}
 
 
-def _merge_entry(item) -> str:
+def _merge_entry(item, detail_label: str) -> str:
     lines = [f"- {item.id}: {item.claim}"]
     if item.detail:
-        lines.append(f"    what breaks: {item.detail}")
+        lines.append(f"    {detail_label}: {item.detail}")
     if item.evidence:
         lines.append(f"    evidence: {item.evidence}")
     return "\n".join(lines)

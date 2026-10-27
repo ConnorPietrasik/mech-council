@@ -15,6 +15,9 @@ class ModeAdapter(Protocol):
     def item_noun_plural(self) -> str: ...
 
     @property
+    def detail_label(self) -> str: ...  # the heading an item's `detail` is printed under
+
+    @property
     def id_prefix(self) -> str: ...  # "F" / "T"
 
     @property
@@ -43,6 +46,7 @@ class BaseAdapter:
     mode: str = ""
     item_noun: str = "item"
     item_noun_plural: str = "items"
+    detail_label: str = "what breaks"
     id_prefix: str = "I"
     consensus_kind: str = "open_work"
     report_name: str = "report.md"

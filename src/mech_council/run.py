@@ -34,7 +34,8 @@ async def orchestrate(launch, sandbox) -> int:
     council = launch.council
     run_dir, runs_dir = launch.run_dir, launch.runs_dir
     console = Console(run_dir=run_dir)
-    console.say(f"council `{council.name}` · mode {council.mode} · {len(council.agents)} seat(s) + a chair")
+    lineage = f" extends {' → '.join(council.extends)}" if council.extends else ""
+    console.say(f"council `{council.name}`{lineage} · mode {council.mode} · {len(council.agents)} seat(s) + a chair")
     console.say(f"config {council.config_path}")
     console.say(f"run directory {run_dir}")
     # The sandbox, the transcript level and the trust decision are each a line, so an
@@ -372,6 +373,7 @@ def _report_context(
         project=council.project,
         config_path=council.config_path,
         council=council.name,
+        council_lineage=f"extends {' → '.join(council.extends)}" if council.extends else "",
         outcome=outcome,
         mode=council.mode,
         rounds=rounds,

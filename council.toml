@@ -1,55 +1,23 @@
 # council.toml — the councils this project convenes.
 # Knobs not stated here take their built-in defaults.
+#
+# `extends` inherits another council's roster, chair and knobs wholesale.  A council that
+# then states `[[agents]]` patches the inherited seats by name — a stated key replaces it,
+# the rest carry over, `drop = true` retires a seat, and a name the parent lacks joins the
+# end — and `[chair]` merges key by key.  Precedence: built-in, `[defaults]`, the extended
+# chain nearest-first, this council, the flags.  A `_` name is a template: something to
+# extend, never something you convene.
 
 [councils.review]                   # `mech-council review` — the whole tree
 mode = "review"
 goal = "See if there is anything that should be fixed / improved in this project."
 
-[[councils.review.agents]]
-name = "Metic"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-persona = """
-You are a meticulous code reviewer. Hunt for correctness bugs.
-"""
-
-[[councils.review.agents]]
-name = "Senior"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-persona = """
-You are a pragmatic senior engineer.
-"""
-
-[[councils.review.agents]]
-name = "Pro"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-persona = """
-You are a professional code reviewer.
-"""
-
-[[councils.review.agents]]
-name = "Coworker"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-persona = """
-You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
-"""
-
 [councils.review.chair]
 name = "Chair"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
-persona = """
-You are the council chair.
-"""
 
-[councils.review-staged]             # `mech-council review-staged` — same roster, narrower scope
-mode = "review"
-goal = "Another agent made the staged changes; did they do a good job?"
-
-[[councils.review-staged.agents]]
+[[councils.review.agents]]
 name = "Metic"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
@@ -57,7 +25,7 @@ persona = """
 You are a meticulous code reviewer. Hunt for correctness bugs.
 """
 
-[[councils.review-staged.agents]]
+[[councils.review.agents]]
 name = "Senior"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
@@ -65,7 +33,7 @@ persona = """
 You are a pragmatic senior engineer.
 """
 
-[[councils.review-staged.agents]]
+[[councils.review.agents]]
 name = "Pro"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
@@ -73,7 +41,7 @@ persona = """
 You are a professional code reviewer.
 """
 
-[[councils.review-staged.agents]]
+[[councils.review.agents]]
 name = "Coworker"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
@@ -81,17 +49,18 @@ persona = """
 You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
 """
 
-[councils.review-staged.chair]
+[councils.review-staged]             # `mech-council review-staged` — same roster, narrower scope
+extends = "review"
+goal = "Another agent made the staged changes; did they do a good job?"
+
+[councils.plan]
+mode = "plan"
+goal = "Make a plan for the implementation of the next TODO item"
+
+[councils.plan.chair]
 name = "Chair"
 provider = "omnissiah"
 model = "Qwen-Flash-Next"
-persona = """
-You are the council chair.
-"""
-
-[councils.plan]                     # `mech-council plan`
-mode = "plan"
-goal = "Make a plan for the implementation of the next TODO item"
 
 [[councils.plan.agents]]
 name = "Metic"
@@ -123,12 +92,4 @@ provider = "omnissiah"
 model = "Qwen-Flash-Next"
 persona = """
 You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
-"""
-
-[councils.plan.chair]
-name = "Chair"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
-persona = """
-You are the chair of a planning council.
 """

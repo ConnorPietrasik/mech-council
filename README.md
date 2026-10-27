@@ -97,7 +97,9 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 
 ## Configuration
 
-`[defaults]` sets knobs; `[councils.<name>]` overrides them. Flags beat both.
+`[defaults]` sets knobs; `[councils.<name>]` overrides them. Flags beat both. Precedence, lowest
+first: built-in default, `[defaults]`, the `extends` chain (nearest ancestor first), the council,
+the flags.
 
 | Knob | Default | Meaning |
 |---|---|---|
@@ -113,6 +115,62 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 
 Seats and the chair also take `provider`, `model`, `persona`, and an unknown model warns
 and falls back rather than failing the run.
+
+### `extends`: one roster, several councils
+
+A council that only wants a different goal still has to name its seats and its chair, so it says
+`extends` instead and inherits them:
+
+```toml
+[councils.review]                    # a goal, three seats and a chair, stated once
+mode = "review"
+goal = "See if there is anything here that should be fixed or improved."
+
+[[councils.review.agents]]
+name = "Metic"
+persona = "You hunt correctness bugs."
+
+[[councils.review.agents]]
+name = "Senior"
+persona = "Smallest change that satisfies the goal."
+
+[[councils.review.agents]]
+name = "Coworker"
+persona = "You inherit this in eighteen months."
+
+[councils.review.chair]
+name = "Chair"
+
+[councils.review-staged]             # the same council, a narrower scope — three lines
+extends = "review"
+goal = "Another agent staged these changes; did they do a good job?"
+
+[councils.review-quick]              # …or the same council with a smaller bench
+extends = "review"
+goal = "The defects you would fix today."
+max_rounds = 3
+
+[[councils.review-quick.agents]]
+name = "Senior"
+drop = true                          # retire an inherited seat
+
+[[councils.review-quick.agents]]
+name = "Metic"
+persona = "One line per finding."    # patch one key; the seat keeps everything else
+
+[councils.review-quick.chair]
+persona = "Be conservative: merge only the same defect."   # the chair merges key by key
+```
+
+`[[agents]]` entries match inherited seats **by name**: a stated key replaces that key, an
+unmatched name joins the end of the roster, and `drop = true` retires a seat (a council still
+needs at least two after the drops). `[chair]` merges key by key — restating it wholesale is
+never required. Only the chain you convene is read, so a table elsewhere in the file can be
+half-written without costing you anything.
+
+A council whose name starts with `_` is a **template**: `extends` reaches it, `mech-council <name>`
+does not, and it is free to be a partial council — a roster with no chair, or a few knobs to pull
+into several councils.
 
 ## The sandbox
 

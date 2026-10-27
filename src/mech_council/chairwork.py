@@ -24,11 +24,11 @@ class Chair:
     # -- publication passes ------------------------------------------------------
 
     async def merge(self, listing: str, *, round_: int) -> dict:
-        message = self.brief.merge(mode=self.council.mode, listing=listing)
+        message = self.brief.merge(mode=self.council.mode, listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="merge", phase="merge", round_=round_)
 
     async def compare(self, listing: str, *, round_: int) -> dict:
-        message = self.brief.comparison(mode=self.council.mode, listing=listing)
+        message = self.brief.comparison(listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="compare", phase="compare", round_=round_)
 
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:

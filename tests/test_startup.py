@@ -90,6 +90,47 @@ def test_an_unresolvable_pi_cli_leaves_no_run_directory(cli, project):
     assert result.run_dir is None
 
 
+# ------------------------------------------------------------ extends, through the CLI
+
+
+def test_a_council_that_extends_another_convenes_the_inherited_roster(cli, project):
+    """`review-staged` states a goal and nothing else: the seats, the chair and the knobs come from `review`."""
+    config = os.path.join(project, "council.toml")
+    with open(config, encoding="utf-8") as handle:
+        text = handle.read()
+    with open(config, "w", encoding="utf-8") as handle:
+        handle.write(text + '[councils.review-staged]\nextends = "review"\ngoal = "Did whoever staged this do a good job?"\n')
+    result = cli(["review-staged"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
+    assert result.returncode == 1, result.console
+    assert "extends review" in result.console, "the console says whose roster is convening"
+    assert result.manifest["extends"] == ["review"], "and the manifest carries the chain"
+    assert [row["name"] for row in result.manifest["roster"]] == ["Metic", "Senior"], "the roster is the parent's"
+    assert result.manifest["goal"] == "Did whoever staged this do a good job?", "the goal is the child's"
+    assert "extends review" in result.report(), "the report names the lineage it ran under"
+
+
+def test_a_template_is_not_a_council_you_name(cli, project):
+    config = os.path.join(project, "council.toml")
+    with open(config, encoding="utf-8") as handle:
+        text = handle.read()
+    with open(config, "w", encoding="utf-8") as handle:
+        handle.write(text + '[councils._bench]\n\n[[councils._bench.agents]]\nname = "Metic"\n')
+    result = cli(["_bench"], cwd=project, env=runs_env(project))
+    assert result.returncode == 2, result.console
+    assert "template" in result.console and "_bench" in result.console
+    assert result.run_dir is None, "a refused selection creates nothing"
+
+
+def test_a_file_of_nothing_but_templates_names_no_council_to_convene(cli, project):
+    """Selection offers only convenable councils, so a file of templates is refused outright rather
+    than with an offer list of nothing."""
+    write_project_config(project, '[councils._bench]\n\n[[councils._bench.agents]]\nname = "Metic"\n')
+    result = cli([], cwd=project, env=runs_env(project))
+    assert result.returncode == 2, result.console
+    assert "states no council to convene" in result.console and "template" in result.console, result.console
+    assert result.run_dir is None, "a refused selection creates nothing"
+
+
 # ------------------------------------------------------------ The config loader shape 3
 
 

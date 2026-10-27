@@ -10,18 +10,18 @@ overlay: `rm -rf` of a project directory fails with `EIO` and leaves it half-emp
 `rename` of one gives `EXDEV`, and `mv` copies the tree, fails to delete the source and
 leaves both copies. A directory you created yourself removes normally. `$TMPDIR`
 (`.council-scratch` inside your working directory) has no such limits — use it freely.
-An overlay errno is never a finding: it says what the sandbox forbids, not what the
+An overlay errno is never an item you raise: it says what the sandbox forbids, not what the
 project does. If you hit one, say what you were trying to do and move on.
 """
 
 PROTOCOL = """\
 # How this council works
 
-You are one seat on a council of independent reviewers. The orchestrator mediates
+You are one seat on a council working toward the goal above. The orchestrator mediates
 everything: it owns the shared docket, shows you what the others said, and asks the
 human what you cannot settle.
 
-- Verify before you claim. A finding survives because peers with workspace access failed
+- Verify before you claim. An item survives because peers with workspace access failed
   to knock it down, not because somebody asserted it. Cite the file, the line or the
   command output that shows it.
 - Peers are numbers. You are shown `AgentN`, never a name: a claim carries its evidence or
@@ -56,8 +56,8 @@ QUESTION_SHAPE = """\
 Every `human_input` entry carries the decision, the context, and the answers you would
 accept, and the human reads them at a checkpoint while the run is stopped:
 
-- `question` — the decision in one line. Not a topic and not a summary of your finding:
-  the thing you cannot decide from the code.
+- `question` — the decision in one line. Not a topic and not a restatement of the item you are
+  stuck on: the thing you cannot decide from the code.
 - `context` — what you looked at that leaves it open, and what guessing wrong costs. Never
   restate the question there; two lines is the limit and the second one is the stakes.
 - `options` — two to four answers **you would accept**, each phrased AS the answer
@@ -79,14 +79,6 @@ ANSWER_SHAPE = """\
 Answer with a single JSON object at the start of your reply (prose after it is fine, and
 is welcome). Field names are matched case- and separator-insensitively, so
 `validationGate` and `validation_gate` are the same field.
-"""
-
-PLAN_EXTRA = """\
-# Unanswered questions
-
-An unanswered question the council judged **deferred** goes into the plan's assumptions
-with the guess it stands for — never decided silently. An unanswered
-**effective-blocking** question is a "do NOT guess": name it and stop.
 """
 
 
@@ -135,7 +127,7 @@ def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket
             text.ROUND_TASK,
             PROTOCOL,
             ESCALATION,
-            PLAN_EXTRA if mode == "plan" else "",
+            text.EXTRA_BRIEFING,
             QUESTION_SHAPE,
             SANDBOX,
             ANSWER_SHAPE,
@@ -177,33 +169,68 @@ def repair_ask(mode: str, phase: str, error: str, previous: str) -> str:
     )
 
 
+def merge_schema(mode: str) -> str:
+    """`chair.MERGE_SCHEMA`, with the example IDs in the prefix this mode's docket issues."""
+    from ..modes import adapter_for
+    from . import chair
+
+    return chair.MERGE_SCHEMA.replace("{id}", adapter_for(mode).id_prefix)
+
+
 def schema_hint(mode: str, *, phase: str) -> str:
     if phase == "phase0":
         return _mode_text(mode).PHASE0_SCHEMA
     if phase == "round":
         return _mode_text(mode).ROUND_SCHEMA
+    if phase == "merge":
+        return merge_schema(mode)
+    if phase == "compare":
+        # Plan mode's pass: review has no plans to map.
+        from . import plan as plan_text
+
+        return plan_text.COMPARISON_SCHEMA
     from . import chair
 
-    # `digest` is what the watchdog calls its own phase; the shape it must repair to is the
-    # pass schema.  An unknown phase is a bug here, not a reason to crash a member's ask.
-    return {
-        "merge": chair.MERGE_SCHEMA,
-        "compare": chair.COMPARISON_SCHEMA,
-        "watchdog": chair.WATCHDOG_SCHEMA,
-        "digest": chair.WATCHDOG_SCHEMA,
-    }.get(phase, chair.WATCHDOG_SCHEMA)
+    # `digest` is what the watchdog calls its own phase; the shape it must repair to is the pass
+    # schema.  An unknown phase is a bug here, not a reason to crash a member's ask.
+    return chair.WATCHDOG_SCHEMA
 
 
-def merge_task(mode: str, listing: str) -> str:
+def merge_task(mode: str, listing: str, goal: str | None = None) -> str:
     from . import chair
 
-    return "\n".join([chair.MERGE, _mode_text(mode).MERGE_TASK, ANSWER_SHAPE, chair.MERGE_SCHEMA, "---", "## The new items", "", listing])
+    return "\n".join(
+        [
+            chair.MERGE,
+            goal_line(goal),
+            _mode_text(mode).MERGE_TASK,
+            ANSWER_SHAPE,
+            merge_schema(mode),
+            "---",
+            "## The new items",
+            "",
+            listing,
+        ]
+    )
 
 
-def comparison_task(mode: str, listing: str) -> str:
-    from . import chair
+def comparison_task(listing: str, goal: str | None = None) -> str:
+    """Plan mode's comparison pass, in plan's own prose — which is why it takes no mode."""
+    from . import plan as plan_text
 
-    return "\n".join([chair.COMPARE, chair.COMPARISON_TASK, ANSWER_SHAPE, chair.COMPARISON_SCHEMA, "---", "## The plans", "", listing])
+    return "\n".join(
+        [
+            plan_text.COMPARE,
+            goal_line(goal),
+            plan_text.COMPARISON_TASK,
+            ANSWER_SHAPE,
+            plan_text.COMPARISON_SCHEMA,
+            "---",
+            "## The plans",
+            "",
+            listing,
+        ]
+    )
 
 
 def watchdog_task(digest: str) -> str:

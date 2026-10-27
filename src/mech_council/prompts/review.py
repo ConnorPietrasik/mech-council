@@ -59,5 +59,13 @@ ROUND_SCHEMA = """\
 ```
 """
 
+# `common.round_briefing`'s per-mode slot: review needs nothing extra.
 EXTRA_BRIEFING = ""
-MERGE_TASK = "Findings raised since the last merge are listed below. Say which describe the same underlying defect."
+MERGE_TASK = """\
+Findings raised since the last merge are listed below. Say which report the **same defect**.
+
+- Forbid merging partial overlaps: two findings that share a symptom but name different causes
+  are two findings.
+- Each finding prints its claim, then its `what breaks:` line and its `evidence:` line. Read
+  all three — claims that read alike often separate on the cause the middle line names.
+"""

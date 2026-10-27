@@ -8,6 +8,9 @@ import pytest
 
 from mech_council.deliberation.engine import Abort, Engine
 from mech_council.deliberation.state import DEMOTED, STANDING, WITHDRAWN, Docket
+from mech_council.prompts import common
+from mech_council.prompts import plan as plan_text
+from mech_council.prompts import review as review_text
 from mech_council.prompts.brief import Brief
 
 from .support.harness import RawAsk, ScriptPort, events_collector, payload
@@ -79,6 +82,71 @@ def test_phase_0_briefing_is_byte_identical_and_names_no_one():
     for text in briefings:
         for leak in ("Agent1", "Agent2", "Agent3", "Metic", "Senior", "Coworker"):
             assert leak not in text, f"the briefing carries no roster IDs, but {leak} leaked in"
+
+
+def test_the_shared_briefing_works_for_either_mode():
+    """No shared briefing line tells a planning seat it is reviewing somebody's code."""
+    for mode in ("review", "plan"):
+        brief = Brief(mode=mode, project="/project")
+        texts = [
+            brief.phase0(mode=mode, goal="ship the migration", project="/project"),
+            brief.round(mode=mode, goal="ship the migration", project="/project", me="Agent1", docket="", phase0_summary=""),
+        ]
+        for text in texts:
+            assert "Goal: ship the migration" in text, "the goal is the brief the seat works to"
+            for leak in ("independent reviewers", "A finding survives", "never a finding", "summary of your finding"):
+                assert leak not in text, f"the shared briefing says {leak!r} to a {mode} seat"
+        # The mode still says what the seat produces, in its own words.
+        assert ("plan you would execute" if mode == "plan" else "fix or improve") in "\n".join(texts)
+
+
+def test_a_mode_s_extra_briefing_reaches_the_seats_it_was_written_for():
+    """`EXTRA_BRIEFING` reaches the seats its prose was written for and no others."""
+    briefs = {
+        mode: Brief(mode=mode, project="/project").round(mode=mode, goal="g", project="/project", me="Agent1", docket="", phase0_summary="")
+        for mode in ("review", "plan")
+    }
+    assert plan_text.EXTRA_BRIEFING.strip() in briefs["plan"], "plan declares prose and never briefs it"
+    assert plan_text.EXTRA_BRIEFING.strip() not in briefs["review"], "a review seat reads planning prose"
+    assert review_text.EXTRA_BRIEFING == "", "review needs nothing extra: the hook stays empty, not absent"
+
+
+def test_each_mode_tells_the_chair_what_makes_two_entries_one():
+    """The dedup discipline is the chair's and mode-blind; the test for one entry twice is the mode's."""
+    tests = {"review": "Forbid merging partial overlaps", "plan": "two forks that merely share a word"}
+    for mode, its_own in tests.items():
+        ask = common.merge_task(mode, "- X1: the claim\n    what breaks: the detail", "g")
+        assert its_own in ask, f"the {mode} chair is never told its own test for one entry twice"
+        assert tests["plan" if mode == "review" else "review"] not in ask, f"the {mode} chair is read the other mode's test"
+        for hedge in ("same underlying thing", "same underlying item", "wrong or undecided"):
+            assert hedge not in ask, f"the {mode} merge ask hedges with {hedge!r}"
+        # What the modes share stays shared: the chair's own discipline, in both asks.
+        for shared in ("Conservative beats tidy", "Echo those IDs exactly"):
+            assert shared in ask
+    # A chair told to echo IDs exactly gets the IDs its own docket hands out, not review mode's.
+    assert '"canonical": "F1"' in common.merge_task("review", "- F1: the claim", "g")
+    assert '"canonical": "T1"' in common.merge_task("plan", "- T1: the claim", "g")
+
+
+def test_the_merge_listing_words_an_item_s_detail_the_way_the_mode_does():
+    """The chair reads an item's detail under the label that mode's schema asks the seat for."""
+    import asyncio
+
+    from mech_council.deliberation.state import Item
+
+    def listing(mode: str, detail: str) -> str:
+        async def main():
+            built, port, _records = engine(mode=mode, reply=payload(groups=[]))
+            built.docket.add_item(Item(id=built.new_id(), claim="the claim", detail=detail, raised_by=["Agent1"]))
+            await built.publish_review()
+            return next(ask.text for ask in port.asks if ask.kind == "merge")
+
+        return asyncio.run(main())
+
+    assert "what breaks: the write is not idempotent" in listing("review", "the write is not idempotent")
+    plan = listing("plan", "queue it, or retry in place")
+    assert "the answers it admits: queue it, or retry in place" in plan
+    assert "what breaks" not in plan, "a decision point's detail line is not a finding's"
 
 
 def test_no_agent_ever_reads_a_name():

@@ -32,11 +32,11 @@ class Brief:
 
     # -- chair asks ------------------------------------------------------------
 
-    def merge(self, *, mode: str, listing: str) -> str:
-        return common.merge_task(mode or self.mode, listing)
+    def merge(self, *, mode: str, listing: str, goal: str | None = None) -> str:
+        return common.merge_task(mode or self.mode, listing, goal)
 
-    def comparison(self, *, mode: str, listing: str) -> str:
-        return common.comparison_task(mode or self.mode, listing)
+    def comparison(self, *, listing: str, goal: str | None = None) -> str:
+        return common.comparison_task(listing, goal)
 
     def watchdog(self, rows: list[dict], *, mode: str = "") -> str:
         return common.watchdog_task(render_digest(rows))

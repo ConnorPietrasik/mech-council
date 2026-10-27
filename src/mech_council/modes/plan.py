@@ -7,6 +7,7 @@ PLAN = register(
         mode="plan",
         item_noun="decision point",
         item_noun_plural="decision points",
+        detail_label="the answers it admits",
         id_prefix="T",
         consensus_kind="direction",
         report_name="plan.md",

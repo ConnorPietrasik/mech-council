@@ -18,6 +18,7 @@ class ReportContext:
     project: str = ""
     config_path: str = ""
     council: str = ""
+    council_lineage: str = ""  # `extends review`, when the council inherits its roster
     outcome: str = ""
     mode: str = "review"
     rounds: int = 0
@@ -40,11 +41,12 @@ class ReportContext:
 
     def header(self, title: str) -> list[str]:
         trust = "no-approve (untrusted)" if self.untrusted else "approve"
+        lineage = f" ({self.council_lineage})" if self.council_lineage else ""
         return [
             f"# {title}",
             "",
             f"- project: `{self.project}`",
-            f"- config: `{self.config_path}` · council `{self.council}`",
+            f"- config: `{self.config_path}` · council `{self.council}`{lineage}",
             f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
             f"- date: {self.date}",
             f"- sandbox: `sandbox_mib = {self.sandbox_mib}` shared by "

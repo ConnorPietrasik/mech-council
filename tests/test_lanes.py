@@ -406,6 +406,24 @@ def chair_board(script, *, watchdog=1):
     return board, members, console, Watchdog(council_, board, chair, console)
 
 
+def test_the_chair_is_told_the_goal_its_pass_serves():
+    """Both chair passes get the council's goal, which is what they judge against."""
+
+    async def main():
+        board, members, console, council_ = lanes(script={"chair": [{"text": '{"groups": [], "human_input": []}'}]})
+        council_.goal = "ship the migration"
+        chair = Chair(council_, board, console, Brief(mode="review", project="/proj"))
+        await chair.merge("### F1 the claim", round_=0)
+        council_.mode = "plan"
+        members.members["chair"].rpc.script.append({"text": '{"agreed": [], "conflicts": [], "uncovered": [], "human_input": []}'})
+        return await chair.compare("Agent1: land it in two steps", round_=0), members.members["chair"].rpc.calls
+
+    _data, calls = run(main())
+    assert len(calls) == 2, f"one ask per pass, no repair re-asks: {len(calls)}"
+    for ask in calls:
+        assert "Goal: ship the migration" in ask, f"the chair is told what the council was convened for: {ask[:200]}"
+
+
 def test_a_pass_in_flight_suppresses_the_next_tick_instead_of_queueing_one():
     async def main():
         board, _members, console, watchdog = chair_board(

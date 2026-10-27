@@ -54,10 +54,12 @@ class Args:
 HELP = """\
 usage: mech-council [<council>] [flags]
 
-Run one named council from the project's council.toml.
+Run one named council from the project's council.toml.  A council may `extends = "<name>"`
+another for its roster, chair and knobs; a `_` name is what one inherits from, never
+something you convene.
 
 positional arguments:
-  <council>          a [councils.<name>] key; omit it when the file holds one council
+  <council>          a [councils.<name>] to convene; omit it when the file holds exactly one
 
 flags:
   -p, --project <path>     project directory (default: the invoking cwd)
