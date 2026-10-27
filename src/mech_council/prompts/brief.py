@@ -5,20 +5,27 @@ from . import common
 
 
 class Brief:
-    def __init__(self, *, mode: str, project: str, max_items: int = 12) -> None:
+    def __init__(self, *, mode: str, project: str, max_items: int = 12, in_place: bool = False) -> None:
         self.mode = mode
         self.project = project
         self.max_items = max_items
+        self.in_place = in_place
 
     # -- member asks -----------------------------------------------------------
 
     def phase0(self, *, mode: str, goal: str | None, project: str) -> str:
-        return common.phase0_briefing(mode=mode or self.mode, goal=goal, project=project or self.project)
+        return common.phase0_briefing(mode=mode or self.mode, goal=goal, project=project or self.project, in_place=self.in_place)
 
     def round(self, *, mode: str, goal: str | None, project: str, me: str, docket: str, phase0_summary: str) -> str:
         summary = f"## Your phase 0 summary\n\n{phase0_summary}\n" if phase0_summary else ""
         return common.round_briefing(
-            mode=mode or self.mode, goal=goal, project=project or self.project, me=me, docket=docket, phase0_summary=summary
+            mode=mode or self.mode,
+            goal=goal,
+            project=project or self.project,
+            me=me,
+            docket=docket,
+            phase0_summary=summary,
+            in_place=self.in_place,
         )
 
     def docket(self, docket, viewer: str) -> str:

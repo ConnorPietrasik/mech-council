@@ -270,6 +270,34 @@ def test_a_pid_in_another_namespace_is_left_alone(tmp_path):
             os.kill(stray, signal.SIGKILL)
 
 
+# ------------------------------------------------- The sweep, and where it must not reach
+
+
+def test_in_place_names_no_namespace_and_therefore_sweeps_nothing(tmp_path):
+    """`own_namespace=None` is in place.  The scope it would have keyed on is the orchestrator's own namespace,
+    which holds every process of the session — so a stray sharing it, the very thing the sweep exists to kill,
+    has to survive."""
+    marker = str(tmp_path / "pid")
+    stray = spawn_stray(marker, keep_alive=True)
+    try:
+
+        async def scenario():
+            member = await live_member(tmp_path)
+            os.close(member.ns_fd)  # in place `spawn` hands back no fd and no namespace: this is that shape
+            member.ns_fd, member.namespace = -1, None
+            lines: list[str] = []
+            result = await lifecycle.dispose_all([member], own_namespace=None, on_line=lines.append)
+            return result, lines
+
+        result, lines = asyncio.run(scenario())
+        assert result.empty, f"in place the sweep named pids it was never given: {result}"
+        assert any("no namespace sweep" in line for line in lines), lines
+        assert alive(stray), "a pid sharing this namespace died for a run that ran in place"
+    finally:
+        if alive(stray):
+            os.kill(stray, signal.SIGKILL)
+
+
 # ------------------- The run dir's files / the one report the dispose path owes
 
 

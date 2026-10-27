@@ -23,26 +23,29 @@ def _write_map(pid: int) -> None:
             handle.write(value)
 
 
-def spawn_orchestrator(body, *, name: str = "orchestrator") -> int:
+def spawn_orchestrator(body, *, name: str = "orchestrator", in_place: bool = False) -> int:
     ack_read, ack_write = os.pipe()  # child → parent: "I am inside"
     go_read, go_write = os.pipe()  # parent → child: "you are mapped"
     pid = os.fork()
     if pid == 0:
-        return _child(ack_write, go_read, body)
+        return _child(ack_write, go_read, body, in_place=in_place)
     os.close(ack_write)
     os.close(go_read)
-    return _supervisor(pid, ack_read, go_write, name)
+    return _supervisor(pid, ack_read, go_write, name, in_place=in_place)
 
 
-def _child(ack_write: int, go_read: int, body) -> int:
-    try:
-        mount.unshare(mount.CLONE_NEWUSER | mount.CLONE_NEWNS)
-    except OSError as failure:
-        sys.stderr.write(f"unshare(CLONE_NEWUSER|CLONE_NEWNS): {os.strerror(failure.errno or 0)}\n")
-        os.close(ack_write)
-        os.close(go_read)
-        return 1
-    os.write(ack_write, b"r")  # "inside, waiting to be mapped"
+def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
+    if not in_place:
+        try:
+            mount.unshare(mount.CLONE_NEWUSER | mount.CLONE_NEWNS)
+        except OSError as failure:
+            from .cli import downgrade_hint
+
+            sys.stderr.write(f"unshare(CLONE_NEWUSER|CLONE_NEWNS): {os.strerror(failure.errno or 0)}.{downgrade_hint()}\n")
+            os.close(ack_write)
+            os.close(go_read)
+            return 1
+    os.write(ack_write, b"r")  # "inside, waiting to be mapped" — in place, "running beside you"
     os.close(ack_write)
     released = os.read(go_read, 1)
     os.close(go_read)
@@ -55,7 +58,7 @@ def _child(ack_write: int, go_read: int, body) -> int:
         return 130
 
 
-def _supervisor(pid: int, ack_read: int, go_write: int, name: str) -> int:
+def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: bool = False) -> int:
     # A signal aimed at *this* pid would otherwise die right here, orphaning the
     # orchestrator with its mounts.  The supervisor forwards and keeps waiting.
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -63,16 +66,19 @@ def _supervisor(pid: int, ack_read: int, go_write: int, name: str) -> int:
     if os.read(ack_read, 1) != b"r":
         os.close(ack_read)
         os.close(go_write)
-        sys.stderr.write(f"{name} never reported entering its namespace\n")
+        sys.stderr.write(
+            f"{name} never reported entering its namespace\n" if not in_place else f"{name} never came up: the child died before it acked\n"
+        )
         return 1
     os.close(ack_read)
-    try:
-        _write_map(pid)
-    except OSError as failure:
-        sys.stderr.write(f"the uid/gid map for {name}: {os.strerror(failure.errno or 0)}\n")
-        os.close(go_write)
-        _relay(pid)
-        return 1
+    if not in_place:
+        try:
+            _write_map(pid)
+        except OSError as failure:
+            sys.stderr.write(f"the uid/gid map for {name}: {os.strerror(failure.errno or 0)}\n")
+            os.close(go_write)
+            _relay(pid)
+            return 1
     os.write(go_write, b"m")
     os.close(go_write)
     while True:

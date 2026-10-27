@@ -6,9 +6,10 @@ import sys
 from dataclasses import dataclass, field
 
 from ..config import MemberSpec
-from ..internal_env import NS_REPORT_FAIL, NS_REPORT_OK, PIPE_ENV
+from ..internal_env import INTERNAL_ENV, NS_REPORT_FAIL, NS_REPORT_OK, PIPE_ENV
 from ..pi_rpc import PiRpc
 from ..sandbox import mount
+from ..sandbox.memberns import SCRATCH_NAME
 
 
 class LauncherSetupError(Exception):
@@ -28,14 +29,27 @@ def pi_argv(spec: MemberSpec, pi_cli: str, *, file_base: str, untrusted: bool) -
     return argv
 
 
-def member_env(*, base: dict[str, str], run_dir: str, run_path: str, project: str, slot_dir: str, runs_root: str) -> dict[str, str]:
+def member_env(
+    *,
+    base: dict[str, str],
+    run_dir: str,
+    run_path: str,
+    project: str,
+    slot_dir: str,
+    runs_root: str,
+    tmpdir: str | None = None,
+    in_place: bool = False,
+) -> dict[str, str]:
     env = dict(base)
+    for name in INTERNAL_ENV:
+        env.pop(name, None)  # a member inherits no launcher's paths, only the ones set for it here
     env["COUNCIL_RUN_DIR"] = os.path.basename(run_path.rstrip("/"))
     env["COUNCIL_RUN_PATH"] = run_path
-    env["TMPDIR"] = f"{project}/.council-scratch"
-    env["COUNCIL_LAUNCH_PROJECT"] = project
-    env["COUNCIL_LAUNCH_RUNS_ROOT"] = runs_root
-    env["COUNCIL_LAUNCH_SLOT_DIR"] = slot_dir
+    env["TMPDIR"] = tmpdir or f"{project}/{SCRATCH_NAME}"
+    if not in_place:  # the launcher reads these three and wipes them before it execs
+        env["COUNCIL_LAUNCH_PROJECT"] = project
+        env["COUNCIL_LAUNCH_RUNS_ROOT"] = runs_root
+        env["COUNCIL_LAUNCH_SLOT_DIR"] = slot_dir
     return env
 
 
@@ -45,7 +59,7 @@ class Member:
     id: str | None
     pid: int
     pgid: int
-    namespace: int
+    namespace: int | None  # None in place: the member never left the orchestrator's namespace
     ns_fd: int
     proc: asyncio.subprocess.Process
     rpc: PiRpc
@@ -69,15 +83,15 @@ async def spawn(
     slot_dir: str,
     run_path: str,
     untrusted: bool,
+    in_place: bool = False,
+    tmpdir: str | None = None,
     transcript=None,
     on_tool_result=None,
     env: dict[str, str] | None = None,
 ) -> Member:
-    argv = (
-        list(launcher_argv())
-        + ["--setup-seat", "--slot", file_base, "--"]
-        + pi_argv(spec, pi_cli, file_base=file_base, untrusted=untrusted)
-    )
+    pi = pi_argv(spec, pi_cli, file_base=file_base, untrusted=untrusted)
+    # In place, pi is the child itself: the launcher exists to mount a seat's view and has nothing left to do.
+    argv = pi if in_place else [*launcher_argv(), "--setup-seat", "--slot", file_base, "--", *pi]
     child_env = member_env(
         base=env if env is not None else dict(os.environ),
         run_dir=run_path,
@@ -85,9 +99,14 @@ async def spawn(
         project=project,
         slot_dir=slot_dir,
         runs_root=runs_root,
+        tmpdir=tmpdir,
+        in_place=in_place,
     )
-    read_fd, write_fd = os.pipe()
-    child_env[PIPE_ENV] = str(write_fd)  # the launcher's report channel
+    read_fd, write_fd = (-1, -1) if in_place else os.pipe()
+    pass_fds: tuple[int, ...] = ()
+    if write_fd >= 0:
+        child_env[PIPE_ENV] = str(write_fd)  # the launcher's report channel
+        pass_fds = (write_fd,)
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -95,12 +114,44 @@ async def spawn(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=child_env,
+            cwd=project,
             start_new_session=True,
-            pass_fds=(write_fd,),
+            pass_fds=pass_fds,
         )
     finally:
-        os.close(write_fd)  # our copy: or the report would never EOF
+        if write_fd >= 0:
+            os.close(write_fd)  # our copy: or the report would never EOF
     child_env.clear()  # the launcher's paths die with the spawn
+    namespace, ns_fd = await _namespace_of(read_fd, proc, file_base=file_base, in_place=in_place)
+    if proc.stdout is None or proc.stdin is None:
+        # Both are PIPEd, so this only fires if the spawn's shape changed; it is checked here because the new fd
+        # and the child both have to be released.
+        if ns_fd >= 0:
+            os.close(ns_fd)
+        await _reap(proc)
+        raise LauncherSetupError(f"{file_base}: {'pi' if in_place else 'the launcher'} came up without its pipes")
+    rpc = PiRpc(label=file_base, stdout=proc.stdout, stdin=proc.stdin, on_tool_result=on_tool_result, transcript=transcript)
+    member = Member(
+        file_base=file_base,
+        id=member_id,
+        pid=proc.pid,
+        pgid=proc.pid,
+        namespace=namespace,
+        ns_fd=ns_fd,
+        proc=proc,
+        rpc=rpc,
+        ns_records=[] if namespace is None else [namespace],
+    )
+    member.stderr_task = asyncio.create_task(_drain_stderr(proc, member, transcript), name=f"stderr-{file_base}")
+    rpc.start()
+    return member
+
+
+async def _namespace_of(read_fd: int, proc: asyncio.subprocess.Process, *, file_base: str, in_place: bool) -> tuple[int | None, int]:
+    """The member's namespace and an fd held open on it for the sweep, or `(None, -1)`: in place the member
+    never left this namespace, and there is nothing to hold."""
+    if in_place:
+        return None, -1
     try:
         report = await _read_report(read_fd, proc)
     finally:
@@ -121,28 +172,7 @@ async def spawn(
         raise LauncherSetupError(
             f"{file_base}: reported the orchestrator's own mount namespace — its own namespace was never set up before the report"
         )
-    ns_fd = os.open(f"/proc/{proc.pid}/ns/mnt", os.O_RDONLY)
-    if proc.stdout is None or proc.stdin is None:
-        # Both are PIPEd, so this only fires if the spawn's shape changed; it is checked here because the new fd
-        # and the child both have to be released.
-        os.close(ns_fd)
-        await _reap(proc)
-        raise LauncherSetupError(f"{file_base}: the launcher came up without its pipes")
-    rpc = PiRpc(label=file_base, stdout=proc.stdout, stdin=proc.stdin, on_tool_result=on_tool_result, transcript=transcript)
-    member = Member(
-        file_base=file_base,
-        id=member_id,
-        pid=proc.pid,
-        pgid=proc.pid,
-        namespace=namespace,
-        ns_fd=ns_fd,
-        proc=proc,
-        rpc=rpc,
-        ns_records=[namespace],
-    )
-    member.stderr_task = asyncio.create_task(_drain_stderr(proc, member, transcript), name=f"stderr-{file_base}")
-    rpc.start()
-    return member
+    return namespace, os.open(f"/proc/{proc.pid}/ns/mnt", os.O_RDONLY)
 
 
 async def _read_report(read_fd: int, proc: asyncio.subprocess.Process) -> tuple[str, object]:

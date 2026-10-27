@@ -32,6 +32,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("transcripts", "t", choices=("off", "full"), note="transcripts level"),
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
+    Flag("in-place", None, takes_value=False),
 )
 
 _LONG = {f"--{f.long}": f for f in FLAGS}
@@ -48,6 +49,7 @@ class Args:
     transcripts: str | None = None
     allow_nested: bool = False
     untrusted: bool = False
+    in_place: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -69,6 +71,7 @@ flags:
   -t, --transcripts <lvl>  off (default) or full
       --allow-nested       let this invocation start inside a running council
       --untrusted          spawn members with --no-approve: ignore project-local files
+      --in-place           run members in the real project: no namespaces, no overlays, no masks
   -h, --help               show this help and exit
   -V, --version            show the version and exit
 
@@ -206,15 +209,25 @@ def is_within(path: str, parent: str) -> bool:
     return path == parent or path.startswith(parent.rstrip("/") + "/")
 
 
-def check_platform(plat: str | None = None) -> str | None:
-    """The refusal for a host that has no user and mount namespaces to sandbox a member with."""
-    plat = sys.platform if plat is None else plat  # read live, so a patched platform is honored however late it is set
-    if plat == "linux":
+def sandbox_supported() -> bool:
+    """Can members be sandboxed here at all?  Read live, so a patched platform is honored however late it is set."""
+    from .sandbox import mount
+
+    return mount.supported()
+
+
+def no_fork_refusal(plat: str | None = None) -> str | None:
+    """The refusal for a host that cannot fork: the orchestrator and every member are forked children, and
+    no flag replaces `os.fork` the way `--in-place` replaces namespaces."""
+    if hasattr(os, "fork"):
         return None
-    return (
-        f"this is not Linux ({plat!r}): every member is sandboxed with Linux user and mount namespaces, and there are none here. "
-        "Run the council on Linux — a VM, or a container mounted to only the project directory."
-    )
+    plat = sys.platform if plat is None else plat
+    return f"this host ({plat!r}) cannot fork: the council's orchestrator and every member are forked children, so nothing can run here."
+
+
+def downgrade_hint() -> str:
+    """Appended to a startup failure the council could have survived without its sandbox."""
+    return " Pass --in-place to run the members in the project itself instead."
 
 
 def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | None:
@@ -258,16 +271,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"note: {note}")
     from . import supervisor
 
-    return supervisor.spawn_orchestrator(lambda: _inside_namespace(launch), name="orchestrator")
+    return supervisor.spawn_orchestrator(lambda: _run_council(launch), name="orchestrator", in_place=launch.council.in_place)
 
 
-def _inside_namespace(launch) -> int:
+def _run_council(launch) -> int:
     import asyncio
 
     from . import startup
     from .sandbox import setup as sandbox_setup
 
     members = launch.council.member_file_bases
+    in_place = launch.council.in_place
+    what = "in-place setup" if in_place else "sandbox setup"
+    hint = "" if in_place else downgrade_hint()
     try:
         sandbox = sandbox_setup.establish(
             project=launch.council.project,
@@ -276,13 +292,14 @@ def _inside_namespace(launch) -> int:
             members=members,
             scratch_cwd=launch.runs_dir,
             sandbox_dir=launch.sandbox_dir,
+            in_place=in_place,
         )
     except OSError as failure:
         where = f"{failure.filename} " if failure.filename else ""
-        sys.stderr.write(f"sandbox setup failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno})\n")
+        sys.stderr.write(f"{what} failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno}).{hint}\n")
         return 1
     except Exception as failure:
-        sys.stderr.write(f"sandbox setup failed: {failure}\n")
+        sys.stderr.write(f"{what} failed: {failure}.{hint}\n")
         return 1
     try:
         launch.run_dir = startup.create_run_dir(launch)

@@ -74,6 +74,12 @@ def test_unknown_flag_names_itself(cli, project):
     assert "unknown flag '--dry-run-ok'" in result.console
 
 
+def test_a_typoed_in_place_is_named_back(cli, project):
+    result = cli(["review", "--inplace"])
+    assert result.returncode == 2
+    assert "did you mean --in-place?" in result.console
+
+
 def test_a_multi_council_file_needs_a_name(cli, project, canary):
     write_project_config(project, TWO_COUNCILS.format(pi=FAKE_PI))
     result = cli([], cwd=project)
@@ -223,30 +229,70 @@ def test_allow_nested_overrides_the_guard(cli, project):
     assert result.run_dir
 
 
-# ------------------------------------------------------- The platform guard
+# ------------------------------------------------------- A host with no namespaces
 
 
-def refused_elsewhere(child_env, cwd, args):
-    """The real entry point with `sys.platform` replaced: the guard reads it when it runs, so the child is macOS for its whole life."""
-    harness = "import sys\nsys.platform = 'darwin'\nfrom mech_council.cli import main\nsys.exit(main(sys.argv[1:]))\n"
+MACOS = "import sys\nsys.platform = 'darwin'\nfrom mech_council.cli import main\nsys.exit(main(sys.argv[1:]))\n"
+
+
+def elsewhere(child_env, cwd, args, *, timeout=60, env=None, harness=MACOS):
+    """The real entry point under a replaced world: `harness` patches what it patches before `main` runs, so the
+    whole child lives inside it.  The members it spawns are separate processes, which never look."""
     return subprocess.run(
-        [sys.executable, "-c", harness, *args], check=False, cwd=cwd, env=child_env, capture_output=True, text=True, timeout=60
+        [sys.executable, "-c", harness, *args],
+        check=False,
+        cwd=cwd,
+        env=dict(child_env, **(env or {})),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
 
 
-def test_a_platform_without_namespaces_refuses_before_anything_is_read(child_env, tmp_path):
-    """The first impression on an unsupported host: a sentence that names the way out, not `unshare(0x…)` from inside the sandbox."""
-    result = refused_elsewhere(child_env, str(tmp_path), ["review"])
-    assert result.returncode == 1
-    console = (result.stdout + result.stderr).lower()
-    assert "linux" in console and "darwin" in console, console
-    assert "namespaces" in console and "vm" in console, console
-    assert "config" not in console and "unshare" not in console, f"nothing is read before the refusal: {console}"
+def manifest_of(console: str) -> dict:
+    line = next(line for line in console.splitlines() if "run directory " in line)
+    with open(os.path.join(line.split("run directory ", 1)[1].strip(), "run.json"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def test_a_host_with_no_namespaces_convenes_in_place(child_env, project):
+    """Off Linux the council runs instead of refusing, in a sentence that names the cost — and nothing said
+    afterwards claims an overlay, a cap or a namespace that was never set up."""
+    result = elsewhere(child_env, project, ["review"], timeout=150)
+    console = result.stdout + result.stderr
+    assert result.returncode == 0, console
+    assert "darwin" in console and "in place" in console, console
+    for claim in ("tmpfs ", "· ns ", "sandbox_mib"):
+        assert claim not in console, f"the console still advertises {claim!r}, which it never built"
+    finished = manifest_of(console)
+    assert finished["settings"]["in_place"] is True
+    assert finished["namespace_sweep"] == "none (in place)", "the manifest says which sweep did not run"
+    assert [record["namespace"] for record in finished["members"].values()] == [None] * len(finished["members"])
+    assert finished["write_journal"] == [], "in place there is no upper layer to journal"
+
+
+REFUSE_UNSHARE = (
+    "import sys\n"
+    "from mech_council.sandbox import mount\n"
+    "def refuse(_flags):\n    raise OSError(1, 'Operation not permitted')\n"
+    "mount.unshare = refuse\n"
+    "from mech_council.cli import main\n"
+    "sys.exit(main(sys.argv[1:]))\n"
+)
+
+
+def test_a_linux_kernel_that_refuses_unshare_names_the_way_out(child_env, project):
+    """Linux never drops the sandbox on its own: a kernel that will not cooperate is a refusal that says what to
+    pass to run without one — the one place where `--in-place` must not be chosen for the operator."""
+    result = elsewhere(child_env, project, ["review"], env=runs_env(project), harness=REFUSE_UNSHARE)
+    console = result.stdout + result.stderr
+    assert result.returncode == 1, console
+    assert "unshare(CLONE_NEWUSER|CLONE_NEWNS)" in console and "--in-place" in console, console
 
 
 def test_version_and_help_answer_on_any_platform(child_env, tmp_path):
     for flag in ("-V", "--help"):
-        result = refused_elsewhere(child_env, str(tmp_path), [flag])
+        result = elsewhere(child_env, str(tmp_path), [flag])
         assert result.returncode == 0, f"{flag}: {result.stderr}"
         assert "mech-council" in result.stdout
 

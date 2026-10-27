@@ -152,6 +152,7 @@ def test_the_reference_config_loads_and_convenes_every_council(tmp_path):
     assert [a.name for a in review.agents] == ["Metic", "Senior", "Coworker"]
     assert review.chair.provider == "omnissiah"
     assert review.max_rounds == 6 and review.max_concurrency == 3
+    assert review.in_place is False, "the reference council states no sandbox decision and takes the built-in"
     assert review.extends == []
     staged = config_mod.convene(loaded, "review-staged", Args(), str(tmp_path))
     assert staged.extends == ["review"]
@@ -246,6 +247,36 @@ def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
 def test_flags_still_beat_the_whole_chain(tmp_path):
     leaf = convene(tmp_path, chain(), "leaf", goal="--goal wins", rounds=1, transcripts="full")
     assert (leaf.goal, leaf.max_rounds, leaf.transcripts) == ("--goal wins", 1, "full")
+
+
+# ------------------------------------------------------------- in place: the knob, and who stated it
+
+
+def test_in_place_is_a_knob_of_its_own(tmp_path):
+    assert convene(tmp_path, body()).in_place is False, "the built-in default is the sandbox"
+    assert convene(tmp_path, body().replace("[defaults]\n", "[defaults]\nin_place = true\n")).in_place is True, "[defaults] may ask"
+    assert convene(tmp_path, body().replace('goal = "g"', 'goal = "g"\nin_place = true')).in_place is True, "so may a council"
+
+
+def test_a_template_hands_in_place_down_the_chain(tmp_path):
+    asked = {"watchdog_sec = 90": "watchdog_sec = 90\nin_place = true"}
+    assert convene_chain(tmp_path, "leaf", **asked).in_place is True, "stated two hops up, and it reaches the leaf"
+
+
+def test_the_flag_turns_in_place_on_when_no_file_asks(tmp_path):
+    assert convene(tmp_path, body(), in_place=True).in_place is True
+
+
+def test_stated_by_names_the_layer_that_asked_for_in_place(tmp_path):
+    """The note that lets an operator see a repo asking to be reviewed unsandboxed reads this, so it answers with
+    the file — the highest-precedence one that states the key, `[defaults]` included."""
+    user = layer(tmp_path, "user", body().replace("[defaults]\n", "[defaults]\nin_place = true\n"))
+    project = layer(tmp_path, "proj", body())
+    loaded = config_mod.load_layers([user, project], project_layer=project)
+    council = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert council.in_place is True, "the project layer never stated it and still inherits it"
+    assert config_mod.stated_by(loaded, "review", council.extends, "in_place") == user
+    assert config_mod.stated_by(loaded, "review", council.extends, "max_rounds") is None, "nothing states this one"
 
 
 def test_a_child_patches_the_inherited_seats_by_name(tmp_path):
@@ -372,6 +403,7 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
         (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = 0', 1), "must be ≥ 1"),
         (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = "10"', 1), "wants an integer, got str"),
         (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
+        (body().replace('goal = "g"', 'goal = "g"\nin_place = "yes"', 1), "wants true or false, got str"),
         (body().replace('goal = "g"', 'goal = "g"\ntranscripts = "everything"', 1), "'off' or 'full'"),
         (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),
         (body().replace('name = "A"', 'name = "A"\nprovider = "p"', 1), "states 'provider' without 'model'"),

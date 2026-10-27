@@ -18,7 +18,7 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
     lines += _rejected(docket, buckets["rejected"], context)
     lines += _never_vetted(docket, buckets["unseen"], context)
     lines += _sandbox_writes(context)
-    lines += _sandbox_limits(docket)
+    lines += _sandbox_limits(docket, context)
     lines += _open_questions(docket, context)
     lines += _rounds(docket, context)
     lines += context.artifacts(run_dir)
@@ -181,11 +181,12 @@ def _never_vetted(docket: Docket, items: list[Item], context: ReportContext) -> 
     return out
 
 
-def _sandbox_limits(docket: Docket) -> list[str]:
+def _sandbox_limits(docket: Docket, context: ReportContext) -> list[str]:
     hit = [item for item in docket.items.values() if "sandbox_limit" in item.markers]
-    out = ["## Sandbox limits", ""]
+    out = ["## Filesystem refusals" if context.in_place else "## Sandbox limits", ""]
     if not hit:
-        return out + ["No finding rested on an overlay refusal.", ""]
+        empty = "No seat reported a refusal from the filesystem." if context.in_place else "No finding rested on an overlay refusal."
+        return out + [empty, ""]
     for item in _sorted(hit):
         out.append(f"- **{item.id}** ({item.severity}) {item.claim}")
         for line in wrap(item.evidence or item.detail):
@@ -195,6 +196,14 @@ def _sandbox_limits(docket: Docket) -> list[str]:
 
 
 def _sandbox_writes(context: ReportContext) -> list[str]:
+    if context.in_place:
+        # No upper layer exists, so there is nothing to list: the project is what the members changed.
+        return [
+            "## Project writes",
+            "",
+            "Members worked in the project itself, and this run journaled nothing: what they left behind is `git status` away.",
+            "",
+        ]
     out = ["## Sandbox writes", ""]
     if not context.journal:
         return out + ["No member wrote anything.", ""]

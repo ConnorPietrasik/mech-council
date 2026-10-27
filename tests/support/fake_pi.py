@@ -11,8 +11,9 @@ reached its `"index"`.  Everything `scripted` and `reply_to` read is listed belo
 added, because a key it does not mention is a key a test author will not find:
 
 {"contains": "Phase 0", "index": 0, "reply": {...} or "raw text", "text": "...", "wrap": true, "sidechain": true,
- "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}], "sleep": 30, "stderr": "...",
- "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...", "no_settle": true, "aborted": true}
+ "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}], "write": [{"path": "f.py", "text": "..."}],
+ "sleep": 30, "stderr": "...", "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...",
+ "no_settle": true, "aborted": true}
 """
 
 from __future__ import annotations
@@ -82,6 +83,10 @@ def reply_to(prompt: str, index: int) -> None:
                 "isError": bool(tool.get("is_error")),
             }
         )
+    for written in entry.get("write") or []:
+        # A real file in the working directory: how a case proves nothing stands between a member and the project.
+        with open(os.path.join(os.getcwd(), str(written.get("path") or "council-write.txt")), "w", encoding="utf-8") as handle:
+            handle.write(str(written.get("text") or "written by the fake"))
     if entry.get("die"):
         os._exit(int(entry.get("die") or 1))
     body = entry.get("reply")

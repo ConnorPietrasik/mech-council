@@ -15,9 +15,13 @@ you get a report with the findings.
 - **Python 3.14+**
 - **`pi`** on your `PATH`, or a `pi_cli` path in `council.toml`. Members are driven through
   pi's RPC mode over pipes — one long-lived child per seat, JSONL in both directions.
-- **Linux with unprivileged user and mount namespaces.** Each member runs in its own
-  namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
-  `--privileged` or a seccomp profile that allows `unshare(2)`. Anywhere else it refuses, in a sentence, before it reads your config.
+- **Linux with unprivileged user and mount namespaces**, to sandbox the members. Each member runs in its
+  own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
+  `--privileged` or a seccomp profile that allows `unshare(2)`.
+- **Anywhere else the council runs in place** — macOS, BSD, a container with `unshare` blocked. Pass
+  `--in-place` (or set `in_place = true`) on Linux to say so yourself; a kernel that refuses `unshare`
+  there is a refusal with the flag named in it, never a silent downgrade. In place is described under
+  [The sandbox](#the-sandbox).
 
 If the kernel won't cooperate, you'll get a descriptive error. To check a container before convening anything, run the sandbox
 family (`pytest tests/test_sandbox.py -q`): it builds the real sandbox — namespaces, overlays, masks, the exit sweep — through
@@ -113,9 +117,9 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 | Code | Meaning |
 |---|---|
 | `0` | A result was written — including `needs_human` and `round_limit_reached`. |
-| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a non-Linux host. |
+| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a host that cannot fork. |
 | `2` | Usage error. |
-| `130`/`143` | Interrupted. Every child is disposed, every namespace swept, and `run.json` finalized first. |
+| `130`/`143` | Interrupted. Every child is disposed, every namespace this run created is swept, and `run.json` finalized first. |
 
 ## Configuration
 
@@ -148,7 +152,8 @@ runs — so that knob belongs in the user's file.
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
 | `chair_timeout_sec` | `300` | Bound on a chair publication pass. |
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot, so a digest never queues behind seat work. |
-| `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. |
+| `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
+| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; nothing forces the sandbox on where the host has no namespaces. |
 | `transcripts` | `off` | `off` or `full`. Full writes the verbatim protocol stream per member. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
@@ -222,6 +227,17 @@ group — and the survivors are named in `run.json` if any remain.
 
 **This is only to minimize agents confusing each other.** It is not recommended to run this outside of a VM (or at least a docker container mounted to only the project directory).
 
+### In place
+
+`--in-place`, or `in_place = true`, convenes the same council with nothing between the
+seats and the project. What changes:
+
+- Every seat works in the **same real tree**. A peer's half-finished edit is not a defect and not yours to
+  finish, and the briefings say so.
+- The exit **namespace sweep cannot run** — in place the members share this namespace, so only their own
+  process groups are signalled. A tool shell that moved to a new process group of its own can outlive the
+  run. `run.json` records `"namespace_sweep": "none (in place)"` so you know which cleanup did not happen.
+
 ## Tests
 
 ```sh
@@ -234,7 +250,8 @@ The offline suite drives real orchestrator, sandbox, RPC and dispose paths again
 scripted fake pi. The `sandbox` family is the only one
 with a platform requirement: its fixture lower must sit on a plain filesystem (ext4, or a
 tmpfs such as a member's `$TMPDIR`). Point `COUNCIL_TEST_FS` at a plain directory to
-choose it explicitly.
+choose it explicitly. Everything else — `test_in_place.py` included — runs on any POSIX host
+that can fork, sandbox or not.
 
 ## Lint and types
 

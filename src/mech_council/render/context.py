@@ -30,6 +30,7 @@ class ReportContext:
     transcripts: str = "off"
     transcript_note: str = "none written"
     untrusted: bool = False
+    in_place: bool = False
     roster: list[RosterRow] = field(default_factory=list)
     chair_name: str = "Chair"
     chair_model: str = ""
@@ -42,6 +43,14 @@ class ReportContext:
     def header(self, title: str) -> list[str]:
         trust = "no-approve (untrusted)" if self.untrusted else "approve"
         lineage = f" ({self.council_lineage})" if self.council_lineage else ""
+        where = (
+            f"- workspace: in place — {self.member_count} members share `{self.project}`; nothing they wrote is journaled or discarded"
+            if self.in_place
+            else (
+                f"- sandbox: `sandbox_mib = {self.sandbox_mib}` shared by "
+                f"{self.member_count} members ({self.member_count - 1} seats + the chair)"
+            )
+        )
         return [
             f"# {title}",
             "",
@@ -49,8 +58,7 @@ class ReportContext:
             f"- config: `{self.config_path}` · council `{self.council}`{lineage}",
             f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
             f"- date: {self.date}",
-            f"- sandbox: `sandbox_mib = {self.sandbox_mib}` shared by "
-            f"{self.member_count} members ({self.member_count - 1} seats + the chair)",
+            where,
             f"- project trust: {trust} · transcripts: {self.transcripts} ({self.transcript_note})",
             f"- pi: `{self.pi_cli}` ({self.pi_version})",
         ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
@@ -70,10 +78,15 @@ class ReportContext:
         return head
 
     def artifacts(self, run_dir: str) -> list[str]:
+        manifest = (
+            "outcome, in place: no write journal, no namespaces, no sweep"
+            if self.in_place
+            else "outcome, write journal, namespaces, survivors"
+        )
         lines = [
             "## Artifacts",
             "",
-            "- `run.json` — the machine-readable manifest (outcome, write journal, namespaces, survivors)",
+            f"- `run.json` — the machine-readable manifest ({manifest})",
             f"- `{self.report_name}` — this report",
             "- `events.jsonl` — the run's events, one JSON object per line, append-only",
             "- `human_input.json` — every question, answer, recommendation and skip",

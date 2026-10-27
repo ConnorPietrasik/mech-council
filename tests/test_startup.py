@@ -7,6 +7,9 @@ import os
 
 import pytest
 
+from mech_council import startup
+from mech_council.sandbox import mount
+
 from .conftest import FAKE_PI, write_project_config
 
 pytestmark = [pytest.mark.timeout(180)]
@@ -14,6 +17,56 @@ pytestmark = [pytest.mark.timeout(180)]
 
 def runs_env(project: str) -> dict:
     return {"COUNCIL_RUNS_DIR": os.path.join(os.path.dirname(project), "runs")}
+
+
+# ------------------------------------------------------------ Who asked to run in place
+
+
+def convened(argv: list[str], project: str, environ: dict[str, str] | None = None):
+    """`startup.convene` with no user config in reach: the notes are what it hands the CLI to print."""
+    env = runs_env(project)
+    env["XDG_CONFIG_HOME"] = os.path.join(os.path.dirname(project), "no-user-config")  # a directory nothing creates
+    env.update(environ or {})
+    _args, launch = startup.convene([*argv, "-p", project], environ=env)
+    return launch.notes, launch.council
+
+
+def state_the_knobs(project: str, *lines: str) -> str:
+    path = os.path.join(project, "council.toml")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace("[defaults]\n", "[defaults]\n" + "".join(f"{line}\n" for line in lines), 1))
+    return path
+
+
+def test_the_sandbox_is_still_the_default_on_a_host_that_has_namespaces(project):
+    notes, council = convened(["review"], project)
+    assert council.in_place is False
+    assert not any("in place" in note for note in notes), notes
+
+
+def test_the_flag_says_what_in_place_costs(project):
+    notes, council = convened(["review", "--in-place"], project)
+    assert council.in_place is True
+    said = next(note for note in notes if "--in-place" in note)
+    assert "share one project" in said and "journaled" in said, said
+
+
+def test_a_council_asking_for_in_place_names_the_file_that_asked(project):
+    config = state_the_knobs(project, "in_place = true", "sandbox_mib = 64")
+    notes, council = convened(["review"], project)
+    assert council.in_place is True
+    said = next(note for note in notes if "asked for by" in note)
+    assert config in said, f"the note must name who asked: {said}"
+    assert "sandbox_mib = 64 is ignored" in said, "a knob in place cannot honor is said so"
+
+
+def test_a_host_with_no_namespaces_runs_in_place_instead_of_refusing(project, monkeypatch):
+    monkeypatch.setattr(mount, "supported", lambda: False)
+    notes, council = convened(["review"], project)
+    assert council.in_place is True, "no namespaces is a reason to run in place, not to refuse"
+    assert any("no namespaces" in note and "running in place" in note for note in notes), notes
 
 
 def errored(**extra) -> str:

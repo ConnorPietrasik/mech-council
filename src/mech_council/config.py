@@ -20,6 +20,7 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "transcripts": "off",
     "pi_cli": None,
     "sandbox_mib": 32768,
+    "in_place": False,
 }
 
 #: The knob table: name → (type, `[defaults]`-allowed).  A new knob is one row here plus one consumer.
@@ -29,6 +30,7 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "chair_timeout_sec": ("int>=1", True),
     "max_concurrency": ("int>=1", True),
     "sandbox_mib": ("int>=1", True),
+    "in_place": ("bool", True),
     "transcripts": ("transcripts", True),
     "pi_cli": ("str", True),
     "mode": ("mode", False),
@@ -82,6 +84,8 @@ class Council:
     #: Every file the config was read from, lowest precedence first.
     config_layers: list[str] = field(default_factory=list)
     untrusted: bool = False
+    #: Members run in the real project: no namespaces, no overlays, no masks, no write journal.
+    in_place: bool = False
     project: str = ""
 
     @property
@@ -429,14 +433,23 @@ def select_council(config: ConfigFile, name: str | None) -> str:
     raise UsageError(f"no council {name!r} in {config.where}{extra}: it offers {', '.join(names)}")
 
 
+def stated_by(config: ConfigFile, name: str, chain: list[str], key: str) -> str | None:
+    """The highest-precedence council file that states `key` for this council — in its `[defaults]`, in the
+    council's own table, or in a table it extends — or None when no file states it."""
+    for path in reversed(config.paths or [config.path]):
+        raw = config.raw.get(path, {})
+        if key in (raw.get("defaults") or {}):
+            return path
+        councils = raw.get("councils") or {}
+        if any(key in (councils.get(owned) or {}) for owned in [name, *chain]):
+            return path
+    return None
+
+
 def _pi_cli_stated_by_project(config: ConfigFile, chain: list[str]) -> bool:
     """Whether the auto-discovered project file is what asked for this `pi_cli`, in its own table, in a
     template it extends, or in `[defaults]`."""
-    raw = config.raw.get(config.project_layer or "", {})
-    if "pi_cli" in (raw.get("defaults") or {}):
-        return True
-    councils = raw.get("councils") or {}
-    return any("pi_cli" in (councils.get(name) or {}) for name in chain)
+    return stated_by(config, chain[0], chain[1:], "pi_cli") == config.project_layer
 
 
 def resolve_pi(explicit: str | None, project: str, *, from_project: bool = False) -> tuple[str, str]:
@@ -470,7 +483,15 @@ def resolve_pi(explicit: str | None, project: str, *, from_project: bool = False
     return resolved, version
 
 
-def convene(config: ConfigFile, name: str, args: Args, project: str, *, untrusted: bool = False) -> Council:
+def convene(
+    config: ConfigFile,
+    name: str,
+    args: Args,
+    project: str,
+    *,
+    untrusted: bool = False,
+    namespaces_available: bool = True,
+) -> Council:
     table, chain = _resolve(config, name)
     # A merged seat may be stated in any council of the chain, so roster errors say which ones.
     via = f" [the roster merges {' → '.join([*reversed(chain), name])}: it can be stated in any of them]" if chain else ""
@@ -532,6 +553,8 @@ def convene(config: ConfigFile, name: str, args: Args, project: str, *, untruste
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),
         untrusted=untrusted,
+        # A flag, a config layer, or a host with nothing to build the sandbox from: any one of them runs in place.
+        in_place=bool(args.in_place or not namespaces_available or flat["in_place"]),
         project=project,
     )
     if council.max_rounds < 1:

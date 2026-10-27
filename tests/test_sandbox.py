@@ -21,7 +21,7 @@ from mech_council.sandbox import journal as journal_mod
 from mech_council.sandbox import mount as m
 from mech_council.sandbox import mount as mount_mod
 from mech_council.sandbox.memberns import SCRATCH_NAME, SetupFailure, setup_member_namespace
-from mech_council.sandbox.setup import _is_mounted, establish
+from mech_council.sandbox.setup import Sandbox, _is_mounted, establish
 from tests.support.ground import FIXTURE_ROOT, fstype_under
 from tests.support.namespaces import in_mapped_child
 
@@ -604,6 +604,31 @@ def test_a_setup_failure_is_reported_as_syscall_and_errno_and_the_member_never_e
     steps = ("unshare(CLONE_NEWNS)", "mkdir", "mount --bind", "mask", "chdir")
     assert any(step in report for step in steps), repr(report)  # names what failed
     assert not os.path.exists(marker), "the member never execed"
+
+
+# ----------------------------------------------------- the other half of `establish`: no sandbox
+
+
+def test_establish_in_place_mounts_nothing_and_hands_each_seat_scratch(tree):
+    """In place the run provides scratch and paths only: no tmpfs, no overlay, no lower fd for the journal to read."""
+    box = establish(
+        project=tree["project"],
+        runs_dir=tree["runs"],
+        sandbox_mib=32,
+        members=tree["members"],
+        sandbox_dir=os.path.join(tree["runs"], "inplace"),
+        in_place=True,
+    )
+    assert box.in_place is True and box.lower_fd == -1, "no lower layer means no eye for the journal"
+    assert sorted(os.listdir(box.sandbox_dir)) == sorted(tree["members"]), "one slot each, holding scratch"
+    for file_base in tree["members"]:
+        assert os.path.isdir(box.scratch(file_base))
+        assert box.tmpdir(file_base) == box.scratch(file_base), "the member's own directory, outside the project"
+        assert not _is_mounted(box.slot_dir(file_base)), "a slot is a directory in place, not a mount"
+    assert not _is_mounted(box.sandbox_dir)
+    sandboxed = Sandbox(project=tree["project"], runs_dir=tree["runs"], sandbox_dir=box.sandbox_dir)
+    assert sandboxed.tmpdir("chair") == f"{tree['project']}/{SCRATCH_NAME}", "inside the view, the bind is still the scratch"
+    box.close()
 
 
 # --------------------------------------------------------------------------- the journal

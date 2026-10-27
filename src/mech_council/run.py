@@ -40,9 +40,19 @@ async def orchestrate(launch, sandbox) -> int:
     console.say(f"run directory {run_dir}")
     # The sandbox, the transcript level and the trust decision are each a line, so an
     # operator reading the console knows what a member could touch before it runs.
-    console.say(f"sandbox {sandbox.sandbox_dir} · tmpfs {council.sandbox_mib} MiB shared by {len(council.agents) + 1} members")
+    if council.in_place:
+        console.say(f"in place · members share {council.project} · scratch {sandbox.sandbox_dir}/<seat> · no write journal")
+    else:
+        console.say(f"sandbox {sandbox.sandbox_dir} · tmpfs {council.sandbox_mib} MiB shared by {len(council.agents) + 1} members")
     console.say(f"transcripts {council.transcripts} · project trust {'untrusted (no approval)' if council.untrusted else 'approve'}")
-    console.event("run_started", project=council.project, mode=council.mode, council=council.name, sandbox_dir=sandbox.sandbox_dir)
+    console.event(
+        "run_started",
+        project=council.project,
+        mode=council.mode,
+        council=council.name,
+        sandbox_dir=sandbox.sandbox_dir,
+        in_place=council.in_place,
+    )
     manifest = runjson.create(
         os.path.join(run_dir, "run.json"),
         council,
@@ -75,7 +85,7 @@ async def orchestrate(launch, sandbox) -> int:
     docket: Docket | None = None
     baselines: dict[str, dict[str, str]] = {}
     try:
-        baselines = {base: journal_mod.listing(sandbox.upper(base)) for base in _file_bases(council)}
+        baselines = {} if sandbox.in_place else {base: journal_mod.listing(sandbox.upper(base)) for base in _file_bases(council)}
         members = Members(
             council=council,
             sandbox=sandbox,
@@ -105,7 +115,7 @@ async def orchestrate(launch, sandbox) -> int:
         # Each owed step is independent, because one failing must not cancel the others — a renderer that raises may not also cost
         # the operator the finalized `run.json` or the sweep result.  Each reports itself when it fails.  `_teardown` is awaited
         # directly (and already reports its own failure): the sweep result has to exist before the manifest can be finalized.
-        survivors = await _teardown(members, console)
+        survivors = await _teardown(members, console, in_place=council.in_place)
         journal = _owed(console, "the write journal", _journal, council, sandbox, baselines, console) or []
         report_path = (
             _owed(console, "the report", _report, council, docket, console, run_dir, outcome, rounds, journal, manifest, aborted) or ""
@@ -124,6 +134,7 @@ async def orchestrate(launch, sandbox) -> int:
             survivor_ns=survivors.namespaces,
             rounds=rounds,
             report=report_path,
+            namespace_sweep="none (in place)" if council.in_place else "namespace",
             **({"aborted_reason": aborted} if aborted else {}),
         )
         _owed(console, "the transcripts", transcripts.close)
@@ -158,7 +169,7 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
     roster = council.seat_ids
     names = {**council.seat_names, "chair": council.chair.name}
     docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name)
-    brief = Brief(mode=council.mode, project=council.project)
+    brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place)
     chair = Chair(council, lanes, console, brief)
     reader = LineReader()
     reader.start()
@@ -269,12 +280,12 @@ def _who(label: str) -> str:
     return label
 
 
-async def _teardown(members: Members | None, console: Console):
+async def _teardown(members: Members | None, console: Console, *, in_place: bool = False):
     from .process import lifecycle
 
     if members is None:
         result = lifecycle.SweepResult()
-        console.say(lifecycle.survivor_line(result))
+        console.say(lifecycle.NO_SWEEP_LINE if in_place else lifecycle.survivor_line(result))
         return result
     try:
         return await members.dispose_all()
@@ -284,7 +295,7 @@ async def _teardown(members: Members | None, console: Console):
 
 
 def _journal(council: Council, sandbox, baselines: dict, console: Console) -> list[dict]:
-    if not baselines:
+    if not baselines:  # in place there is no upper layer to read: members wrote in the project itself
         return []
     out = []
     for base in _file_bases(council):
@@ -385,6 +396,7 @@ def _report_context(
         transcripts=council.transcripts,
         transcript_note=console.transcript_note(),
         untrusted=council.untrusted,
+        in_place=council.in_place,
         roster=roster,
         chair_name=council.chair.name,
         chair_model=council.chair.model or "pi default",

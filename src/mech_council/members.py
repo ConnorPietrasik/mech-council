@@ -8,7 +8,7 @@ from .console import Console, MemberSinks, Transcripts
 from .pi_rpc import ChildGone, ProtocolError
 from .process import lifecycle, spawn
 from .runjson import RunManifest
-from .sandbox.setup import Sandbox
+from .sandbox.setup import Seat
 
 
 class MemberGone(Exception):
@@ -18,7 +18,7 @@ class MemberGone(Exception):
 @dataclass
 class Members:
     council: Council
-    sandbox: Sandbox
+    sandbox: Seat
     run_dir: str
     runs_dir: str
     console: Console
@@ -76,11 +76,14 @@ class Members:
             slot_dir=self.sandbox.slot_dir(spec.file_base),
             run_path=self.run_dir,
             untrusted=self.council.untrusted,
+            in_place=self.council.in_place,
+            tmpdir=self.sandbox.tmpdir(spec.file_base),
             transcript=sinks,
             on_tool_result=self.on_tool_result(spec.file_base),
         )
         self.members[spec.file_base] = member
-        self.manifest.record_namespace(spec.file_base, member.namespace)
+        if member.namespace is not None:
+            self.manifest.record_namespace(spec.file_base, member.namespace)
         return member
 
     async def start_all(self) -> None:
@@ -95,7 +98,8 @@ class Members:
         try:
             member = await self.spawn_one(spec)
         except spawn.LauncherSetupError as failure:
-            self.console.say(f"{label}'s member namespace never came up: {failure}")
+            where = "pi never came up" if self.council.in_place else "the member namespace never came up"
+            self.console.say(f"{label}'s {where}: {failure}")
             raise
         except OSError as failure:
             self.console.event("member_spawn_failed", member=label, file_base=spec.file_base, error=str(failure))
@@ -112,7 +116,8 @@ class Members:
             self.console.event("council_unknown_model", member=label, warning=warning)
             self.console.say(f"{label}: {warning}")
         model = spec.model or "pi default"
-        self.console.say(f"{label} up · {spec.provider or 'default provider'}/{model} · ns {member.namespace}")
+        where = f" · ns {member.namespace}" if member.namespace is not None else ""
+        self.console.say(f"{label} up · {spec.provider or 'default provider'}/{model}{where}")
 
     async def restart(self, file_base: str, *, why: str) -> spawn.Member:
         if self.stopping:
@@ -126,8 +131,10 @@ class Members:
         self.console.say(f"restarting {file_base} ({why})")
         spec = self.spec_for(file_base)
         member = await self.spawn_one(spec)
-        member.ns_records = list(old.ns_records) + [member.namespace] if old else [member.namespace]
-        self.manifest.record_namespace(file_base, member.namespace)
+        if old is not None:
+            member.ns_records = [*old.ns_records, *member.ns_records]  # in place, both are empty
+        if member.namespace is not None:
+            self.manifest.record_namespace(file_base, member.namespace)
         try:
             await member.rpc.get_state()
         except (ProtocolError, ChildGone, TimeoutError) as failure:
@@ -146,7 +153,9 @@ class Members:
         self.transcripts.close()
         return self.survivors
 
-    def own_namespace(self) -> int:
+    def own_namespace(self) -> int | None:
+        if self.council.in_place:
+            return None  # the members share this namespace: it is the one scope no sweep may key on
         from .sandbox.mount import namespace_id
 
         return namespace_id()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import time
 from dataclasses import dataclass
 
@@ -23,8 +24,11 @@ class Launch:
 def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[cli.Args, Launch]:
     environ = dict(os.environ if environ is None else environ)
     args = cli.parse_args(argv)
-    if refusal := cli.check_platform():
+    if refusal := cli.no_fork_refusal():
         raise ConfigError(refusal)  # before anything is read: a stranger's first impression is this line
+    plat = sys.platform
+    # A host with no namespaces runs in place rather than refusing; the operator only has to say so on Linux.
+    namespaces_available = cli.sandbox_supported()
     if message := cli.check_nested_guard(args.allow_nested, environ):
         raise ConfigError(message)
     project = cli.resolve_project(args.project)
@@ -35,7 +39,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     paths, project_layer = cli.config_candidates(args.config, project, environ)
     loaded = config_mod.load_layers(paths, project_layer=project_layer)
     name = config_mod.select_council(loaded, args.council)
-    council = config_mod.convene(loaded, name, args, project, untrusted=args.untrusted)
+    council = config_mod.convene(loaded, name, args, project, untrusted=args.untrusted, namespaces_available=namespaces_available)
     runs_dir = cli._runs_root_from_env(environ)
     _check_runs_root(runs_dir, project)
     run_name = _run_name(project)
@@ -44,6 +48,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     notes = list(args.notes)
     notes += _layer_notes(loaded)
     notes += _trust_notes(council, args)
+    notes += _in_place_notes(loaded, council, args, plat=plat)
     return args, Launch(
         council=council,
         runs_dir=runs_dir,
@@ -77,6 +82,23 @@ def _trust_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
     if not args.untrusted:
         return []
     return ["--untrusted: every member spawns with --no-approve, so project-local .pi resources are not provided to them"]
+
+
+def _in_place_notes(loaded: config_mod.ConfigFile, council: config_mod.Council, args: cli.Args, *, plat: str) -> list[str]:
+    """Who asked to run unsandboxed, in the order the operator should read it: their own flag, then the
+    file that asked, then the host.  The sandbox keeps seats off each other, so what each note owes the
+    operator is the shared tree and the missing journal."""
+    if not council.in_place:
+        return []
+    costs = "members share one project and nothing they write is journaled or discarded"
+    if args.in_place:
+        note = f"--in-place: no namespaces, no overlays and no masks — {costs}"
+    else:
+        asked_by = config_mod.stated_by(loaded, council.name, council.extends, "in_place")
+        note = f"in place, asked for by {asked_by} — {costs}" if asked_by else f"no namespaces on {plat!r}: running in place — {costs}"
+    if config_mod.stated_by(loaded, council.name, council.extends, "sandbox_mib"):
+        note += f" · sandbox_mib = {council.sandbox_mib} is ignored"
+    return [note]
 
 
 def prepare_runs_root(runs_dir: str) -> str:

@@ -195,6 +195,20 @@ def test_the_sandbox_journal_is_rendered_per_member_with_its_markers():
     assert "sandbox_artifact" in text, "a finding citing a sandbox artifact is marked"
 
 
+def test_an_in_place_report_never_claims_a_sandbox():
+    """Nothing was journaled and nothing was quarantined, so neither section may say otherwise."""
+    docket = build()
+    entry = item(docket, "F1", "the write failed", evidence="mv: Invalid cross-device link")
+    entry.markers.append("sandbox_limit")
+    text = report_review.render(docket, context(in_place=True))
+    assert "- workspace: in place" in text and "sandbox_mib" not in text, "the header names the shared tree, not a cap"
+    assert "## Project writes" in text and "## Sandbox writes" not in text
+    assert "git status" in text, "the report says where what the members wrote went"
+    assert "## Filesystem refusals" in text and "## Sandbox limits" not in text
+    assert "F1" in text[text.index("## Filesystem refusals") :], "the refusal is still reported, under its real name"
+    assert "no write journal, no namespaces, no sweep" in text, "the manifest's own description says what it cannot hold"
+
+
 def test_an_overlay_refusal_prints_under_sandbox_limits_not_as_evidence():
     """An overlay refusal is evidence of the *limit*, never of a finding."""
     docket = build()

@@ -1,5 +1,6 @@
 """Two classes of descendant escape every group kill — a tool shell pi never cleaned up, and any descendant that called
-setsid() and moved to a new pgid.  That is what the namespace-scoped sweep at the end of teardown is for.
+setsid() and moved to a new pgid.  That is what the namespace-scoped sweep at the end of teardown is for; in place there is no
+namespace to sweep, so those two classes are the one thing this cannot promise to clean up.
 """
 
 from __future__ import annotations
@@ -64,8 +65,10 @@ async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
             await member.stderr_task
 
 
-def namespace_set(members: list[Member], *, own_namespace: int) -> set[int]:
-    out = {own_namespace}
+def namespace_set(members: list[Member], *, own_namespace: int | None) -> set[int]:
+    """`own_namespace` is None in place, where the members share this namespace and it is therefore the one
+    scope the sweep must never be keyed on."""
+    out: set[int] = set() if own_namespace is None else {own_namespace}
     for member in members:
         out.update(member.ns_records)
     return out
@@ -119,14 +122,21 @@ def survivor_line(result: SweepResult) -> str:
     return f"killed {len(result.pids)} survivor(s) {sorted(result.pids)} in the namespace(s) this run created ({joined})"
 
 
+NO_SWEEP_LINE = "no namespace sweep: in place the members share this namespace, so only their own process groups were signalled"
+
+
 def close_ns_fds(members: list[Member]) -> None:
     """After the sweep: the held fd is the last handle on the run's namespaces once every member is gone."""
     for member in members:
+        if member.ns_fd < 0:
+            continue  # in place, there was never an fd to hold
         with contextlib.suppress(OSError):
             os.close(member.ns_fd)
 
 
-async def dispose_all(members: list[Member], *, own_namespace: int, on_line=None, budget: float = DISPOSE_SWEEP_AFTER_S) -> SweepResult:
+async def dispose_all(
+    members: list[Member], *, own_namespace: int | None, on_line=None, budget: float = DISPOSE_SWEEP_AFTER_S
+) -> SweepResult:
     own_pgid = os.getpgid(0)
     try:
         async with asyncio.timeout(budget):
@@ -138,8 +148,11 @@ async def dispose_all(members: list[Member], *, own_namespace: int, on_line=None
         for member in members:
             send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
     await asyncio.sleep(0)
-    result = sweep(namespace_set(members, own_namespace=own_namespace), keep_fds=[member.ns_fd for member in members])
+    namespaces = namespace_set(members, own_namespace=own_namespace)
+    # No namespace of its own means no sweep at all: the group kills above are the whole cleanup, and a
+    # sweep keyed on the namespace we share with the operator would reach far past this run.
+    result = sweep(namespaces, keep_fds=[member.ns_fd for member in members]) if namespaces else SweepResult()
     close_ns_fds(members)
     if on_line:
-        on_line(survivor_line(result))
+        on_line(survivor_line(result) if namespaces else NO_SWEEP_LINE)
     return result

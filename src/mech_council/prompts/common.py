@@ -14,6 +14,19 @@ An overlay errno is never an item you raise: it says what the sandbox forbids, n
 project does. If you hit one, say what you were trying to do and move on.
 """
 
+SHARED = """\
+# Your workspace
+
+Your working directory is the project, and it is the real one: your writes land in it and
+stay there. The other seats work in this same tree at the same time, so a file or an edit
+you did not make is a peer's work in progress — never a defect, and never yours to finish,
+revert or reformat. Touch only what your own task touches, and leave the rest of the tree
+as you found it. `$TMPDIR` is a directory of your own outside the project: put anything
+half-finished there rather than in the tree. A filesystem refusal (`EACCES`, `EROFS`,
+`ENOSPC`) says what your environment forbids, not what the project does: say what you were
+trying to do and move on.
+"""
+
 PROTOCOL = """\
 # How this council works
 
@@ -93,7 +106,12 @@ def goal_line(goal: str | None) -> str:
     return f"Goal: {goal}\n" if goal else "No goal was stated for this council.\n"
 
 
-def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
+def _workspace(in_place: bool) -> str:
+    """The two workspaces differ on exactly one thing the seats can act on: whether a peer shares the tree."""
+    return SHARED if in_place else SANDBOX
+
+
+def phase0_briefing(*, mode: str, goal: str | None, project: str, in_place: bool = False) -> str:
     text = _mode_text(mode)
     return "\n".join(
         [
@@ -103,7 +121,7 @@ def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
             goal_line(goal),
             text.PHASE0_TASK,
             PROTOCOL,
-            SANDBOX,
+            _workspace(in_place),
             ESCALATION,
             QUESTION_SHAPE,
             ANSWER_SHAPE,
@@ -112,7 +130,16 @@ def phase0_briefing(*, mode: str, goal: str | None, project: str) -> str:
     )
 
 
-def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket: str, phase0_summary: str) -> str:
+def round_briefing(
+    *,
+    mode: str,
+    goal: str | None,
+    project: str,
+    me: str,
+    docket: str,
+    phase0_summary: str,
+    in_place: bool = False,
+) -> str:
     text = _mode_text(mode)
     return "\n".join(
         [
@@ -129,7 +156,7 @@ def round_briefing(*, mode: str, goal: str | None, project: str, me: str, docket
             ESCALATION,
             text.EXTRA_BRIEFING,
             QUESTION_SHAPE,
-            SANDBOX,
+            _workspace(in_place),
             ANSWER_SHAPE,
             text.ROUND_SCHEMA,
             "---",

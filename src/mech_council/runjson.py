@@ -108,6 +108,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
             "max_concurrency": council.max_concurrency,
             "transcripts": council.transcripts,
             "sandbox_mib": council.sandbox_mib,
+            "in_place": council.in_place,
             "project_trust": "no-approve" if council.untrusted else "approve",
         },
         "pi_cli": council.pi_cli,
@@ -130,6 +131,7 @@ def finalize(
     survivor_ns: list[int],
     rounds: int,
     report: str | None,
+    namespace_sweep: str = "namespace",
     **extra,
 ) -> None:
     manifest.data.update(
@@ -138,6 +140,8 @@ def finalize(
             "rounds": rounds,
             "report": report,
             "write_journal": journal,
+            # In place the members share this namespace, so the scope the sweep could have read is nothing.
+            "namespace_sweep": namespace_sweep,
             "survivor_pids": list(survivor_pids),
             "survivor_ns": list(survivor_ns),
             "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import errno as _errno
 import os
+import sys
 
 CLONE_NEWUSER = 0x10000000
 CLONE_NEWNS = 0x00020000
@@ -34,11 +35,26 @@ class MountError(OSError):
         return f"{self.syscall}: {os.strerror(self.err)}"
 
 
-_libc = ctypes.CDLL("libc.so.6", use_errno=True)
-_libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
-_libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
-_libc.unshare.argtypes = [ctypes.c_int]
-_libc.prctl.argtypes = [ctypes.c_int] * 5
+#: Loaded on first call, never at import: this module also carries the run's timing constants, and a host
+#: without `libc.so.6` still has to be able to read them.
+_handle: ctypes.CDLL | None = None
+
+
+def _libc() -> ctypes.CDLL:
+    global _handle
+    if _handle is None:
+        lib = ctypes.CDLL("libc.so.6", use_errno=True)
+        lib.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
+        lib.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        lib.unshare.argtypes = [ctypes.c_int]
+        lib.prctl.argtypes = [ctypes.c_int] * 5
+        _handle = lib
+    return _handle
+
+
+def supported() -> bool:
+    """The only platform with the user and mount namespaces the sandbox is built from."""
+    return sys.platform == "linux"
 
 
 def _last_error() -> int:
@@ -46,7 +62,7 @@ def _last_error() -> int:
 
 
 def mount(source: str | None, target: str, fstype: str | None = None, flags: int = 0, data: str | None = None) -> None:
-    result = _libc.mount(
+    result = _libc().mount(
         source.encode() if source is not None else None,
         target.encode(),
         fstype.encode() if fstype else None,
@@ -78,7 +94,7 @@ def private_recursive(target: str = "/") -> None:
 
 
 def umount2(target: str, flags: int = 0) -> None:
-    if _libc.umount2(target.encode(), flags) != 0:
+    if _libc().umount2(target.encode(), flags) != 0:
         raise MountError(f"umount2({target!r})", _last_error())
 
 
@@ -88,12 +104,12 @@ def unshare(flags: int) -> None:
         return
     except AttributeError:  # pragma: no cover — 3.12+ has it
         pass
-    if _libc.unshare(ctypes.c_int(flags)) != 0:
+    if _libc().unshare(ctypes.c_int(flags)) != 0:
         raise MountError(f"unshare({flags:#x})", _last_error())
 
 
 def prctl(option: int, value: int) -> int:
-    result = _libc.prctl(option, value, 0, 0, 0)
+    result = _libc().prctl(option, value, 0, 0, 0)
     if result < 0:
         raise MountError(f"prctl({option})", _last_error())
     return result
