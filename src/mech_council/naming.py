@@ -1,5 +1,4 @@
-"""`file_base` = ``slot<NN>[-<slugified name>]`` for a seat, ``chair`` for the chair.
-"""
+"""`file_base` = ``slot<NN>[-<slugified name>]`` for a seat, ``chair`` for the chair."""
 
 from __future__ import annotations
 

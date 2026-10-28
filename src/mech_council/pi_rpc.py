@@ -309,14 +309,12 @@ class PiRpc:
 
 
 def _text_of(message: dict) -> str:
+    """The member's visible reply only: a thinking trace that drafts `{...}` would be parsed as its verdict."""
     content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") in ("text", "thinking"):
-                parts.append(str(block.get("text") or block.get("thinking") or ""))
+        parts = [str(block.get("text") or "") for block in content if isinstance(block, dict) and block.get("type") == "text"]
         return "\n".join(p for p in parts if p)
     return ""
 

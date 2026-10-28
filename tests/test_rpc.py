@@ -90,6 +90,23 @@ def test_an_error_stop_reason_and_its_message_survive_to_the_unusable_test():
     assert answer.errored and "429" in answer.error_message
 
 
+def test_a_thinking_block_that_drafts_json_is_never_the_answer():
+    """A reasoning member drafts its JSON while thinking; reading that draft as its reply would put it in the record."""
+    draft = '{"positions": [{"item": "F9", "stance": "disagree"}]}'
+    script = [{"contains": "", "thinking": "maybe " + draft + " but no, not yet", "text": "I have no positions this round."}]
+
+    async def main():
+        child, rpc, _events = await start(script)
+        try:
+            return await rpc.ask("go")
+        finally:
+            await rpc.stop()
+            child.terminate()
+            await child.wait()
+
+    assert run(main()).text == "I have no positions this round."
+
+
 def test_tool_events_are_counted_and_their_results_reach_the_sandbox_inference():
     """The sandbox inference hook is fed by pi's own tool events, not by parsing prose."""
     seen: list[dict] = []

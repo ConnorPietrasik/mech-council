@@ -53,6 +53,18 @@ def test_the_first_balanced_object_wins_and_a_trailing_brace_does_not_swallow_it
     assert out.data["positions"][0]["item"] == "F1"
 
 
+def test_a_brace_left_open_in_the_prose_does_not_doom_the_object_after_it():
+    out = parse("the `{` character opens an object.\n" + json.dumps(positions(("F1", "agree"))))
+    assert not out.invalid and out.data["positions"][0]["item"] == "F1"
+
+
+def test_an_answer_cut_off_mid_object_owes_a_repair_and_never_becomes_the_object_nested_in_it():
+    """A truncated reply leaves a complete position nested in it, which parses as "nothing to say" — the one reading
+    that must never be taken, because the member's whole verdict is gone and the round would carry on without it."""
+    out = parse(json.dumps(positions(("F1", "agree"), ("F2", "disagree")))[:-1])
+    assert out.invalid and out.errors
+
+
 # --------------------------------------------------------------------------- case and separators
 
 

@@ -143,17 +143,30 @@ def find_json(text: str) -> tuple[dict | None, str | None]:
     while start >= 0:
         end = _balanced_end(cleaned, start)
         if end is None:
-            return None, "unbalanced JSON object in the answer"
-        try:
-            value = json.loads(cleaned[start : end + 1])
-        except json.JSONDecodeError as exc:
-            last_error = f"unparseable JSON: {exc}"
+            # A brace that opens an object and never closes is a reply cut off mid-answer, and the object nested inside
+            # it is a fragment: reading that as the reply replaces the member's verdict with "nothing to say".
+            if _opens_an_object(cleaned, start):
+                return None, "unbalanced JSON object in the answer: the reply was cut off, so send the object whole"
+            # Any other brace that never closes is prose, so keep looking for one that does.
         else:
-            if isinstance(value, dict):
-                return value, None
-            last_error = "the answer's JSON is not an object"
+            try:
+                value = json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError as exc:
+                last_error = f"unparseable JSON: {exc}"
+            else:
+                if isinstance(value, dict):
+                    return value, None
+                last_error = "the answer's JSON is not an object"
         start = cleaned.find("{", start + 1)
     return None, last_error or "no JSON object found in the answer"
+
+
+def _opens_an_object(text: str, start: int) -> bool:
+    """`{` with a quote next opens an object; `{` followed by anything else is a brace in the answer's prose."""
+    pos = start + 1
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    return pos < len(text) and text[pos] == '"'
 
 
 def _balanced_end(text: str, start: int) -> int | None:

@@ -11,7 +11,8 @@ reached its `"index"`.  Everything `scripted` and `reply_to` read is listed belo
 added, because a key it does not mention is a key a test author will not find:
 
 {"contains": "Phase 0", "index": 0, "reply": {...} or "raw text", "text": "...", "wrap": true, "sidechain": true,
- "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}], "write": [{"path": "f.py", "text": "..."}],
+ "thinking": "...", "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}],
+ "write": [{"path": "f.py", "text": "..."}],
  "sleep": 30, "stderr": "...", "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...",
  "no_settle": true, "aborted": true}
 """
@@ -104,6 +105,10 @@ def reply_to(prompt: str, index: int) -> None:
                 "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "the sub-agent's turn"}]},
             }
         )
+    blocks = [{"type": "text", "text": text}]
+    if entry.get("thinking"):
+        # A reasoning model thinks before it speaks, so the block arrives first and holds what it drafted there.
+        blocks.insert(0, {"type": "thinking", "thinking": str(entry["thinking"])})
     say({"type": "message_start", "message": {"role": "assistant"}})
     say(
         {
@@ -112,7 +117,7 @@ def reply_to(prompt: str, index: int) -> None:
                 "role": "assistant",
                 "stopReason": entry.get("stop_reason", "stop"),
                 **({"errorMessage": entry["error_message"]} if entry.get("error_message") else {}),
-                "content": [{"type": "text", "text": text}],
+                "content": blocks,
             },
         }
     )
