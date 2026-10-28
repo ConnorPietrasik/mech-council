@@ -70,13 +70,13 @@ class RunManifest:
 def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str, orchestrator_pid: int) -> RunManifest:
     members: dict[str, MemberRecord] = {}
     roster = []
-    for spec in council.agents:
+    for slot, spec in enumerate(council.agents, 1):  # the slot is the seat's position, and nothing else records it
         members[spec.file_base] = MemberRecord(
             file_base=spec.file_base, id=spec.id, name=spec.name, kind="seat", provider=spec.provider, model=spec.model
         )
         roster.append(
             {
-                "slot": spec.slot,
+                "slot": slot,
                 "id": spec.id,
                 "name": spec.name,
                 "file_base": spec.file_base,

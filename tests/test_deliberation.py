@@ -398,9 +398,10 @@ def test_a_declined_record_for_the_asker_leaves_it_standing():
 
 
 def test_file_bases_are_their_own_vocabulary():
-    assert naming.seat_file_base(1, "Metic") == "slot1-metic"
-    assert naming.seat_file_base(2, "Coworker") == "slot2-coworker"
+    assert naming.seat_file_base(1, "Metic") == "slot01-metic"
+    assert naming.seat_file_base(2, "Coworker") == "slot02-coworker"
     assert naming.seat_file_base(12, "Big Name!") == "slot12-big-name"
+    assert naming.seat_file_base(9) < naming.seat_file_base(10), "single digits are padded, so a listing is in seat order"
     assert naming.chair_file_base() == "chair"
     assert naming.slugify("  ../weird/../name ") == "weird-name", "path noise collapses to one separator, ends trimmed"
     assert "/" not in naming.slugify("a/b") and ".." not in naming.slugify("a/..b")

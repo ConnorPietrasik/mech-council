@@ -8,8 +8,14 @@ def severity_key(severity: str) -> tuple[int, str]:
 
 
 def caption(agent_id: str, names: dict[str, str]) -> str:
+    """The report's form: the name beside the id every record of the run is written with."""
     name = names.get(agent_id)
     return f"{name} ({agent_id})" if name else agent_id
+
+
+def name_of(agent_id: str, names: dict[str, str]) -> str:
+    """The console's form: the name alone, the id left to the records."""
+    return names.get(agent_id, agent_id)
 
 
 def wrap(text: str, width: int = 76, indent: str = "  ") -> list[str]:

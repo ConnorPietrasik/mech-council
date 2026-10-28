@@ -63,7 +63,7 @@ class Chair:
             elapsed=[row["elapsed"] for row in rows],
             idle=[row["idle"] for row in rows],
         )
-        self.console.say(_digest_line(rows))
+        self.console.say(_digest_line(rows, self.council.roster_names))
         message = self.brief.watchdog(rows, mode=self.council.mode)
         try:
             outcome = await self.lanes.ask_chair(message, round_=None, phase="digest", kind="watchdog", timeout=WATCHDOG_PASS_TIMEOUT_S)
@@ -78,6 +78,8 @@ class Chair:
         return outcome.data.data
 
 
-def _digest_line(rows: list[dict]) -> str:
-    parts = "; ".join(f"{row['agent']} {row.get('tool_name') or 'no tool'} {row['idle']:.0f}s idle" for row in rows)
+def _digest_line(rows: list[dict], names: dict[str, str]) -> str:
+    from .render.text import name_of
+
+    parts = "; ".join(f"{name_of(row['agent'], names)} {row.get('tool_name') or 'no tool'} {row['idle']:.0f}s idle" for row in rows)
     return f"watchdog: chair pass over {parts}"

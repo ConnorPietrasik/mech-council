@@ -91,7 +91,7 @@ class Watchdog:
                 self.console.say(f"watchdog: the chair named {label!r}, which is not a member of this council — nobody is restarted")
                 continue
             self.console.event("watchdog_restart", member=label, reason=reason)
-            self.console.say(f"watchdog: restarting {label} ({reason or 'no reason given'})")
+            self.console.say(f"watchdog: restarting {self.lanes.members.display_for(file_base)} ({reason or 'no reason given'})")
             await self._restart(file_base, reason or "watchdog restart")
 
     async def _restart(self, file_base: str, why: str) -> None:
@@ -106,7 +106,7 @@ class Watchdog:
             await self.lanes.members.restart(file_base, why=why)
         except Exception as failure:
             self.console.event("member_spawn_failed", member=file_base, error=str(failure))
-            self.console.say(f"watchdog: {file_base} could not be restarted: {failure}")
+            self.console.say(f"watchdog: {self.lanes.members.display_for(file_base)} could not be restarted: {failure}")
 
     def _file_base(self, label: str) -> str | None:
         for spec in self.council.agents:

@@ -55,7 +55,7 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
         out.append("")
         out.append("No direction is printed for you to follow: nobody chose one.")
         return out + [""]
-    artifact, note = resolve_direction(docket, converged)
+    artifact, note = resolve_direction(docket, converged, context.captions)
     out.append(f"- converged token: `{converged}`")
     if note:
         out.append(f"- **{note}**")
@@ -70,7 +70,7 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
     return out
 
 
-def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
+def resolve_direction(docket: Docket, token: str, captions: dict[str, str]) -> tuple[dict | None, str]:
     if token.startswith("merged:"):
         label = token.split(":", 1)[1].strip()
         for agent in docket.roster:
@@ -85,9 +85,7 @@ def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
             return None, "the merge was never written down and no seat backs it"
         agent, artifact = best
         return artifact, (
-            f"the merge was never written down — this is "
-            f"{caption(agent, docket_captions(docket))}'s own plan, the "
-            "fullest one backing that token"
+            f"the merge was never written down — this is {caption(agent, captions)}'s own plan, the fullest one backing that token"
         )
     agent = token
     approach = docket.approaches.get(agent)
@@ -112,12 +110,8 @@ def _fullest_backer(docket: Docket, token: str):
     return (best[0], best[1]) if best else None
 
 
-def docket_captions(docket: Docket) -> dict[str, str]:
-    return {}
-
-
 def _stages(docket: Docket, context: ReportContext, converged: str | None) -> list[str]:
-    artifact, _ = resolve_direction(docket, converged) if converged else (None, "")
+    artifact, _ = resolve_direction(docket, converged, context.captions) if converged else (None, "")
     out = ["## Stages", ""]
     if not artifact or not artifact.get("stages"):
         return out + ["No stages were settled.", ""]
@@ -253,7 +247,7 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
         out.append(f"### Round {record.round}")
         if record.summary:
             out.append(record.summary)
-        out += [f"- {line}" for line in record.lines]
+        out += [f"- {caption(agent, context.captions)}: {line}" for agent, line in record.lines]
         out.append("")
     return out
 

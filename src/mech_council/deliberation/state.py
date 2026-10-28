@@ -137,7 +137,8 @@ class Approach:
 class RoundRecord:
     round: int
     summary: str = ""
-    lines: list[str] = field(default_factory=list)
+    #: (protocol id, what that seat did); the renderers print the name.
+    lines: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass

@@ -74,7 +74,7 @@ def test_run_json_carries_every_field_of_its_two_phases(finished):
 def test_run_json_records_the_per_member_identity_the_sweep_and_report_need(finished):
     """`file_base` plus *every* namespace inode recorded for that member."""
     members = finished.manifest["members"]
-    assert sorted(members) == ["chair", "slot1-metic", "slot2-senior"]
+    assert sorted(members) == ["chair", "slot01-metic", "slot02-senior"]
     for base, record in members.items():
         assert record["file_base"] == base
         assert record["namespaces"], f"{base} recorded no namespace to sweep"
@@ -87,7 +87,7 @@ def test_run_json_records_the_per_member_identity_the_sweep_and_report_need(fini
 def test_the_write_journal_is_per_member_and_excludes_scratch(finished):
     """Created/modified/deleted per member, `.council-scratch` never listed."""
     journal = finished.manifest["write_journal"]
-    assert {row["file_base"] for row in journal} == {"chair", "slot1-metic", "slot2-senior"}
+    assert {row["file_base"] for row in journal} == {"chair", "slot01-metic", "slot02-senior"}
     for row in journal:
         assert {"created", "modified", "deleted", "bytes", "sandbox_mib"} <= set(row)
         for path in row["created"] + row["modified"] + row["deleted"]:
@@ -121,7 +121,7 @@ def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
 def test_full_transcripts_write_one_verbatim_file_per_member(finished):
     agents = os.path.join(finished.run_dir, "agents")
     written = sorted(os.listdir(agents))
-    assert written == ["chair.transcripts.jsonl", "slot1-metic.transcripts.jsonl", "slot2-senior.transcripts.jsonl"], written
+    assert written == ["chair.transcripts.jsonl", "slot01-metic.transcripts.jsonl", "slot02-senior.transcripts.jsonl"], written
     with open(os.path.join(agents, "chair.transcripts.jsonl"), encoding="utf-8") as handle:
         first = json.loads(handle.readline())
     assert "type" in first, "the transcript is the protocol stream, not a summary"
@@ -148,11 +148,42 @@ def test_the_console_says_what_a_member_could_touch_before_one_runs(finished):
 
 def test_the_console_prints_each_spawn_with_its_namespace_and_each_ask_with_a_duration(finished):
     console = finished.console
-    for label in ("Agent1", "Agent2", "chair"):
-        assert f"{label} up ·" in console, f"{label} never reported up"
+    for name in ("Metic", "Senior", "Chair"):
+        assert f"{name} up ·" in console, f"{name} never reported up"
     assert console.count("ns ") >= 3, "every spawn prints the namespace it landed in"
     assert " answered in " in console, "per-ask durations are printed"
     assert "s (round 1)" in console
+
+
+def test_the_console_names_members_and_the_roster_line_keys_the_names_to_ids(finished):
+    """Names are for whoever is watching; `events.jsonl`, `run.json` and `agents/` keep the ids this line is the key for."""
+    console = finished.console
+    assert "roster Metic (Agent1) · Senior (Agent2) · Chair" in console
+    assert "Metic: verdict answered in" in console, "a seat's ask line carries its name"
+    assert "asked by Metic, Senior" in console, "even the checkpoint's listing names the asker and nothing more"
+    narration = console.split("# Code review", 1)[0]  # the report follows the narration and speaks ids beside names
+    keyed = [line for line in narration.splitlines() if "Agent" in line]
+    assert keyed == ["roster Metic (Agent1) · Senior (Agent2) · Chair"], "the key line is the one place a name meets its id"
+
+
+def test_the_console_says_who_declined_a_gap_by_name_only():
+    """The event carries the id the report is written with; the line says the name."""
+    from mech_council.run import _summary_line
+
+    line = _summary_line("gap_declined", {"member": "Agent2", "items": ["F1", "F2"]}, {"Agent2": "Senior"})
+    assert line == "Senior declined 2 item(s) after its ladder"
+
+
+def test_the_write_journal_names_the_member_rather_than_its_directory(cli, project):
+    """The directory is named by `file_base` and lives in `run.json`; the line about it names the member."""
+    script = json.loads(SCRIPT)
+    script[0]["write"] = [{"path": "seen-by-every-seat.md", "text": "one write per seat"}]
+    result = cli(["review"], cwd=project, stdin="\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=json.dumps(script)), timeout=200)
+    assert result.returncode == 0, result.console
+    journal = [line for line in result.console.splitlines() if line.startswith("journal:")]
+    assert any(line.startswith("journal: Metic wrote") for line in journal), f"no journal line naming a member: {journal}"
+    assert not any("slot" in line for line in journal), "the line names the member, not the directory it wrote into"
+    assert result.manifest["write_journal"], "the record still says which `file_base` wrote"
 
 
 def test_the_run_ends_by_printing_the_termination_and_the_transcript_tally(finished):
@@ -221,9 +252,9 @@ def test_an_item_naming_a_file_only_a_member_wrote_is_marked_as_an_artifact(tmp_
     project = tmp_path / "proj"
     (project / "src").mkdir(parents=True)
     docket = _docket_with_item("src/repro.py:1")
-    marked = mark_sandbox_items(docket, _journal({"slot1-metic": ["src/repro.py"]}), project=str(project))
+    marked = mark_sandbox_items(docket, _journal({"slot01-metic": ["src/repro.py"]}), project=str(project))
     assert "F1:sandbox_artifact" in marked
-    assert docket.items["F1"].artifact_by == "slot1-metic"
+    assert docket.items["F1"].artifact_by == "slot01-metic"
 
 
 def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
@@ -234,7 +265,7 @@ def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
     (project / "src").mkdir(parents=True)
     (project / "src" / "app.py").write_text("x = 1\n")
     docket = _docket_with_item("src/app.py:12")
-    journal = _journal({"slot1-metic": []}, {"slot1-metic": ["src/app.py"]})
+    journal = _journal({"slot01-metic": []}, {"slot01-metic": ["src/app.py"]})
     assert mark_sandbox_items(docket, journal, project=str(project)) == []
     assert docket.items["F1"].markers == []
 
@@ -257,7 +288,7 @@ def test_a_file_two_seats_both_wrote_is_marked_and_owned_by_neither(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
     docket = _docket_with_item("REPRO.md shows it")
-    journal = _journal({"slot1-metic": ["REPRO.md"], "slot2-senior": ["REPRO.md"]})
+    journal = _journal({"slot01-metic": ["REPRO.md"], "slot02-senior": ["REPRO.md"]})
     marked = mark_sandbox_items(docket, journal, project=str(project))
     assert "F1:sandbox_artifact" in marked
     assert docket.items["F1"].artifact_by == ""

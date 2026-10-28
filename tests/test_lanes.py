@@ -95,6 +95,9 @@ class FakeMembers:
     def label_for(self, file_base):
         return file_base
 
+    def display_for(self, file_base):
+        return SPEC[file_base].name
+
     def spec_for(self, file_base):
         return SPEC[self.members[file_base].file_base]
 
@@ -105,15 +108,15 @@ class FakeMembers:
 
 
 SPEC = {
-    "seat1-one": MemberSpec(name="one", slot=1, id="Agent1", file_base="seat1-one", provider="anthropic", model="claude-opus-4"),
-    "seat2-two": MemberSpec(name="two", slot=2, id="Agent2", file_base="seat2-two"),
-    "chair": MemberSpec(name="gavel", slot=0, file_base="chair"),
+    "seat1-one": MemberSpec(name="one", id="Agent1", file_base="seat1-one", provider="anthropic", model="claude-opus-4"),
+    "seat2-two": MemberSpec(name="two", id="Agent2", file_base="seat2-two"),
+    "chair": MemberSpec(name="gavel", file_base="chair"),
 }
 
 
 def council(n=2, *, concurrency=2, watchdog=0):
     agents = [
-        MemberSpec(name=name, slot=i, id=f"Agent{i}", file_base=fb, provider=SPEC[fb].provider, model=SPEC[fb].model)
+        MemberSpec(name=name, id=f"Agent{i}", file_base=fb, provider=SPEC[fb].provider, model=SPEC[fb].model)
         for i, (fb, name) in enumerate([("seat1-one", "one"), ("seat2-two", "two")][:n], start=1)
     ]
     return Council(
@@ -263,6 +266,21 @@ def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
     assert rows[0]["events"] == 2, "the row carries the activity as it stands, not as it was when the ask began"
 
 
+def test_the_digest_line_names_the_seat_it_is_watching():
+    """The digest is console: the rows carry the ids the chair answers to, the line carries the names."""
+
+    async def main():
+        board, _members, console, council_ = lanes(script={"chair": [{"text": '{"decisions": []}'}]})
+        rows = [
+            {"agent": "Agent1", "tool_name": "Read", "idle": 12.4, "elapsed": 1.0, "events": 2, "last_tool": "path=src/app.py"},
+            {"agent": "chair", "tool_name": "", "idle": 2.0, "elapsed": 1.0, "events": 0, "last_tool": ""},
+        ]
+        await Chair(council_, board, console, Brief(mode="review", project="/proj")).digest(rows)
+        return console.lines
+
+    assert "watchdog: chair pass over one Read 12s idle; gavel no tool 2s idle" in run(main())
+
+
 # --------------------------------------------------------- Lenient extraction's repairs
 
 
@@ -329,7 +347,7 @@ def test_the_second_failure_ends_the_run_naming_the_member_and_the_round():
 
     failure, restarts = run(main())
     assert restarts == 1
-    assert "seat1-one" in str(failure) and "round 4" in str(failure)
+    assert str(failure).startswith("one failed (round 4)"), "the member by name, the round it was lost in"
     assert "restart" in str(failure)
 
 

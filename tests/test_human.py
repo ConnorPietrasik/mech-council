@@ -123,7 +123,8 @@ def test_the_listing_prints_even_when_nothing_waits():
     docket = build()
     escalations.raise_question(docket, text="what is the retention policy?", asker="Agent2", item_id=None, blocking=False, round_=1)
     text = render_ask_set(docket, list(docket.questions.values()), names=NAMES, waiting=False)
-    assert "keeps working" in text and "H1" in text and "Senior (Agent2)" in text
+    assert "keeps working" in text and "H1" in text and "asked by Senior" in text
+    assert "Agent2" not in text, "the checkpoint is console: it names the asker, the id stays in `human_input.json`"
     assert "retention policy" in text
 
 

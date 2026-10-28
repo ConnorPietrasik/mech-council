@@ -277,7 +277,7 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
         out.append(f"### Round {record.round}")
         if record.summary:
             out.append(record.summary)
-        out += [f"- {line}" for line in record.lines]
+        out += [f"- {caption(agent, context.captions)}: {line}" for agent, line in record.lines]
         out.append("")
     return out
 

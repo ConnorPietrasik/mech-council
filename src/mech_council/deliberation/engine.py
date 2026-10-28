@@ -662,11 +662,10 @@ class Engine:
         )
         record = RoundRecord(round=round_, summary=summary)
         for agent in self.docket.roster:
-            record.lines.append(
-                f"{agent}: stance {len(self.shown.get(agent, []))} · "
-                f"backing {self.docket.backing.get(agent, '—') if self.docket.mode == 'plan' else 'n/a'}"
-                f" · signoff {'yes' if self.docket.signoffs.get(agent) == round_ else 'no'}"
-            )
+            backing = self.docket.backing.get(agent, "—") if self.docket.mode == "plan" else "n/a"
+            signoff = "yes" if self.docket.signoffs.get(agent) == round_ else "no"
+            shown = len(self.shown.get(agent, []))
+            record.lines.append((agent, f"stance {shown} · backing {backing} · signoff {signoff}"))
         self.docket.rounds.append(record)
         self.emit("round_summary", round=round_, signed_off=signed, states=counts)
 

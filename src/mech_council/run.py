@@ -36,6 +36,7 @@ async def orchestrate(launch, sandbox) -> int:
     console = Console(run_dir=run_dir)
     lineage = f" extends {' → '.join(council.extends)}" if council.extends else ""
     console.say(f"council `{council.name}`{lineage} · mode {council.mode} · {len(council.agents)} seat(s) + a chair")
+    console.say(f"roster {_roster(council)}")
     console.say(f"config {council.config_path}")
     console.say(f"run directory {run_dir}")
     # The sandbox, the transcript level and the trust decision are each a line, so an
@@ -163,11 +164,19 @@ def _file_bases(council: Council) -> list[str]:
     return [spec.file_base for spec in council.agents] + [council.chair.file_base]
 
 
+def _roster(council: Council) -> str:
+    """The run's one name-to-id key: every other console line speaks names alone, and ids live in the records."""
+    shown = [f"{name} ({agent_id})" for agent_id, name in council.seat_names.items()]
+    chair, key = council.chair.name, council.chair.file_base
+    shown.append(chair if chair.casefold() == key else f"{chair} ({key})")
+    return " · ".join(shown)
+
+
 async def _deliberate(council: Council, members: Members, console: Console, stop: asyncio.Event, lanes: Lanes):
     from .humanio import LineReader
 
     roster = council.seat_ids
-    names = {**council.seat_names, "chair": council.chair.name}
+    names = council.roster_names
     docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name)
     brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place)
     chair = Chair(council, lanes, console, brief)
@@ -250,7 +259,7 @@ def _emitter(console: Console, names: dict[str, str]):
 
 
 def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
-    from .render.text import caption
+    from .render.text import name_of
 
     if name == "phase0_done":
         return f"phase 0: {fields['valid']} seat(s) in, {fields.get('items', 0)} item(s) on the docket"
@@ -272,12 +281,8 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
     if name == "answer_option_rejected":
         return f"the checkpoint reported option {fields['option']} for {fields['id']}: {fields['reason']}"
     if name == "gap_declined":
-        return f"{caption(_who(fields.get('member', '')), names)} declined {len(fields.get('items') or [])} item(s) after its ladder"
+        return f"{name_of(fields.get('member', ''), names)} declined {len(fields.get('items') or [])} item(s) after its ladder"
     return ""
-
-
-def _who(label: str) -> str:
-    return label
 
 
 async def _teardown(members: Members | None, console: Console, *, in_place: bool = False):
@@ -297,13 +302,16 @@ async def _teardown(members: Members | None, console: Console, *, in_place: bool
 def _journal(council: Council, sandbox, baselines: dict, console: Console) -> list[dict]:
     if not baselines:  # in place there is no upper layer to read: members wrote in the project itself
         return []
+    from .render.text import name_of
+
     out = []
     for base in _file_bases(council):
+        who = name_of(base, council.display_names)
         try:
             changes = journal_mod.journal(sandbox.upper(base), sandbox.lower_fd)
             used = journal_mod.bytes_used(sandbox.upper(base))
         except OSError as failure:
-            console.say(f"journal: {base} unreadable ({failure})")
+            console.say(f"journal: {who} unreadable ({failure})")
             continue
         before = set(baselines.get(base) or {})
         rows = {key: sorted(set(values) - before) for key, values in changes.items()}
@@ -311,7 +319,7 @@ def _journal(council: Council, sandbox, baselines: dict, console: Console) -> li
         touched = sum(len(rows.get(key, [])) for key in ("created", "modified", "deleted"))
         if touched:
             console.say(
-                f"journal: {base} wrote {used} bytes · "
+                f"journal: {who} wrote {used} bytes · "
                 + ", ".join(f"{len(rows[key])} {key}" for key in ("created", "modified", "deleted") if rows.get(key))
             )
         out.append(entry)
@@ -404,6 +412,7 @@ def _report_context(
         report_name=council.adapter.report_name,
         goal=council.goal,
         aborted_reason=aborted,
+        captions=council.roster_names,
     )
 
 

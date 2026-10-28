@@ -187,13 +187,14 @@ def test_the_reference_config_loads_and_convenes_every_council(tmp_path, pi_on_p
     assert plan.agents[1].persona is None
 
 
-def test_convening_assigns_ids_slots_and_file_bases(tmp_path):
+def test_convening_assigns_ids_and_file_bases(tmp_path):
     council = convene(tmp_path, body())
     assert [a.id for a in council.agents] == ["Agent1", "Agent2"]
-    assert [a.slot for a in council.agents] == [1, 2]
-    assert [a.file_base for a in council.agents] == ["slot1-a", "slot2-b"]
+    assert [a.file_base for a in council.agents] == ["slot01-a", "slot02-b"]
     assert council.chair.id is None and council.chair.file_base == "chair"
-    assert council.member_file_bases == ["slot1-a", "slot2-b", "chair"]
+    assert council.member_file_bases == ["slot01-a", "slot02-b", "chair"]
+    assert council.roster_names == {"Agent1": "A", "Agent2": "B", "chair": "Chair"}, "the console's key from protocol label to name"
+    assert council.display_names == {"slot01-a": "A", "slot02-b": "B", "chair": "Chair"}
     assert council.adapter.item_noun_plural == "findings"
 
 
@@ -255,7 +256,7 @@ def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
     assert leaf.mode == "review" and leaf.max_concurrency == 4, "unstated everywhere: [defaults], then the built-in"
     assert convene_chain(tmp_path, "mid").extends == ["_base"]
     # Slots and file bases are assigned after the merge, so an inherited roster needs no bookkeeping.
-    assert [a.file_base for a in leaf.agents] == ["slot1-a", "slot2-b"]
+    assert [a.file_base for a in leaf.agents] == ["slot01-a", "slot02-b"]
 
 
 def test_flags_still_beat_the_whole_chain(tmp_path):

@@ -53,14 +53,9 @@ class MemberSpec:
     provider: str | None = None
     model: str | None = None
     persona: str | None = None
-    slot: int = 0
     id: str | None = None  # `AgentN`, assigned at convening
     file_base: str = ""
     model_warning: str | None = None
-
-    @property
-    def is_chair(self) -> bool:
-        return self.slot == 0
 
 
 @dataclass
@@ -110,6 +105,16 @@ class Council:
     @property
     def seat_names(self) -> dict[str, str]:
         return dict(zip(self.seat_ids, [agent.name for agent in self.agents]))
+
+    @property
+    def roster_names(self) -> dict[str, str]:
+        """Protocol label → the name to print for it, the chair's `chair` included."""
+        return {**self.seat_names, self.chair.file_base: self.chair.name}
+
+    @property
+    def display_names(self) -> dict[str, str]:
+        """`file_base` → the name to print for it: names are unique across the whole roster."""
+        return {spec.file_base: spec.name for spec in (*self.agents, self.chair)}
 
 
 def _check(value: object, kind: str, where: str, key: str) -> object:
@@ -527,10 +532,8 @@ def convene(
     from .naming import chair_file_base, seat_file_base
 
     for index, agent in enumerate(agents, 1):
-        agent.slot = index
         agent.id = f"Agent{index}"
         agent.file_base = seat_file_base(index, agent.name)
-    chair.slot = 0
     chair.id = None
     chair.file_base = chair_file_base()
 

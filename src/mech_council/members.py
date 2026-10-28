@@ -44,6 +44,12 @@ class Members:
                 return spec.id or spec.file_base
         return file_base
 
+    def display_for(self, file_base: str) -> str:
+        """The name for a human to read; the protocol, the events and `agents/` all keep speaking ids and file bases."""
+        from .render.text import name_of
+
+        return name_of(file_base, self.council.display_names)
+
     def spec_for(self, file_base: str) -> MemberSpec:
         if file_base == self.council.chair.file_base:
             return self.council.chair
@@ -60,7 +66,7 @@ class Members:
             if verdict is None:
                 return
             self.console.event(verdict, member=file_base, id=self.members[file_base].id, tool=record.get("toolName"), inferred=True)
-            self.console.say(f"{verdict} (inferred from an erroring tool result) in {file_base}")
+            self.console.say(f"{verdict} (inferred from an erroring tool result) in {self.display_for(file_base)}")
 
         return handle
 
@@ -91,44 +97,45 @@ class Members:
         results = await asyncio.gather(*(self._start_one(spec) for spec in specs), return_exceptions=True)
         for spec, result in zip(specs, results):
             if isinstance(result, BaseException):
-                raise MemberGone(f"{spec.file_base}: {result}") from result
+                raise MemberGone(f"{spec.name}: {result}") from result
 
     async def _start_one(self, spec: MemberSpec) -> None:
-        label = spec.id or "chair"
+        label, who = spec.id or "chair", spec.name
         try:
             member = await self.spawn_one(spec)
         except spawn.LauncherSetupError as failure:
             where = "pi never came up" if self.council.in_place else "the member namespace never came up"
-            self.console.say(f"{label}'s {where}: {failure}")
+            self.console.say(f"{who}'s {where}: {failure}")
             raise
         except OSError as failure:
             self.console.event("member_spawn_failed", member=label, file_base=spec.file_base, error=str(failure))
-            raise MemberGone(f"{label} could not be spawned: {failure}") from failure
+            raise MemberGone(f"{who} could not be spawned: {failure}") from failure
         try:
             await member.rpc.get_state()  # the probe: it answers, or it is not there
         except (ProtocolError, ChildGone, TimeoutError, OSError) as failure:
             await self.dispose_one(member)
             self.console.event("member_spawn_failed", member=label, file_base=spec.file_base, error=str(failure))
-            raise MemberGone(f"{label} did not answer get_state: {failure}") from failure
+            raise MemberGone(f"{who} did not answer get_state: {failure}") from failure
         warning = _stderr_warning(member)
         if warning:
             self.manifest.set_model_warning(spec.file_base, warning)
             self.console.event("council_unknown_model", member=label, warning=warning)
-            self.console.say(f"{label}: {warning}")
+            self.console.say(f"{who}: {warning}")
         model = spec.model or "pi default"
         where = f" · ns {member.namespace}" if member.namespace is not None else ""
-        self.console.say(f"{label} up · {spec.provider or 'default provider'}/{model}{where}")
+        self.console.say(f"{who} up · {spec.provider or 'default provider'}/{model}{where}")
 
     async def restart(self, file_base: str, *, why: str) -> spawn.Member:
+        who = self.display_for(file_base)
         if self.stopping:
-            raise MemberGone(f"{file_base}: restart dropped, the run is stopping")
+            raise MemberGone(f"{who}: restart dropped, the run is stopping")
         old = self.members.get(file_base)
         if old is not None:
             # The dead spawn's ns fd stays open until after the sweep: restart does not close it, so its inode remains in the sweep set.
             await lifecycle.dispose(old)
             self.members[file_base] = old  # keep the record; fds still held
         self.console.event("member_restart", member=file_base, reason=why)
-        self.console.say(f"restarting {file_base} ({why})")
+        self.console.say(f"restarting {who} ({why})")
         spec = self.spec_for(file_base)
         member = await self.spawn_one(spec)
         if old is not None:
@@ -138,7 +145,7 @@ class Members:
         try:
             await member.rpc.get_state()
         except (ProtocolError, ChildGone, TimeoutError) as failure:
-            raise MemberGone(f"{file_base} restarted but did not answer get_state: {failure}") from failure
+            raise MemberGone(f"{who} restarted but did not answer get_state: {failure}") from failure
         return member
 
     # -- dispose -------------------------------------------------------------

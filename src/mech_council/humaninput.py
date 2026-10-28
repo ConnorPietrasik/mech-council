@@ -56,14 +56,14 @@ def parse_line(text: str) -> Line:
 
 
 def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool) -> str:
-    from .render.text import caption
+    from .render.text import name_of
 
     if not listing:
         return "the council has no question for you right now"
     lines = ["the council needs you" if waiting else "open questions (the run keeps working):"]
     for question in listing:
         where = f" on {question.item_id}" if question.item_id else ""
-        askers = ", ".join(caption(a, names) for a in question.askers) or "the chair"
+        askers = ", ".join(name_of(a, names) for a in question.askers) or "the chair"
         lines.append(f"  {question.id}{where} [{effective_class(docket, question)}] asked by {askers} (round {question.raised_round})")
         lines.append(f"    {question.text}")
         if question.context:
@@ -204,12 +204,14 @@ class Checkpoint:
             self.console.say(f"no seat is available to explain {qid}")
             return None
         from .prompts import common
+        from .render.text import name_of
 
-        self.console.say(f"asking {asker} to explain {qid}; the run stays parked and this is the only ask in flight")
+        who = name_of(asker, self.names)
+        self.console.say(f"asking {who} to explain {qid}; the run stays parked and this is the only ask in flight")
         outcome = await self.ask_seat(asker, common.explain_ask(target.text, question), round_=self.docket.round, phase="explain")
         text = (getattr(outcome, "text", "") or "").strip()
         if text:
-            self.console.say(f"{qid}, {asker}'s recommendation: {_clip(text)}")
+            self.console.say(f"{qid}, {who}'s recommendation: {_clip(text)}")
         return text
 
 

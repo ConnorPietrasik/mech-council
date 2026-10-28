@@ -66,7 +66,7 @@ async def live_member(tmp_path, *, env=None) -> Member:
         sys.executable,
         FAKE_PI,
         "--name",
-        "slot1-a",
+        "slot01-a",
         "--mode",
         "rpc",
         "--approve",
@@ -78,10 +78,10 @@ async def live_member(tmp_path, *, env=None) -> Member:
         start_new_session=True,
     )
     assert proc.stdout is not None and proc.stdin is not None, "both halves were PIPEd just above"
-    rpc = PiRpc(label="slot1-a", stdout=proc.stdout, stdin=proc.stdin)
+    rpc = PiRpc(label="slot01-a", stdout=proc.stdout, stdin=proc.stdin)
     rpc.start()
     return Member(
-        file_base="slot1-a",
+        file_base="slot01-a",
         id="Agent1",
         pid=proc.pid,
         pgid=os.getpgid(proc.pid),

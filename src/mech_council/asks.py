@@ -176,20 +176,21 @@ class Lanes:
     ) -> Outcome:
         file_base = self.members.file_base_for(agent_id)
         label = self.members.label_for(file_base)
+        who = self.members.display_for(file_base)
         outcome = Outcome()
         started = time.monotonic()
         text = await self._prompt_with_restart(
             file_base, message, label=label, round_=round_, timeout=timeout, outcome=outcome, classify_unusable=classify_unusable
         )
         # Every completed ask prints with its duration, so a slow seat is visible while the run is live rather than only in a post-mortem.
-        self.console.say(f"{label}: {kind} answered in {time.monotonic() - started:.1f}s{round_note(round_)}")
+        self.console.say(f"{who}: {kind} answered in {time.monotonic() - started:.1f}s{round_note(round_)}")
         parsed = extract(kind, text, **parse_kw)
         while needs_repair(parsed) and outcome.repairs < REPAIR_ASKS:
             outcome.repairs += 1
             hint = "; ".join(getattr(parsed, "errors", []) or []) or "the answer did not match the schema"
             outcome.errors = list(getattr(parsed, "errors", []) or [])
             self.console.event("verdict_rejected", member=label, **round_field(round_), reason=hint, repair=outcome.repairs, phase=phase)
-            self.console.say(f"{label}: answer refused ({hint}) — repair {outcome.repairs}/{REPAIR_ASKS}")
+            self.console.say(f"{who}: answer refused ({hint}) — repair {outcome.repairs}/{REPAIR_ASKS}")
             text = await self._prompt_with_restart(
                 file_base,
                 common.repair_ask(self.council.mode, phase, hint, text),
@@ -214,7 +215,7 @@ class Lanes:
                 final=True,
                 phase=phase,
             )
-            self.console.say(f"{label}: message rejected after {outcome.repairs} repair re-ask(s)")
+            self.console.say(f"{who}: message rejected after {outcome.repairs} repair re-ask(s)")
             return outcome
         outcome.data = parsed
         return outcome
@@ -231,6 +232,7 @@ class Lanes:
         classify_unusable: bool,
     ) -> str:
         spec = self.members.spec_for(file_base)
+        who = self.members.display_for(file_base)
         started = time.monotonic()
         detail = "no answer"
         for attempt in (0, 1):
@@ -245,20 +247,20 @@ class Lanes:
                     outcome.seconds += time.monotonic() - started
                     return answer.text
                 if classify_unusable and first_prompt:
-                    raise AskUnusable(label, spec.provider, spec.model, detail, self.prompts.get(file_base, 0))
+                    raise AskUnusable(who, spec.provider, spec.model, detail, self.prompts.get(file_base, 0))
             except (ChildGone, ProtocolError, TimeoutError, OSError) as error:
                 detail = str(error) or type(error).__name__
             if attempt == 1:
-                raise AskLost(label, spec.provider, spec.model, round_, f"{detail} (after a restart and one re-ask)")
+                raise AskLost(who, spec.provider, spec.model, round_, f"{detail} (after a restart and one re-ask)")
             self.console.event("ask_failed", member=label, **round_field(round_), error=detail)
-            self.console.say(f"{label}: ask failed ({detail}) — one restart and one re-ask")
+            self.console.say(f"{who}: ask failed ({detail}) — one restart and one re-ask")
             try:
                 await self.members.restart(file_base, why=detail)
             except Exception as restart_error:
                 raise AskLost(
-                    label, spec.provider, spec.model, round_, f"{detail}; the restart failed too: {restart_error}"
+                    who, spec.provider, spec.model, round_, f"{detail}; the restart failed too: {restart_error}"
                 ) from restart_error
-        raise AskLost(label, spec.provider, spec.model, round_, detail)  # unreachable
+        raise AskLost(who, spec.provider, spec.model, round_, detail)  # unreachable
 
     async def _prompt(self, file_base: str, message: str, *, timeout: float | None, label: str) -> Answer:
         member = self.members.members.get(file_base)
