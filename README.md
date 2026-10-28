@@ -22,11 +22,9 @@ you get a report with the findings.
 ## Install
 
 ```sh
-pip install mech-council
+pipx install mech-council
 mech-council --help
 ```
-
-From a clone, install it editable instead: `pip install -e ".[test,dev]"`.
 
 ## Quick start
 
