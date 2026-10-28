@@ -114,6 +114,18 @@ def convene(tmp_path, text: str, name: str = "review", **kw):
 
 PI = os.path.abspath(os.path.join(os.path.dirname(__file__), "support", "fake_pi.py"))
 
+
+@pytest.fixture
+def pi_on_path(tmp_path_factory, monkeypatch):
+    """A `pi` on PATH for a config that states no `pi_cli`, so the resolution is this test's, not the box's."""
+    bin_dir = tmp_path_factory.mktemp("bin")
+    shim = bin_dir / "pi"
+    shutil.copyfile(PI, shim)
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return str(shim)
+
+
 BODY = """\
 [defaults]
 pi_cli = "{pi}"
@@ -144,11 +156,13 @@ def body(**replacements) -> str:
 # --------------------------------------------------------------------------- the reference config
 
 
-def test_the_reference_config_loads_and_convenes_every_council(tmp_path):
+def test_the_reference_config_loads_and_convenes_every_council(tmp_path, pi_on_path):
     path = write(tmp_path, REFERENCE_CONFIG)
     loaded = config_mod.load_config(path)
     assert loaded.names() == ["review", "review-staged", "review-fast", "plan"], "a `_` template is not a council you convene"
     review = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert review.pi_cli == os.path.realpath(pi_on_path), "a config that states no pi_cli takes the one on PATH"
+    assert "fake-pi" in review.pi_version
     assert [a.name for a in review.agents] == ["Metic", "Senior", "Coworker"]
     assert review.chair.provider == "omnissiah"
     assert review.max_rounds == 6 and review.max_concurrency == 3

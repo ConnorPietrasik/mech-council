@@ -82,9 +82,37 @@ def tmpfs(target: str, *, size_mib: int, read_only: bool = False) -> None:
     mount("tmpfs", target, "tmpfs", MS_RDONLY if read_only else 0, options)
 
 
+def is_mounted(path: str) -> bool:
+    """The mountinfo line is `id parent id major:minor root opts - fstype source superopts`: the mount point is field 5, on the
+    *left* of the `-`, and the field after the `-` is the *fstype*.
+    """
+    wanted = _mountinfo_escape(path)
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as handle:
+            for line in handle:
+                left, sep, _ = line.strip().partition(" - ")
+                fields = left.split(" ")
+                if sep and len(fields) > 4 and fields[4] == wanted:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _mountinfo_escape(path: str) -> str:
+    """mountinfo escapes space, tab, newline and backslash as `\\040` &c."""
+    for character, code in (("\\", "\\134"), (" ", "\\040"), ("\t", "\\011"), ("\n", "\\012")):
+        path = path.replace(character, code)
+    return path
+
+
 def overlay(lower: str, root: str, view: str) -> None:
     for name in ("up", "work", "view"):
         os.makedirs(os.path.join(root, name), exist_ok=True)
+    if is_mounted(view):
+        # A second overlay would shadow the upper the restarted member's own earlier writes sit in, and the kernel refuses one
+        # only when it mounts with index=on — Ubuntu ships index=off — so this guard is what keeps one mount per slot.
+        raise MountError(f"overlay({view!r} is already a mount point)", _errno.EBUSY)
     mount("overlay", view, "overlay", 0, f"lowerdir={lower},upperdir={root}/up,workdir={root}/work")
 
 

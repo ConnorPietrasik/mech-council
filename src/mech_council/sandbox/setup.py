@@ -36,7 +36,7 @@ class Sandbox:
     def prepare_member(self, file_base: str) -> None:
         root = self.slot_dir(file_base)
         os.makedirs(f"{root}/scratch", exist_ok=True)
-        if _is_mounted(self.view(file_base)):
+        if m.is_mounted(self.view(file_base)):
             return
         m.overlay(self.project, root, self.view(file_base))
 
@@ -112,27 +112,3 @@ def establish(
     sandbox.lower_fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY)  # the journal's eye
     sandbox.members = list(members)
     return sandbox
-
-
-def _is_mounted(path: str) -> bool:
-    """The mountinfo line is `id parent id major:minor root opts - fstype source superopts`: the mount point is field 5, on the
-    *left* of the `-`, and the field after the `-` is the *fstype*.
-    """
-    wanted = _mountinfo_escape(path)
-    try:
-        with open("/proc/self/mountinfo", encoding="utf-8") as handle:
-            for line in handle:
-                left, sep, _ = line.strip().partition(" - ")
-                fields = left.split(" ")
-                if sep and len(fields) > 4 and fields[4] == wanted:
-                    return True
-    except OSError:
-        pass
-    return False
-
-
-def _mountinfo_escape(path: str) -> str:
-    """mountinfo escapes space, tab, newline and backslash as `\\040` &c."""
-    for character, code in (("\\", "\\134"), (" ", "\\040"), ("\t", "\\011"), ("\n", "\\012")):
-        path = path.replace(character, code)
-    return path

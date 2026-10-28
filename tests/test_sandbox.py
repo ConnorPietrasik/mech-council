@@ -21,7 +21,7 @@ from mech_council.sandbox import journal as journal_mod
 from mech_council.sandbox import mount as m
 from mech_council.sandbox import mount as mount_mod
 from mech_council.sandbox.memberns import SCRATCH_NAME, SetupFailure, setup_member_namespace
-from mech_council.sandbox.setup import Sandbox, _is_mounted, establish
+from mech_council.sandbox.setup import Sandbox, establish
 from tests.support.ground import FIXTURE_ROOT, fstype_under
 from tests.support.namespaces import in_mapped_child
 
@@ -541,13 +541,14 @@ def _alive(pid: int) -> bool:
 
 
 def test_a_second_overlay_on_one_slot_is_busy_and_the_idempotence_guard_sees_it(tree):
-    """One mount per slot; a restarted member keeps using the same upper."""
+    """One mount per slot, and `overlay()` is what holds that line: the kernel's exclusive-upperdir lock only bites when it
+    mounts with index=on, and Ubuntu ships index=off.  A restarted member keeps using the same upper."""
 
     def plan(box, tell):
         slot = box.slot_dir("seat1-a")
-        tell({"mounted": _is_mounted(box.view("seat1-a"))})
+        tell({"mounted": m.is_mounted(box.view("seat1-a"))})
         box.prepare_member("seat1-a")  # the restart path: idempotent, not EBUSY
-        tell({"still_mounted": _is_mounted(box.view("seat1-a"))})
+        tell({"still_mounted": m.is_mounted(box.view("seat1-a"))})
         try:
             mount_mod.overlay(tree["project"], slot, box.view("seat1-a"))
             tell({"second": "mounted"})
@@ -624,8 +625,8 @@ def test_establish_in_place_mounts_nothing_and_hands_each_seat_scratch(tree):
     for file_base in tree["members"]:
         assert os.path.isdir(box.scratch(file_base))
         assert box.tmpdir(file_base) == box.scratch(file_base), "the member's own directory, outside the project"
-        assert not _is_mounted(box.slot_dir(file_base)), "a slot is a directory in place, not a mount"
-    assert not _is_mounted(box.sandbox_dir)
+        assert not m.is_mounted(box.slot_dir(file_base)), "a slot is a directory in place, not a mount"
+    assert not m.is_mounted(box.sandbox_dir)
     sandboxed = Sandbox(project=tree["project"], runs_dir=tree["runs"], sandbox_dir=box.sandbox_dir)
     assert sandboxed.tmpdir("chair") == f"{tree['project']}/{SCRATCH_NAME}", "inside the view, the bind is still the scratch"
     box.close()
