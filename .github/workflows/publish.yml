@@ -1,0 +1,91 @@
+# One-time setup for trusted publishing, both sides:
+#   1. PyPI, Account -> Publishing -> add a GitHub Actions publisher: owner `ConnorPietrasik`,
+#      repository `mech-council`, workflow `publish.yml`, environment `pypi`, and the project
+#      name spelled exactly as pyproject spells it. The project does not exist yet, so add it
+#      as a *pending* publisher: it reserves no name and expires on a TTL, so register it and
+#      tag in the same sitting. The first upload creates the project. No API token lives here —
+#      the job's OIDC token is the credential (`id-token: write` below).
+#   2. This repository -> Settings -> Environments -> `pypi`. The name has to match both the
+#      job's `environment` below and the field given to PyPI, or the token's claims disagree and
+#      PyPI answers `invalid-publisher`. Required reviewers are optional.
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+
+name: Publish (PyPI)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to publish, e.g. v1.2.3"
+        required: true
+
+# Uploads queue behind an in-flight one and are never cancelled.
+concurrency:
+  group: pypi
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# `-eo pipefail` for every step; the reason is in ci.yml.
+defaults:
+  run:
+    shell: bash
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  gate:
+    name: CI gate on the tagged commit
+    uses: ./.github/workflows/ci.yml
+    # Deleting a tag fires a push event too.
+    if: github.event_name == 'push' && github.event.created
+
+  publish:
+    name: Build and upload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: gate
+    # always(): a skipped gate would skip this too, and the two skip cases want different
+    # outcomes. A dispatch checks out the tag it names but runs from the branch tip, so there
+    # is no commit here for the gate to certify; PyPI refusing an existing version is the
+    # backstop against a pointless re-run.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.gate.result == 'success')
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mech-council/
+    permissions:
+      contents: read
+      id-token: write
+      # The upload stays in this file: a reusable workflow cannot itself be a trusted publisher
+      # (pypi/warehouse#11096), and the claim PyPI matches is this file's name.
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The tag, not the branch tip.
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Build
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q build twine
+          .venv/bin/python -m build --outdir dist
+          .venv/bin/twine check dist/*
+      - name: The tag and the package have to agree
+        # The version is dynamic, so a tag can name 1.2.3 while the tree says 1.2.2. Read it
+        # back off the installed wheel rather than importing it.
+        run: |
+          .venv/bin/pip install -q dist/*.whl
+          version=$(.venv/bin/python -c "import importlib.metadata as md; print(md.version('mech-council'))")
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "::error::tag ${TAG} does not match the built version v${version}" >&2
+            exit 1
+          fi
+      - name: Upload
+        uses: pypa/gh-action-pypi-publish@v1.14.3

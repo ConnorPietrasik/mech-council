@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # publish.yml gates a release tag on this suite.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Naming `bash` gives every step `-eo pipefail`; the default `bash -e {0}` would let the two
+# steps that pipe the suite into a log report tee's 0 over a red run.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  suite:
+    # `ubuntu-latest` moves to 26.04 in November 2026; move the pin when the probe passes there.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Create the venv every command runs from
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[test,dev]"
+      - name: Make the box able to mount, then prove it can
+        run: |
+          # actions/runner-images#10443: 24.04's AppArmor denies unprivileged user namespaces.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || echo "no such knob on this box"
+          # One overlay through the harness's own handshake, so a box that cannot mount says so
+          # here rather than in a hundred EPERMs.
+          .venv/bin/python - <<'PY'
+          import os
+          import shutil
+
+          from mech_council.sandbox import mount as m
+          from tests.support.ground import FIXTURE_ROOT, fstype_under
+          from tests.support.namespaces import in_mapped_child
+
+
+          def build(ground: str) -> int:
+              m.private_recursive("/")
+              m.overlay(f"{ground}/lower", f"{ground}/slot", f"{ground}/slot/view")
+              return m.namespace_id()
+
+
+          ground = f"{FIXTURE_ROOT}/ci-probe"
+          os.makedirs(f"{ground}/lower", exist_ok=True)
+          try:
+              mntns = in_mapped_child(build, ground)
+          finally:
+              shutil.rmtree(ground, ignore_errors=True)
+          print(f"the box mounts: mapped userns, mountns {mntns}, overlay on {FIXTURE_ROOT} "
+                f"({fstype_under(FIXTURE_ROOT)})")
+          PY
+      - name: Ruff
+        run: |
+          .venv/bin/ruff check .
+          .venv/bin/ruff format --check .
+      - name: Mypy
+        run: .venv/bin/mypy
+      - name: Pytest
+        run: |
+          # -rs puts the skip lines the last step reads into the log.
+          .venv/bin/pytest -q -rs | tee "$RUNNER_TEMP/pytest.log"
+      - name: Build and check the distributions
+        run: |
+          .venv/bin/pip install -q build twine
+          .venv/bin/python -m build --outdir dist
+          .venv/bin/twine check dist/*
+      - name: The suite runs from an unpacked sdist
+        run: |
+          # MANIFEST.in's claim, checked. Its own venv, so a stray path in the checkout cannot
+          # be what made this pass.
+          python -m venv .venv-sdist
+          tarball=$(ls dist/*.tar.gz)
+          .venv-sdist/bin/pip install -q "${tarball}[test]"
+          mkdir -p unpacked
+          tar -xzf "$tarball" -C unpacked --strip-components=1
+          cd unpacked
+          ../.venv-sdist/bin/pytest -q -rs | tee "$RUNNER_TEMP/sdist.log"
+      - name: Nothing sat out
+        run: |
+          # The sandbox family may skip only when its lower would sit inside an overlay, and a
+          # checkout never does. grep answers a missing log with 2, which reads as "nothing
+          # skipped", so ask each log for the summary line first.
+          for log in pytest.log sdist.log; do
+            if ! grep -q ' passed' "$RUNNER_TEMP/$log"; then
+              echo "::error::$RUNNER_TEMP/$log holds no test summary: that suite never reported" >&2
+              exit 1
+            fi
+          done
+          if grep -h '^SKIPPED' "$RUNNER_TEMP/pytest.log" "$RUNNER_TEMP/sdist.log"; then
+            echo "::error::something skipped: this run proved less than it appears to" >&2
+            exit 1
+          fi
+          echo "no skips: the sandbox family ran"

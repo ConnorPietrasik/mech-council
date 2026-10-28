@@ -17,15 +17,7 @@ you get a report with the findings.
   pi's RPC mode over pipes — one long-lived child per seat, JSONL in both directions.
 - **Linux with unprivileged user and mount namespaces**, to sandbox the members. Each member runs in its
   own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
-  `--privileged` or a seccomp profile that allows `unshare(2)`.
-- **Anywhere else the council runs in place** — macOS, BSD, a container with `unshare` blocked. Pass
-  `--in-place` (or set `in_place = true`) on Linux to say so yourself; a kernel that refuses `unshare`
-  there is a refusal with the flag named in it, never a silent downgrade. In place is described under
-  [The sandbox](#the-sandbox).
-
-If the kernel won't cooperate, you'll get a descriptive error. To check a container before convening anything, run the sandbox
-family (`pytest tests/test_sandbox.py -q`): it builds the real sandbox — namespaces, overlays, masks, the exit sweep — through
-the product's own code.
+  `--privileged` or a seccomp profile that allows `unshare(2)`. `--in-place` is the default otherwise.
 
 ## Install
 
@@ -268,6 +260,18 @@ The lint set is chosen rather than defaulted: real defects (pyflakes, syntax err
 and four habits — sorted imports, no dead `noqa`, stated `subprocess` intent, and a handle
 either closed in place or declared long-lived. `testdata/toy-project` is excluded from both
 tools on purpose.
+
+## CI
+
+GitHub Actions runs that bar on every push to `master` and on every pull request
+([`.github/workflows/ci.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/ci.yml)):
+ruff, mypy, the offline suite, and then the same suite again from an unpacked sdist.
+
+`pytest -m slow`, the one family that spends tokens, stays out of CI: it wants a real `pi` and a real budget.
+
+Tagging a release publishes it ([`publish.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/publish.yml)):
+the suite on the tagged commit, a build whose version has to match the tag, then the upload through PyPI's
+trusted publishing, so no token lives in this repository.
 
 ## License
 
