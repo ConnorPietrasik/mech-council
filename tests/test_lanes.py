@@ -205,7 +205,7 @@ def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
         async def chair():
             await asyncio.sleep(0.1)  # let the seat take the only slot
             order.append("chair-start")
-            outcome = await board.ask_chair("digest?", round_=1, phase="digest", kind="watchdog", timeout=5)
+            outcome = await board.ask_chair("digest?", round_=None, phase="digest", kind="watchdog", timeout=5)
             order.append("chair-end")
             return outcome
 

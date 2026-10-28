@@ -15,6 +15,15 @@ from .prompts import common
 REPAIR_ASKS = 2  # the only repair count there is
 
 
+def round_note(round_: int | None) -> str:
+    """A digest pass answers beside the deliberation, not inside a round, so it must not claim one."""
+    return "" if round_ is None else f" (round {round_})"
+
+
+def round_field(round_: int | None) -> dict[str, int]:
+    return {} if round_ is None else {"round": round_}
+
+
 class AskUnusable(Exception):
     def __init__(self, label: str, provider: str | None, model: str | None, detail: str, prompts: int) -> None:
         super().__init__(
@@ -25,8 +34,8 @@ class AskUnusable(Exception):
 
 
 class AskLost(Exception):
-    def __init__(self, label: str, provider: str | None, model: str | None, round_: int, detail: str) -> None:
-        super().__init__(f"{label} failed in round {round_}: {detail}")
+    def __init__(self, label: str, provider: str | None, model: str | None, round_: int | None, detail: str) -> None:
+        super().__init__(f"{label} failed{round_note(round_)}: {detail}")
         self.label, self.provider, self.model = label, provider, model
         self.round, self.detail = round_, detail
 
@@ -97,7 +106,7 @@ class Lanes:
         self,
         message: str,
         *,
-        round_: int,
+        round_: int | None,
         phase: str,
         kind: str,
         timeout: float,
@@ -158,7 +167,7 @@ class Lanes:
         agent_id: str,
         message: str,
         *,
-        round_: int,
+        round_: int | None,
         kind: str,
         parse_kw: dict,
         phase: str,
@@ -173,13 +182,13 @@ class Lanes:
             file_base, message, label=label, round_=round_, timeout=timeout, outcome=outcome, classify_unusable=classify_unusable
         )
         # Every completed ask prints with its duration, so a slow seat is visible while the run is live rather than only in a post-mortem.
-        self.console.say(f"{label}: {kind} answered in {time.monotonic() - started:.1f}s (round {round_})")
+        self.console.say(f"{label}: {kind} answered in {time.monotonic() - started:.1f}s{round_note(round_)}")
         parsed = extract(kind, text, **parse_kw)
         while needs_repair(parsed) and outcome.repairs < REPAIR_ASKS:
             outcome.repairs += 1
             hint = "; ".join(getattr(parsed, "errors", []) or []) or "the answer did not match the schema"
             outcome.errors = list(getattr(parsed, "errors", []) or [])
-            self.console.event("verdict_rejected", member=label, round=round_, reason=hint, repair=outcome.repairs, phase=phase)
+            self.console.event("verdict_rejected", member=label, **round_field(round_), reason=hint, repair=outcome.repairs, phase=phase)
             self.console.say(f"{label}: answer refused ({hint}) — repair {outcome.repairs}/{REPAIR_ASKS}")
             text = await self._prompt_with_restart(
                 file_base,
@@ -197,7 +206,13 @@ class Lanes:
             outcome.errors = list(getattr(parsed, "errors", []) or []) or ["no JSON object in the answer"]
             outcome.rejected = True
             self.console.event(
-                "verdict_rejected", member=label, round=round_, reason=outcome.errors[0], repair=outcome.repairs, final=True, phase=phase
+                "verdict_rejected",
+                member=label,
+                **round_field(round_),
+                reason=outcome.errors[0],
+                repair=outcome.repairs,
+                final=True,
+                phase=phase,
             )
             self.console.say(f"{label}: message rejected after {outcome.repairs} repair re-ask(s)")
             return outcome
@@ -205,7 +220,15 @@ class Lanes:
         return outcome
 
     async def _prompt_with_restart(
-        self, file_base: str, message: str, *, label: str, round_: int, timeout: float | None, outcome: Outcome, classify_unusable: bool
+        self,
+        file_base: str,
+        message: str,
+        *,
+        label: str,
+        round_: int | None,
+        timeout: float | None,
+        outcome: Outcome,
+        classify_unusable: bool,
     ) -> str:
         spec = self.members.spec_for(file_base)
         started = time.monotonic()
@@ -227,7 +250,7 @@ class Lanes:
                 detail = str(error) or type(error).__name__
             if attempt == 1:
                 raise AskLost(label, spec.provider, spec.model, round_, f"{detail} (after a restart and one re-ask)")
-            self.console.event("ask_failed", member=label, round=round_, error=detail)
+            self.console.event("ask_failed", member=label, **round_field(round_), error=detail)
             self.console.say(f"{label}: ask failed ({detail}) — one restart and one re-ask")
             try:
                 await self.members.restart(file_base, why=detail)

@@ -19,7 +19,6 @@ class Chair:
         self.lanes = lanes
         self.console = console
         self.brief = brief
-        self.passes = 0
 
     # -- publication passes ------------------------------------------------------
 
@@ -57,10 +56,8 @@ class Chair:
     async def digest(self, rows: list[dict]) -> dict | None:
         if not rows:
             return None
-        self.passes += 1
         self.console.event(
             "watchdog_pass",
-            pass_number=self.passes,
             agents=[row["agent"] for row in rows],
             tools=[row.get("tool_name") or "" for row in rows],
             elapsed=[row["elapsed"] for row in rows],
@@ -69,15 +66,13 @@ class Chair:
         self.console.say(_digest_line(rows))
         message = self.brief.watchdog(rows, mode=self.council.mode)
         try:
-            outcome = await self.lanes.ask_chair(
-                message, round_=self.passes, phase="digest", kind="watchdog", timeout=WATCHDOG_PASS_TIMEOUT_S
-            )
+            outcome = await self.lanes.ask_chair(message, round_=None, phase="digest", kind="watchdog", timeout=WATCHDOG_PASS_TIMEOUT_S)
         except Exception as failure:
             # The pass itself failed.  That says nothing about any member.
-            self.console.event("watchdog_pass_failed", pass_number=self.passes, error=str(failure))
+            self.console.event("watchdog_pass_failed", error=str(failure))
             return None
         if outcome.rejected or outcome.data is None:
-            self.console.event("watchdog_keep_all", pass_number=self.passes, reason="; ".join(outcome.errors) or "no JSON object")
+            self.console.event("watchdog_keep_all", reason="; ".join(outcome.errors) or "no JSON object")
             self.console.say("watchdog: the chair's pass was unreadable after both repair re-asks — every agent is kept")
             return None
         return outcome.data.data
