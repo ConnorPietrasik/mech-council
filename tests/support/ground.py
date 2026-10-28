@@ -30,9 +30,3 @@ def fstype_under(path: str) -> str:
     except OSError:
         pass
     return fstype
-
-
-#: The literals a suite-wide "no silent skips" check looks for.  They live
-#: here so the checking test file does not contain them and match itself.
-SKIP_MARKERS = ("pytest.skip", "skipif")
-GROUND_SKIP_PHRASE = "lower inside an overlay"

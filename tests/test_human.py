@@ -17,10 +17,6 @@ def build(n=3):
     return state.Docket(mode="review", goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)])
 
 
-def item(docket, id_, claim="a call", severity="major"):
-    docket.add_item(state.Item(id=id_, claim=claim, severity=severity, raised_by=["Agent1"], opened_round=0))
-
-
 # --------------------------------------------------------------------------- the line grammar
 
 
@@ -372,6 +368,3 @@ def test_explain_without_a_channel_says_so_and_keeps_waiting():
     cp, _console, _reader = make_checkpoint(docket, lines=["explain H1", ""])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert not outcome.recommendations and not outcome.answers
-
-
-# --------------------------------------------------------------------------- the menu's provenance

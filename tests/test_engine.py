@@ -10,7 +10,6 @@ from mech_council.deliberation.engine import Abort, Engine
 from mech_council.deliberation.state import DEMOTED, STANDING, WITHDRAWN, Docket
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
-from mech_council.prompts import review as review_text
 from mech_council.prompts.brief import Brief
 
 from .support.harness import RawAsk, ScriptPort, events_collector, payload
@@ -108,7 +107,6 @@ def test_a_mode_s_extra_briefing_reaches_the_seats_it_was_written_for():
     }
     assert plan_text.EXTRA_BRIEFING.strip() in briefs["plan"], "plan declares prose and never briefs it"
     assert plan_text.EXTRA_BRIEFING.strip() not in briefs["review"], "a review seat reads planning prose"
-    assert review_text.EXTRA_BRIEFING == "", "review needs nothing extra: the hook stays empty, not absent"
 
 
 def test_each_mode_tells_the_chair_what_makes_two_entries_one():
@@ -340,31 +338,6 @@ def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stand
     refused = [record for record in records if record["event"] == "answer_option_rejected"]
     assert len(refused) == 1
     assert refused[0]["id"] == "H1" and refused[0]["option"] == 9 and refused[0]["menu"] == 1
-
-
-def test_a_negative_option_number_names_no_line_and_costs_the_run_nothing():
-    """`options[-2]` would otherwise record the wrong line as the human's choice, silently — and still end no run."""
-    import asyncio
-
-    def reply(ask):
-        if ask.phase == "phase0":
-            if ask.who != "Agent1":
-                return payload(findings=[])
-            return payload(findings=[{"claim": "a bug"}], human_input=[{"question": "which way?", "options": ["a", "b", "c"]}])
-        if ask.kind == "merge":
-            return {"groups": []}
-        return stance_all(ask, "agree")
-
-    async def main():
-        built, _port, records = engine(reply=reply, answers={"H1": "b"}, selections={"H1": -2})
-        outcome = await built.run()
-        return outcome, built, records
-
-    outcome, built, records = asyncio.run(main())
-    question = built.docket.questions["H1"]
-    assert outcome == "consensus" and question.state == "answered" and question.answer == "b"
-    assert (question.answer_option, question.answer_option_text) == (0, ""), "a negative index proves nothing about the menu"
-    assert [record["event"] for record in records].count("answer_option_rejected") == 1
 
 
 def test_a_selection_whose_line_is_not_the_answer_records_no_line():

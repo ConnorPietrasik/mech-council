@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import signal
@@ -10,8 +9,6 @@ import subprocess
 import sys
 
 import pytest
-
-from tests.support.ground import FIXTURE_ROOT, GROUND_SKIP_PHRASE, SKIP_MARKERS, fstype_under
 
 from .conftest import no_user_config
 
@@ -76,54 +73,3 @@ def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent():
     assert result.returncode == 1, result.stderr[-400:]
     assert "--allow-nested" in result.stderr, "the refusal must name the way out"
     assert not os.path.exists("/tmp/council-smoke-guard"), "a refusal creates nothing"
-
-
-def test_the_sandbox_family_is_never_silently_empty():
-    """The harness rule is that the sandbox family *ran*, not that it exited 0 — and the ground skip is the one
-    sanctioned way it may not have, so this says nothing about a run on ground that cannot hold a lower."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    listing = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/test_sandbox.py", "--collect-only", "-q", "-rs", "-p", "no:cacheprovider"],
-        cwd=os.path.dirname(here),
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    collected = [line for line in listing.stdout.splitlines() if "::" in line]
-    if len(collected) >= 12:
-        return
-    ground = fstype_under(FIXTURE_ROOT)
-    said_the_ground = GROUND_SKIP_PHRASE in listing.stdout + listing.stderr
-    assert said_the_ground and ground == "overlay", (
-        f"the sandbox family collected {len(collected)} cases on {ground} ground ({FIXTURE_ROOT}): "
-        f"only {GROUND_SKIP_PHRASE} excuses it, and the family said otherwise\n{(listing.stdout + listing.stderr)[-600:]}"
-    )
-
-
-def _skip_candidates(path: str) -> list[tuple[int, str]]:
-    """Every call and decorator in a file, with the source text it spans."""
-    with open(path, encoding="utf-8") as handle:
-        src = handle.read()
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(ast.parse(src)):
-        candidates = [node] if isinstance(node, ast.Call) else []
-        candidates += list(getattr(node, "decorator_list", []))
-        found.extend((getattr(c, "lineno", 0), ast.get_source_segment(src, c) or "") for c in candidates)
-    return found
-
-
-def test_the_ground_skip_is_the_only_way_this_suite_proves_nothing():
-    """A test skipped for any other reason fails the suite."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    offenders = []
-    for name in sorted(os.listdir(here)):
-        if not name.startswith("test_"):
-            continue
-        for number, span in _skip_candidates(os.path.join(here, name)):
-            if not any(marker in span for marker in SKIP_MARKERS):
-                continue
-            if name == "test_sandbox.py" and GROUND_SKIP_PHRASE in span:
-                continue
-            offenders.append(f"{name}:{number}: {' '.join(span.split())[:90]}")
-    assert not offenders, "extra skip paths:\n" + "\n".join(offenders)

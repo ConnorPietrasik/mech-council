@@ -11,6 +11,7 @@ from typing import cast
 
 import pytest
 
+from mech_council import pi_rpc
 from mech_council.config import MemberSpec
 from mech_council.pi_rpc import ChildGone, PiRpc, ProtocolError
 from mech_council.process import lifecycle
@@ -295,15 +296,13 @@ def test_abort_replies_and_reports_what_was_cleared():
     assert ok is True and answer.aborted
 
 
-def test_an_abort_that_gets_nothing_comes_back_false_within_its_own_bound():
+def test_an_abort_that_gets_nothing_comes_back_false_within_its_own_bound(monkeypatch):
     """The constants-not-knobs choice: 30 s bounds the abort response, and a hang is a false, not a hang."""
+    monkeypatch.setattr(pi_rpc, "ABORT_TIMEOUT_S", 1.0)  # the bound itself, not a 30 s wait
 
     async def main():
         child, rpc, _events = await start(extra_env={"FAKE_PI_SILENT_ABORT": "1"})
         try:
-            from mech_council import pi_rpc
-
-            pi_rpc.ABORT_TIMEOUT_S = 1.0  # the bound itself, not a 30 s wait
             return await rpc.abort()
         finally:
             await rpc.stop()
@@ -342,26 +341,21 @@ def test_the_spawn_argv_is_pi_plus_exactly_the_flags_we_add():
 # ------------------------------- The dispose path on teardown
 
 
-def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group():
+def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group(monkeypatch):
     """The *group*, because pi detaches its tool shells; KILL if TERM is ignored."""
     sent: list[tuple[int, int]] = []
     settled: list[int | None] = []
     member = _member(stubborn=True, settled=settled)
-    real_killpg = os.killpg
 
     def fake_killpg(pgid, sig):
         sent.append((pgid, sig))
         if sig == signal.SIGKILL:
             member.proc.returncode = -9  # the KILL lands: the child reports its exit
 
-    os.killpg = fake_killpg
-    lifecycle.STDIN_CLOSE_GRACE_S = 0.05
-    lifecycle.TERM_GRACE_S = 0.05
-    try:
-        asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
-    finally:
-        os.killpg = real_killpg
-        lifecycle.STDIN_CLOSE_GRACE_S, lifecycle.TERM_GRACE_S = 5.0, 5.0
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+    monkeypatch.setattr(lifecycle, "STDIN_CLOSE_GRACE_S", 0.05)
+    monkeypatch.setattr(lifecycle, "TERM_GRACE_S", 0.05)
+    asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
     assert sent == [(member.pgid, signal.SIGTERM), (member.pgid, signal.SIGKILL)], sent
     assert settled == [-9], "the exit the KILL caused is awaited, not just the KILL sent"
 
@@ -407,7 +401,7 @@ def _member(pgid=None, pid=999_991, stubborn=False, settled=None):
     )
 
 
-def test_a_child_that_already_exited_is_never_signalled_or_awaited():
+def test_a_child_that_already_exited_is_never_signalled_or_awaited(monkeypatch):
     member = _member()
     member.proc.returncode = 0
     waited: list[int] = []
@@ -418,12 +412,8 @@ def test_a_child_that_already_exited_is_never_signalled_or_awaited():
 
     member.proc.wait = wait
     sent: list[tuple[int, int]] = []
-    real_killpg = os.killpg
-    os.killpg = lambda pgid, sig: sent.append((pgid, sig))
-    try:
-        asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
-    finally:
-        os.killpg = real_killpg
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    asyncio.run(lifecycle.dispose(member, own_pgid=os.getpgid(0)))
     assert sent == [], "a process that reported its exit code is not signalled"
     assert waited == [], "nothing waits on it a second time"
 

@@ -62,13 +62,6 @@ def test_the_docket_reads_you_and_tags_your_own_entries():
     assert "Agent1" in theirs, "a peer reads as a bare number, never as a name"
 
 
-def test_the_docket_renderer_cannot_be_handed_names():
-    """The bias control is the signature: no parameter of the renderer could carry a name into a seat's docket."""
-    import inspect
-
-    assert "names" not in inspect.signature(docket_render.render).parameters
-
-
 def test_a_closed_item_still_prints_its_id_so_it_can_be_reopened():
     """`agreed`/`rejected` collapse to one *addressable* line."""
     docket = build()

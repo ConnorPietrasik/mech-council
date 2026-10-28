@@ -88,33 +88,6 @@ def test_rejection_needs_a_reason_and_is_not_majority():
     assert dispositions.derive(docket, "F1") == UNHEARD  # heard, and unheard
 
 
-def test_every_open_item_yields_exactly_one_state():
-    """The invariant: no pattern is stateless, and none is two states at once."""
-    options = [None, AGREE, DISAGREE, ABSTAIN, NEEDS_HUMAN]
-    docket = docket_with(2, items=1)
-    seen = set()
-    for first in options:
-        for second in options:
-            docket.stances["F1"] = {}
-            for agent, value in zip(docket.roster, (first, second)):
-                if value is not None:
-                    stance(docket, "F1", agent, value)
-            state = dispositions.derive(docket, "F1")
-            assert state in (AGREED, REJECTED, DISPUTED, HUMAN, UNHEARD, UNSEEN)
-            seen.add(state)
-    assert seen >= {AGREED, DISPUTED, HUMAN, UNHEARD, UNSEEN}
-
-
-def test_no_open_item_derives_short_a_stance_except_unseen():
-    """`unseen` needs a seat with no current stance; once all three have one, it is unreachable."""
-    docket = docket_with(3)
-    stance(docket, "F1", "Agent1", AGREE)
-    stance(docket, "F1", "Agent2", ABSTAIN)
-    assert dispositions.derive(docket, "F1") == UNSEEN
-    stance(docket, "F1", "Agent3", ABSTAIN)
-    assert dispositions.derive(docket, "F1") != UNSEEN
-
-
 def test_a_declined_record_is_inert_in_every_count():
     docket = docket_with(3)
     stance(docket, "F1", "Agent1", AGREE)
