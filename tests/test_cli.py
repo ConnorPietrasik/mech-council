@@ -103,7 +103,7 @@ def test_a_repeat_that_changes_value_is_noted(cli, project):
 # ---------------------------------------------------- The exit-code table
 
 
-def test_a_round_limited_run_exits_zero(cli, project):
+def test_a_stalled_run_exits_zero(cli, project):
     """The outcome is a result, never an exit code: 0 for every member of the four."""
     script = json.dumps(
         [
@@ -128,7 +128,7 @@ def test_a_round_limited_run_exits_zero(cli, project):
     env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
     result = cli(["review"], cwd=project, env=env, timeout=120)
     assert result.returncode == 0, result.console
-    assert result.manifest.get("outcome") == "round_limit_reached"
+    assert result.manifest.get("outcome") == "stalemate", "one seat refuting with evidence every round is no movement"
     assert os.path.exists(os.path.join(result.run_dir, "report.md"))
     assert os.path.exists(os.path.join(result.run_dir, "human_input.json"))
     assert result.events, "events.jsonl holds the run"
@@ -595,7 +595,7 @@ def test_a_plan_council_writes_plan_md_and_says_plainly_when_no_direction_was_ch
     assert "prescriptive" in report and "descriptive" in report
     assert "wrap the call in a retry helper" in report, "the stage gates reach the plan"
     assert "bounded backoff" in report
-    assert result.manifest["outcome"] in ("consensus", "round_limit_reached")
+    assert result.manifest["outcome"] in ("consensus", "stalemate", "round_limit_reached")
 
 
 def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project):

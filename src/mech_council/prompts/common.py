@@ -57,9 +57,9 @@ ESCALATION = """\
   stops the run. To stop the council, stance `needs_human` on an item.
 - A question you no longer need answered is dropped by restancing that item (an
   `abstain` does it), not by going quiet.
-- Only an escalation several seats hold, or one the chair raises, stops the council
-  mid-run to ask. Everything else is asked at the checkpoint the run reaches when it
-  would otherwise end, so an unanswered question is never a way to avoid stancing.
+- Only an escalation several seats hold stops the council mid-run to ask. Everything else is
+  asked at the checkpoint the run reaches when it would otherwise end, so an unanswered
+  question is never a way to avoid stancing.
 - If a peer challenges your escalation with cited evidence, answer the challenge.
 """
 
@@ -216,6 +216,11 @@ def schema_hint(mode: str, *, phase: str) -> str:
         from . import plan as plan_text
 
         return plan_text.COMPARISON_SCHEMA
+    if phase == "direction":
+        # Plan mode again: a split review council has no direction to choose.
+        from . import plan as plan_text
+
+        return plan_text.DIRECTION_SCHEMA
     from . import chair
 
     # `digest` is what the watchdog calls its own phase; the shape it must repair to is the pass
@@ -254,6 +259,24 @@ def comparison_task(listing: str, goal: str | None = None) -> str:
             plan_text.COMPARISON_SCHEMA,
             "---",
             "## The plans",
+            "",
+            listing,
+        ]
+    )
+
+
+def direction_task(listing: str, goal: str | None = None) -> str:
+    """Plan mode's one chair-worded ask: the directions themselves are the run's, so the reply is a sentence."""
+    from . import plan as plan_text
+
+    return "\n".join(
+        [
+            plan_text.DIRECTION,
+            goal_line(goal),
+            ANSWER_SHAPE,
+            plan_text.DIRECTION_SCHEMA,
+            "---",
+            "## The directions still standing",
             "",
             listing,
         ]

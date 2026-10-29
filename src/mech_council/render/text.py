@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 SEVERITY_ORDER = {"blocker": 0, "major": 1, "minor": 2, "trivial": 3}
 
 
@@ -16,6 +18,25 @@ def caption(agent_id: str, names: dict[str, str]) -> str:
 def name_of(agent_id: str, names: dict[str, str]) -> str:
     """The console's form: the name alone, the id left to the records."""
     return names.get(agent_id, agent_id)
+
+
+#: A seat's id inside prose a model wrote.
+_AGENT_ID = re.compile(r"Agent\d+")
+
+
+def spoken(text: str, names: dict[str, str]) -> str:
+    """A model's sentence with names in place of the ids it was handed.  Only the human's screen gets this: a seat's docket
+    keeps the ids, because an id is the token a seat answers with and a name is not.
+    """
+    return _AGENT_ID.sub(lambda found: names.get(found.group(), found.group()), text or "")
+
+
+def direction_label(token: str, names: dict[str, str]) -> str:
+    """A direction in the words the human is shown: the seat's name, or the label of the merge it stands for."""
+    from ..deliberation.state import MERGED
+
+    label = token.partition(MERGED)[2].strip() if token.startswith(MERGED) else ""
+    return f"the merge `{label}`" if label else name_of(token, names)
 
 
 def wrap(text: str, width: int = 76, indent: str = "  ") -> list[str]:

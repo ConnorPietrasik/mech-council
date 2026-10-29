@@ -67,6 +67,12 @@ class Port:
         except ChairUnusable as failure:
             raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
 
+    async def chair_direction(self, listing: str, *, round_: int) -> dict:
+        try:
+            return await self.chair.direction(listing, round_=round_)
+        except ChairUnusable as failure:
+            raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
+
     # -- the human ------------------------------------------------------------
 
     async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool):

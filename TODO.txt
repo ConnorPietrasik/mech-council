@@ -1,0 +1,5 @@
+Should be able to answer the deferred questions during the round, so that they don't stop the round but I can still answer
+An aborted run should make a report based on the current state
+Set a different report location
+Blocking questions as intentional stance or option, and revocation of questions
+A way to message agents?

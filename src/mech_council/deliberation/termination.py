@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .dispositions import derive
 from .escalations import effective_class
-from .state import ASKED, CONSENSUS, DECLINED, DISPUTED, GO, NEEDS_OUTCOME, NO_PREFERENCE, SKIPPED, UNSEEN, Docket
+from .state import ASKED, CONSENSUS, DECLINED, DISPUTED, GO, NEEDS_OUTCOME, SKIPPED, UNSEEN, Docket
 
 
 def unsettled_questions(docket: Docket) -> list:
@@ -11,7 +11,7 @@ def unsettled_questions(docket: Docket) -> list:
         question = docket.questions[qid]
         if question.state != ASKED:
             continue
-        if question.item_id is not None and not question.chair_raised:
+        if question.item_id is not None:
             holders = [
                 e for e in docket.standing_escalations(question.item_id) if e.question_id == question.id or e.asker in question.askers
             ]
@@ -38,13 +38,12 @@ def direction_rule(docket: Docket) -> tuple[bool, str | None, str]:
     unnamed = [a for a in docket.roster if docket.backing.get(a) in (None, DECLINED)]
     if unnamed:
         return False, None, "backing not named by: " + ",".join(unnamed)
-    named = {docket.backing[a] for a in docket.roster}
-    real = {t for t in named if t != NO_PREFERENCE}
+    real = docket.directions()
     if len(real) > 1:
-        return False, None, ("seats name different directions: " + ",".join(sorted(named)))
+        return False, None, "seats name different directions: " + ",".join(real)
     if not real:
         return False, None, "no seat named a direction (no_preference never causes consensus)"
-    return True, next(iter(real)), "every seat backs one direction or holds no preference"
+    return True, real[0], "every seat backs one direction or holds no preference"
 
 
 def evaluate(docket: Docket) -> tuple[str, str]:

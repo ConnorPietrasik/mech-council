@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from mech_council.deliberation import escalations, termination
-from mech_council.deliberation.state import AGREE, NEEDS_HUMAN, Docket, Item
-from mech_council.deliberation.termination import CONSENSUS, GO, NEEDS_OUTCOME, NO_PREFERENCE
+from mech_council.deliberation.state import AGREE, NEEDS_HUMAN, NO_PREFERENCE, Docket, Item
+from mech_council.deliberation.termination import CONSENSUS, GO, NEEDS_OUTCOME
 
 
 def _docket(mode: str, items: list[str], *, signed: list[str] | None = None) -> Docket:

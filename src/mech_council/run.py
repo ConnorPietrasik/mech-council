@@ -16,7 +16,7 @@ from .config import Council
 from .console import Console, Transcripts
 from .deliberation.engine import Abort, Engine
 from .deliberation.escalations import effective_class
-from .deliberation.state import NO_PREFERENCE, Docket
+from .deliberation.state import ABORTED, CONSENSUS, NEEDS_OUTCOME, NO_PREFERENCE, RETIRED, ROUND_LIMIT, STALEMATE, Docket
 from .deliberation.termination import direction_rule
 from .humaninput import Checkpoint
 from .members import MemberGone, Members
@@ -27,7 +27,7 @@ from .sandbox import journal as journal_mod
 from .watchdog import Watchdog
 
 EXIT_OK, EXIT_ABORT = 0, 1
-RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
+RESULTS = (CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
 
 
 async def orchestrate(launch, sandbox) -> int:
@@ -63,7 +63,7 @@ async def orchestrate(launch, sandbox) -> int:
         orchestrator_pid=os.getpid(),
     )
     transcripts = Transcripts(run_dir, council.transcripts)
-    outcome, aborted = "aborted", ""
+    outcome, aborted = ABORTED, ""
     rounds, report_path = 0, ""
     signalled: list[int] = []
     stop = asyncio.Event()
@@ -102,12 +102,12 @@ async def orchestrate(launch, sandbox) -> int:
         lanes = Lanes(council, members, console)
         outcome, rounds, docket = await _deliberate(council, members, console, stop, lanes)
     except (Abort, AskUnusable, ChairUnusable, MemberGone) as failure:
-        aborted, outcome = str(failure), "aborted"
+        aborted, outcome = str(failure), ABORTED
         console.say(aborted)
         console.event("run_aborted", reason=aborted)
     except Exception as failure:  # a bug ends the run too
         aborted = f"internal error: {type(failure).__name__}: {failure}"
-        outcome = "aborted"
+        outcome = ABORTED
         console.say(aborted)
         console.event(
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
@@ -194,6 +194,7 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
         project=council.project,
         brief=brief,
         max_rounds=council.max_rounds,
+        names=names,
         emit=_emitter(console, names),
     )
     watchdog = Watchdog(council=council, lanes=lanes, chair=chair, console=console)
@@ -259,7 +260,7 @@ def _emitter(console: Console, names: dict[str, str]):
 
 
 def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
-    from .render.text import name_of
+    from .render.text import direction_label, name_of
 
     if name == "phase0_done":
         return f"phase 0: {fields['valid']} seat(s) in, {fields.get('items', 0)} item(s) on the docket"
@@ -267,6 +268,11 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"chair merged {fields['groups']} duplicate group(s)"
     if name == "chair_compare":
         return f"chair comparison: {fields['agreed']} agreed point(s), {fields['conflicts']} conflict(s), {fields['uncovered']} uncovered"
+    if name == "direction_ask":
+        held = ", ".join(direction_label(token, names) for token in fields["directions"])
+        return f"the seats will not converge ({held}) — asking the human to choose"
+    if name == "chair_direction_unreadable":
+        return "the chair could not word the split — the run asks in its own words"
     if name == "round_summary":
         states = ", ".join(f"{count} {state}" for state, count in sorted((fields.get("states") or {}).items()))
         return f"round {fields['round']}: {fields['signed_off']} signed off · {states or 'nothing open'}"
@@ -441,8 +447,9 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
                 "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
                 "markers": list(q.markers),  # unasked / skipped / deferred: the report's words
-                "chair_raised": q.chair_raised,
-                "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == "retired"],
+                # The split ask blocks with no holders behind it, so the record has to say which ask it was.
+                "direction_ask": q.direction_ask,
+                "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == RETIRED],
             }
             for q in (docket.questions[i] for i in docket.question_order)
         ],

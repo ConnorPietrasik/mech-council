@@ -2,7 +2,24 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import effective_class
-from ..deliberation.state import AGREED, DISPUTED, HUMAN, REJECTED, UNHEARD, UNSEEN, Docket, Item, Question
+from ..deliberation.state import (
+    ABSTAIN,
+    AGREE,
+    AGREED,
+    ASKED,
+    DISAGREE,
+    DISPUTED,
+    HUMAN,
+    NEEDS_HUMAN,
+    REJECTED,
+    SKIPPED,
+    STANDING,
+    UNHEARD,
+    UNSEEN,
+    Docket,
+    Item,
+    Question,
+)
 from .context import ReportContext
 from .text import caption, severity_key, wrap
 
@@ -52,10 +69,10 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
         return out + ["Nothing reached the majority bar with no reasoned objection.", ""]
     for item in _sorted(items):
         bar = docket.bar()
-        acceptors = [a for a in docket.roster if (r := docket.stance(item.id, a)) and r.stance == "agree"]
+        acceptors = [a for a in docket.roster if (r := docket.stance(item.id, a)) and r.stance == AGREE]
         declined = [a for a in docket.roster if (r := docket.stance(item.id, a)) and r.declined]
         abstainers = [
-            a for a in docket.roster if (r := docket.stance(item.id, a)) and not r.declined and r.stance in ("abstain", "needs_human")
+            a for a in docket.roster if (r := docket.stance(item.id, a)) and not r.declined and r.stance in (ABSTAIN, NEEDS_HUMAN)
         ]
         out.append(f"### {item.id} · {item.severity} · {item.claim}")
         if item.detail.strip():  # an empty detail must not print a stray line
@@ -72,10 +89,10 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
         if abstainers:
             out.append(f"- not vetted by: {_names(abstainers, context)}")
         out.append(f"- closed: {item.disposition} in round {item.closed_round}")
-        for question in _questions_on(docket, item, ("skipped", "unasked")):
+        for question in _questions_on(docket, item, (SKIPPED, "unasked")):
             out.append(
                 f"- caveat — {question.id} was "
-                f"{'**skipped** by the human' if question.state == 'skipped' else 'left **unasked**'}: {question.text}"
+                f"{'**skipped** by the human' if question.state == SKIPPED else 'left **unasked**'}: {question.text}"
             )
         for note in item.history:
             out.append(f"- history: {note}")
@@ -104,7 +121,7 @@ def _not_fully_vetted(docket: Docket, items: list[Item], context: ReportContext)
                 f"- {caption(agent, context.captions)}: {record.stance}"
                 f" (round {record.round}){tag}" + (f" — {record.note}" if record.note else "")
             )
-        not_vetted = [a for a in docket.roster if (r := docket.stance(item.id, a)) is None or r.stance != "agree"]
+        not_vetted = [a for a in docket.roster if (r := docket.stance(item.id, a)) is None or r.stance != AGREE]
         out.append(f"- not vetted by: {_names(not_vetted, context)}")
         for escalation in docket.standing_escalations(item.id):
             question = docket.questions.get(escalation.question_id)
@@ -151,7 +168,7 @@ def _rejected(docket: Docket, items: list[Item], context: ReportContext) -> list
         out.append(f"- closed rejected in round {item.closed_round}")
         for agent in docket.roster:
             record = docket.stance(item.id, agent)
-            if record and record.stance == "disagree":
+            if record and record.stance == DISAGREE:
                 out.append(
                     f"- killed by {caption(agent, context.captions)}: "
                     f"{record.note or '(no note)'}" + (f" | evidence: {record.evidence}" if record.evidence else "")
@@ -237,7 +254,7 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
                 out.append(f'- item: **{item.id}** {item.claim} → `{state}` (reported under "{section}")')
         else:
             out.append("- stands on its own: no item")
-        out.append(f"- asked by: {_names(question.askers, context)}" + (" (chair)" if question.chair_raised else ""))
+        out.append(f"- asked by: {_names(question.askers, context)}")
         out.append(
             f"- raised: round {question.raised_round}"
             + (f", latest text update: round {question.updated_round}" if question.updated_round != question.raised_round else "")
@@ -264,7 +281,7 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
         if question.answer:
             out.append(f"- **answer** (round {question.answer_round}): {question.answer}")
         out.append(
-            f"- end state: **{question.state if question.state != 'asked' else 'standing'}**"
+            f"- end state: **{question.state if question.state != ASKED else 'standing'}**"
             + (f" ({', '.join(markers)})" if markers else "")
         )
         out.append("")
@@ -298,11 +315,11 @@ def _markers(docket: Docket, question: Question) -> list[str]:
     out = list(question.markers)
     for esc in _escalations_for(docket, question):
         if esc.item_id == question.item_id and esc.asker in question.askers:
-            if esc.state != "standing" and esc.state not in out:
+            if esc.state != STANDING and esc.state not in out:
                 out.append(esc.state)
             if esc.undefended and "undefended" not in out:
                 out.append("undefended")
-    if question.state == "asked" and effective_class(docket, question) == "deferred":
+    if question.state == ASKED and effective_class(docket, question) == "deferred":
         if "deferred" not in out:
             out.append("deferred")
     return out

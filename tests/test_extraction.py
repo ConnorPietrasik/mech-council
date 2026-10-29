@@ -9,6 +9,7 @@ from mech_council.extraction import (
     map_severity,
     map_stance,
     parse_comparison,
+    parse_direction,
     parse_merge_plan,
     parse_phase0,
     parse_verdict,
@@ -243,14 +244,29 @@ def test_a_plan_with_no_claim_and_no_stages_is_a_repair():
 
 
 def test_a_merge_plan_is_read_through_the_synonym_table():
-    text = json.dumps({"merges": [{"keep": "F1", "dupes": ["F2", "F3"]}], "questions_for_human": [{"question": "which name wins?"}]})
-    groups, questions, errors = parse_merge_plan(text)
+    text = json.dumps({"merges": [{"keep": "F1", "dupes": ["F2", "F3"]}]})
+    groups, errors = parse_merge_plan(text)
     assert groups is not None and not errors, "the synonym table is what makes this parse"
     assert groups["groups"] == [{"canonical": "F1", "duplicates": ["F2", "F3"]}]
-    assert questions[0]["question"] == "which name wins?" and not errors
 
 
-def test_a_comparison_carries_agreed_conflicts_uncovered_and_questions():
+def test_no_publication_pass_carries_a_question_from_the_chair():
+    """A question the chair raised would reach the human with no evidence behind it and nobody to challenge it."""
+    merge, _ = parse_merge_plan(json.dumps({"groups": [], "human_input": [{"question": "which name wins?"}]}))
+    comparison, _ = parse_comparison(json.dumps({"agreed": [], "human_input": [{"question": "who signs off?"}]}))
+    decisions, _ = parse_watchdog(json.dumps({"decisions": [], "human_input": [{"question": "who is wedged?"}]}))
+    assert merge is not None and comparison is not None and decisions == []
+    assert "questions" not in merge and "human_input" not in comparison
+
+
+def test_the_direction_reply_is_a_sentence_about_a_split_the_run_found():
+    wording, errors = parse_direction(json.dumps({"question": "which cache owns the key?", "context": "two plans, one gate"}))
+    assert wording == {"question": "which cache owns the key?", "context": "two plans, one gate"} and not errors
+    # The menu is the run's, one line per direction the council held, so a reply can offer none of its own.
+    assert parse_direction(json.dumps({"context": "no question here"}))[1], "a wording without a question is unreadable"
+
+
+def test_a_comparison_carries_agreed_conflicts_and_uncovered():
     text = json.dumps(
         {
             "agreed": [{"point": "the staging"}],
@@ -266,7 +282,6 @@ def test_a_comparison_carries_agreed_conflicts_uncovered_and_questions():
     assert data["agreed"][0]["point"] == "the staging"
     assert data["conflicts"][0]["claim"] == "step two"
     assert data["uncovered"] == ["the rollback"]
-    assert data["human_input"][0]["question"] == "who signs off?"
 
 
 def test_a_watchdog_reply_reads_both_action_spellings():
@@ -274,8 +289,8 @@ def test_a_watchdog_reply_reads_both_action_spellings():
     text = json.dumps(
         {"decisions": [{"agent": "Senior", "restart": True}, {"agent": "Coworker", "action": "keep", "reason": "idle is fine"}]}
     )
-    decisions, questions, errors = parse_watchdog(text)
-    assert not errors and not questions
+    decisions, errors = parse_watchdog(text)
+    assert not errors
     assert decisions == [
         {"agent": "Senior", "action": "restart", "reason": ""},
         {"agent": "Coworker", "action": "keep", "reason": "idle is fine"},
@@ -283,5 +298,5 @@ def test_a_watchdog_reply_reads_both_action_spellings():
 
 
 def test_a_watchdog_reply_that_is_not_a_decision_list_is_an_error():
-    _decisions, _unknown, errors = parse_watchdog("the council looks fine to me")
+    _decisions, errors = parse_watchdog("the council looks fine to me")
     assert errors

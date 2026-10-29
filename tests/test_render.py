@@ -81,6 +81,21 @@ def test_open_human_requests_print_with_their_effective_class():
     assert "deferred" in text, "one seat of three is below the bar"
 
 
+def test_an_answered_question_is_still_shown_to_the_seats_that_must_follow_it():
+    """The human's answer is an instruction the council reads, not a line only the report ever gets."""
+    docket = build()
+    item(docket, "F1", "a call only a human can make")
+    stance(docket, "F1", "Agent1", state.NEEDS_HUMAN, note="which tenant key?")
+    question = docket.questions[docket.escalations[("F1", "Agent1")].question_id]
+    assert "ANSWER" not in docket_render.render(docket, "Agent2")
+    question.state, question.answer, question.answer_round = (state.ANSWERED, "the tenant is fixed by contract", 2)
+    text = docket_render.render(docket, "Agent2")
+    assert "ANSWER (authoritative): the tenant is fixed by contract" in text
+    open_asks, answers = text.split("## Human answers", 1)
+    assert question.id in answers and "answered, round 2" in answers
+    assert question.id not in open_asks, "an answered ask prints as an answer, not as a question still holding the run"
+
+
 # ------------------------------------------------------ The review report
 
 
@@ -264,6 +279,20 @@ def test_the_plan_report_prints_deferred_questions_as_named_assumptions():
     text = report_plan.render(docket, context(mode="plan", outcome="round_limit_reached"))
     assert "is the old table read by anything else?" in text
     assert "assumption" in text.lower(), "never dropped, never presented as settled"
+
+
+def test_the_plan_report_prints_the_split_ask_where_the_direction_is_reported():
+    """The council's split belongs beside the direction it could not choose, not among the plan's assumptions."""
+    docket = build(mode="plan", n=3)
+    docket.backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
+    ask = escalations.raise_direction_ask(
+        docket, text="which plan do you want?", context="two seats, two orders of work", options=["Agent1: a", "Agent2: b"], round_=2
+    )
+    text = report_plan.render(docket, context(mode="plan", outcome="needs_human"))
+    chosen = text.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
+    assert "which plan do you want?" in chosen and "never answered" in chosen
+    assumptions = text.split("## Assumptions", 1)[1].split("\n## ", 1)[0]
+    assert ask.id not in assumptions, "the split the human was asked about is not printed as a guess the council made"
 
 
 def test_the_plan_report_carries_no_review_only_sections():

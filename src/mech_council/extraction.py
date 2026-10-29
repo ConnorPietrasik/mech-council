@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from .deliberation.state import ABSTAIN, AGREE, DISAGREE, NEEDS_HUMAN, STANCES
+from .deliberation.state import ABSTAIN, AGREE, DISAGREE, MERGED, NEEDS_HUMAN, NO_PREFERENCE, STANCES
 
 
 #: fold case and drop `_`/`-`: `validationGate`/`VALIDATION_GATE` → `validation_gate`.
@@ -106,18 +106,18 @@ STANCE_WORDS: dict[str, str] = {
 }
 STANCE_WORDS = {fold(word): value for word, value in STANCE_WORDS.items()}
 
-#: Lenient extraction's backing paraphrase table: three literals and nowhere else.
+#: Lenient extraction's backing paraphrase table: the one place a paraphrase becomes a canonical backing token.
 BACKING_WORDS: dict[str, str] = {
-    "defer": "no_preference",
-    "either": "no_preference",
-    "any": "no_preference",
-    "none": "no_preference",
-    "whatever": "no_preference",
-    "no_preference": "no_preference",
-    "nopreference": "no_preference",
-    "noweakpreferences": "no_preference",
-    "no": "no_preference",
-    "neutral": "no_preference",
+    "defer": NO_PREFERENCE,
+    "either": NO_PREFERENCE,
+    "any": NO_PREFERENCE,
+    "none": NO_PREFERENCE,
+    "whatever": NO_PREFERENCE,
+    "no_preference": NO_PREFERENCE,
+    "nopreference": NO_PREFERENCE,
+    "noweakpreferences": NO_PREFERENCE,
+    "no": NO_PREFERENCE,
+    "neutral": NO_PREFERENCE,
 }
 BACKING_WORDS = {fold(word): value for word, value in BACKING_WORDS.items()}
 
@@ -241,7 +241,7 @@ def map_backing(value: object, me: str) -> tuple[str | None, bool]:
     if word.startswith(("merged", "merge")):
         label = text_of(value).split(":", 1)[-1].strip() if ":" in text_of(value) else ""
         label = label or text_of(value)[len("merged") :].strip()
-        return (f"merged: {label}", False) if label else (None, True)
+        return (f"{MERGED} {label}", False) if label else (None, True)
     return None, True
 
 
@@ -507,10 +507,10 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
     return out
 
 
-def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
+def parse_merge_plan(payload: str) -> tuple[dict | None, list[str]]:
     data, error = find_json(payload)
     if data is None:
-        return None, [], [error or "no JSON object found"]
+        return None, [error or "no JSON object found"]
     groups, merges = pick(data, "groups"), pick(data, "merges")
     rows = groups if isinstance(groups, list) else merges if isinstance(merges, list) else []
     clean = []
@@ -524,8 +524,18 @@ def parse_merge_plan(payload: str) -> tuple[dict | None, list[dict], list[str]]:
         if not canonical or not isinstance(dups, list):
             continue
         clean.append({"canonical": canonical, "duplicates": [text_of(d).strip() for d in dups if text_of(d).strip()]})
-    questions = _human_input(data)
-    return {"groups": clean}, questions, []
+    return {"groups": clean}, []
+
+
+def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
+    """The chair's wording of the split.  The menu is the run's, so the reply carries no options of its own."""
+    data, error = find_json(payload)
+    if data is None:
+        return None, [error or "no JSON object found"]
+    question = text_of(pick(data, "question")).strip()
+    if not question:
+        return None, ["the direction reply carried no `question`"]
+    return {"question": question[:600], "context": text_of(pick(data, "context")).strip()[:600]}, []
 
 
 def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
@@ -536,7 +546,6 @@ def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
         "agreed": _agreed(pick(data, "agreed")),
         "conflicts": _conflicts(pick(data, "conflicts")),
         "uncovered": _strings(pick(data, "uncovered")),
-        "human_input": _human_input(data),
         "summary": text_of(pick(data, "summary")),
     }
     return out, []
@@ -578,13 +587,13 @@ def _conflicts(value: object) -> list[dict]:
     return out
 
 
-def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
+def parse_watchdog(payload: str) -> tuple[list[dict], list[str]]:
     data, error = find_json(payload)
     if data is None:
-        return [], [], [error or "no JSON object found"]
+        return [], [error or "no JSON object found"]
     decisions = pick(data, "decisions")
     if not isinstance(decisions, list):
-        return [], [], ["the watchdog reply carried no `decisions` array"]
+        return [], ["the watchdog reply carried no `decisions` array"]
     out = []
     for entry in decisions:
         if not isinstance(entry, dict):
@@ -600,7 +609,7 @@ def parse_watchdog(payload: str) -> tuple[list[dict], list[dict], list[str]]:
         else:
             continue
         out.append({"agent": agent, "action": action, "reason": text_of(pick(entry, "reason"))})
-    return out, _human_input(data), []
+    return out, []
 
 
 def extract(kind: str, text: str, **kwargs) -> Extraction:
@@ -609,12 +618,15 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
     if kind == "verdict":
         return parse_verdict(text, **kwargs)
     if kind == "merge":
-        plan, questions, errors = parse_merge_plan(text)
-        return Extraction(data={"groups": (plan or {}).get("groups", []), "questions": questions}, invalid=plan is None, errors=errors)
+        plan, errors = parse_merge_plan(text)
+        return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
+    if kind == "direction":
+        wording, errors = parse_direction(text)
+        return Extraction(data=wording or {}, invalid=wording is None, errors=errors)
     if kind == "compare":
         comparison, errors = parse_comparison(text)
         return Extraction(data=comparison or {}, invalid=comparison is None, errors=errors)
     if kind == "watchdog":
-        decisions, questions, errors = parse_watchdog(text)
-        return Extraction(data={"decisions": decisions, "questions": questions}, invalid=not decisions, errors=errors)
+        decisions, errors = parse_watchdog(text)
+        return Extraction(data={"decisions": decisions}, invalid=not decisions, errors=errors)
     raise KeyError(kind)

@@ -12,12 +12,8 @@ so.
 
 - Conservative beats tidy: when unsure, keep them apart.
 - Every entry below carries an ID. Echo those IDs exactly; make none up.
-- If two entries force a product decision neither can settle, raise it in `human_input`:
-  `context` is the one line showing why neither entry settles it, and `options` are the
-  alternatives **as the seats themselves put them** — quote the entries in front of you and
-  invent nothing. The run stops on what you raise, so make it answerable by typing a number.
-- Anything you raise stops the run to ask; a seat's question only stops if a majority votes
-  to raise.
+- You raise nothing to the human from this pass: a seat with the code in front of it raises what its
+  evidence supports, and a decision no seat will put its name to is not one you can settle.
 """
 
 WATCHDOG = """\
@@ -37,9 +33,7 @@ Echo each seat's ID exactly as given (`AgentN`) and answer with one decision per
 #: with the ID prefix that mode's docket hands out.
 MERGE_SCHEMA = """\
 ```json
-{"groups": [{"canonical": "{id}1", "duplicates": ["{id}4", "{id}7"]}],
- "human_input": [{"question": "…", "context": "why neither entry settles it",
-                  "options": ["the alternative as one seat put it", "…"], "blocking": false}]}
+{"groups": [{"canonical": "{id}1", "duplicates": ["{id}4", "{id}7"]}]}
 ```
 A group means: keep `canonical`, and record `duplicates` as other seats reporting it.
 Only list a group when the duplicates are one entry reported twice; omit everything
@@ -48,8 +42,7 @@ that stands alone.
 
 WATCHDOG_SCHEMA = """\
 ```json
-{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "…"}],
- "human_input": []}
+{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "…"}]}
 ```
 `action` is `keep` or `restart`, exactly once per agent listed.
 """

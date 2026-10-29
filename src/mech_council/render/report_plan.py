@@ -3,8 +3,12 @@ from __future__ import annotations
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import effective_class
 from ..deliberation.state import (
+    ANSWERED,
+    ASKED,
+    MERGED,
     NO_PREFERENCE,
     REJECTED,
+    SKIPPED,
     Docket,
     Question,
 )
@@ -52,6 +56,10 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
         never = [a for a in docket.roster if not docket.backing.get(a)]
         if never:
             out.append(f"- `declined` — {_names(never, context)}")
+        ask = docket.direction_ask()
+        if ask is not None:
+            out.append(f"- the human was asked ({ask.id}): {ask.text}")
+            out.append(f"  - answer: {ask.answer}" if ask.answer else f"  - {'declined' if ask.state == SKIPPED else 'never answered'}")
         out.append("")
         out.append("No direction is printed for you to follow: nobody chose one.")
         return out + [""]
@@ -71,8 +79,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
 
 
 def resolve_direction(docket: Docket, token: str, captions: dict[str, str]) -> tuple[dict | None, str]:
-    if token.startswith("merged:"):
-        label = token.split(":", 1)[1].strip()
+    if token.startswith(MERGED):
+        label = token.partition(MERGED)[2].strip()
         for agent in docket.roster:
             approach = docket.approaches.get(agent)
             if approach is None:
@@ -138,7 +146,7 @@ def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
             "unasked"
             if "unasked" in question.markers
             else "skipped"
-            if question.state == "skipped"
+            if question.state == SKIPPED
             else "undefended"
             if any(e.undefended for e in _escalations(docket, question))
             else "deferred"
@@ -196,7 +204,7 @@ def _human_input(docket: Docket, context: ReportContext) -> list[str]:
     if not questions:
         return out + ["None was asked for.", ""]
     for question in questions:
-        state = question.state if question.state != "asked" else "standing"
+        state = question.state if question.state != ASKED else "standing"
         out.append(f"- {question.id} ({state}) {_names(question.askers, context)}: {question.text}")
         if question.answer:
             out.append(f"  - authoritative answer (round {question.answer_round}): {question.answer}")
@@ -253,7 +261,9 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
 
 
 def _touches_direction(docket: Docket, question: Question) -> bool:
-    if question.state == "answered":
+    if question.direction_ask:
+        return False  # the split itself, printed under "Chosen direction", never one of the plan's assumptions
+    if question.state == ANSWERED:
         return False
     if question.item_id is None:
         return True

@@ -66,13 +66,17 @@ printed last after a blank line.
    `disagree`, `needs_human`, `abstain` — with evidence or a note. An item needs a majority
    to be `agreed`; an objection with cited evidence reopens a settled one. A seat that stops answering gets asked, once, and
    then its silence is recorded as a *declined* abstention.
-4. **You.** When a seat says `needs_human`, or the chair raises a question, you see it at a
-   checkpoint. Only a question that's effectively *blocking* makes the run wait; deferred
-   ones print and get asked when the run would otherwise end.
+4. **You.** When a seat says `needs_human`, or a planning council will not converge on one
+   direction, you see it at a checkpoint. Only a question that's effectively *blocking* — an
+   escalation a majority holds, or a direction split that held through a round nothing else moved
+   in (three rounds of the same camps, or the run's last round, at the latest) — makes the run
+   wait; deferred ones print and get asked when the run would otherwise end.
 5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached`.
 
-The chair never has a stance and never gets a roster ID, so it can't move the majority bar.
-It merges, compares, and judges the watchdog digest — that's all.
+The chair never has a stance and never gets a roster ID, so it can't move the majority bar. It
+merges, compares, words the council's split for you, and judges the watchdog digest — that's all,
+and it can ask you nothing of its own: a question reaches you from a seat or from the split the
+seats themselves are holding.
 
 ### At the checkpoint
 
@@ -87,7 +91,11 @@ skip H1 H2                   # decline these two and answer the rest
 ```
 
 The last line you type about a question is your word on it — answering a question you
-declined takes it back, and declining one you answered withdraws the answer.
+declined takes it back, and declining one you answered withdraws the answer.  An answer is not
+yours alone to remember: from the next round on, the docket every seat is shown prints it as
+authoritative.  Nothing but the seats' own stances settles the run, though — a council that
+keeps planning against your answer ends `stalemate` or out of rounds, and the report says so
+rather than printing a direction you never chose.
 
 ## What you get
 

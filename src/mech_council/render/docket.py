@@ -70,10 +70,15 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
                 out.append(f"  - {entry}")
         out.append("")
 
-    questions = _visible_questions(docket)
-    if questions:
-        out.append("## Questions for the human")
-        for question in questions:
+    open_asks, answered_asks = _ask_sections(docket)
+    if open_asks:
+        out.append(f"## Questions for the human ({len(open_asks)})")
+        for question in open_asks:
+            out.append(_question_line(docket, question, viewer))
+        out.append("")
+    if answered_asks:
+        out.append(f"## Human answers — plan against these, never your own guess ({len(answered_asks)})")
+        for question in answered_asks:
             out.append(_question_line(docket, question, viewer))
         out.append("")
 
@@ -95,7 +100,7 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
 
 def _question_line(docket: Docket, question: Question, viewer: str) -> str:
     where = f" (on {question.item_id})" if question.item_id else " (no item)"
-    state = effective_class(docket, question)
+    state = f"answered, round {question.answer_round}" if question.state == ANSWERED else effective_class(docket, question)
     line = f"- {question.id}{where}, {state}: {question.text}"
     if question.askers:
         line += f"\n  asked by {_who(question.askers, viewer)}"
@@ -111,10 +116,14 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
     return line
 
 
-def _visible_questions(docket: Docket) -> list[Question]:
+def _ask_sections(docket: Docket) -> tuple[list[Question], list[Question]]:
+    """The open asks and the human's answered ones, kept apart: an answered ask is no longer a question, and an answer the seats
+    never read is a decision they did not get.
+    """
     from ..deliberation.termination import unsettled_questions
 
-    return unsettled_questions(docket)
+    answered = [q for q in (docket.questions[i] for i in docket.question_order) if q.state == ANSWERED and q.answer]
+    return unsettled_questions(docket), answered
 
 
 def _plan_sections(docket: Docket, viewer: str) -> list[str]:

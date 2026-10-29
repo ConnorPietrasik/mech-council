@@ -174,6 +174,13 @@ def test_the_console_says_who_declined_a_gap_by_name_only():
     assert line == "Senior declined 2 item(s) after its ladder"
 
 
+def test_the_console_names_a_split_the_way_the_menu_does():
+    from mech_council.run import _summary_line
+
+    line = _summary_line("direction_ask", {"directions": ["Agent1", "merged: both"]}, {"Agent1": "Metic"})
+    assert line == "the seats will not converge (Metic, the merge `both`) — asking the human to choose"
+
+
 def test_the_write_journal_names_the_member_rather_than_its_directory(cli, project):
     """The directory is named by `file_base` and lives in `run.json`; the line about it names the member."""
     script = json.loads(SCRIPT)

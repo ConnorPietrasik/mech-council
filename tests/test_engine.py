@@ -28,6 +28,7 @@ def engine(n=3, *, mode="review", max_rounds=4, reply=None, answers=None, skip=N
         project="/project",
         brief=Brief(mode=mode, project="/project"),
         max_rounds=max_rounds,
+        names=NAMES,
         emit=emit,
     )
     return built, port, records
@@ -124,6 +125,19 @@ def test_each_mode_tells_the_chair_what_makes_two_entries_one():
     # A chair told to echo IDs exactly gets the IDs its own docket hands out, not review mode's.
     assert '"canonical": "F1"' in common.merge_task("review", "- F1: the claim", "g")
     assert '"canonical": "T1"' in common.merge_task("plan", "- T1: the claim", "g")
+
+
+def test_the_chair_is_told_it_raises_nothing_and_words_only_a_split():
+    for mode in ("review", "plan"):
+        merge = common.merge_task(mode, "- X1: the claim", "g")
+        assert "You raise nothing to the human" in merge, f"the {mode} chair is still offered a question to raise"
+        assert "human_input" not in merge and "blocking" not in merge, f"the {mode} merge schema still carries a question field"
+    comparison = common.comparison_task("### Agent1\n\ndo it", "g")
+    assert "You ask the human nothing from this pass" in comparison
+    assert "human_input" not in comparison, "the comparison still offers the chair a question field"
+    direction = common.direction_task("### Agent1\n\n- Agent1, backing `the original plan`:\ndo it", "g")
+    assert "the ID each seat answers with" in direction, "the chair may word a direction the run never listed"
+    assert "blocking" not in direction, "the chair was handed a stop button again"
 
 
 def test_the_merge_listing_words_an_item_s_detail_the_way_the_mode_does():
@@ -400,7 +414,7 @@ def test_a_seat_standing_by_its_ask_moves_nothing_on_the_docket():
         return outcome, built, records
 
     outcome, built, records = asyncio.run(main())
-    assert outcome == "round_limit_reached" and built.docket.question_order == ["H1"], "one ask, re-filed three times"
+    assert outcome == "stalemate" and built.docket.question_order == ["H1"], "one ask, re-filed until the council stalled on it"
     rounds = [record["round"] for record in records if record["event"] == "question_updated"]
     assert rounds == [1], f"round 1 gave the entry its context and menu; rounds 2 and 3 changed nothing, and said {rounds}"
 
@@ -785,6 +799,310 @@ def test_a_refused_merge_plan_leaves_the_docket_unmerged_and_the_run_going():
     assert outcome != "aborted"
 
 
+PLANS = {"claim": "do it", "stages": [{"state": "done", "gate": "green", "scope": "src/", "exceptions": []}]}
+
+
+def test_no_chair_pass_puts_a_question_to_the_human():
+    """The chair sees no code and holds no stance: a question of its own would reach the human unexamined and unchallenged."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            reported = {"claim": "the cache ignores tenants", "severity": "major", "evidence": "x.py:1"}
+            return payload(approach=dict(PLANS), findings=[reported] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return payload(groups=[], human_input=[{"question": "is the tenant fixed by contract?", "blocking": True}])
+        if ask.kind == "compare":
+            return payload(agreed=[], conflicts=[], uncovered=[], human_input=[{"question": "which order?"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        boards = {}
+        for mode in ("review", "plan"):
+            built, _port, _records = engine(reply=reply, mode=mode, max_rounds=2)
+            boards[mode] = await built.run(), built
+        return boards
+
+    boards = asyncio.run(main())
+    for mode, (_outcome, built) in boards.items():
+        assert built.docket.question_order == [], f"the {mode} chair put a question to the human anyway"
+
+
+def split_council(following: str | None = None):
+    """Two seats, two directions, a third with no preference; `following` is what the seats back once they read an answer."""
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(approach=dict(PLANS))
+        if ask.kind == "compare":
+            return payload(agreed=[], conflicts=[], uncovered=[])
+        if ask.kind == "direction":
+            return payload(question="which plan do you want?", context="two seats, two orders of work")
+        if following and "ANSWER (authoritative)" in ask.text:
+            return payload(positions=[], backing=following, signoff=True)
+        backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
+        return payload(positions=[], backing=backing[ask.who], signoff=True)
+
+    return reply
+
+
+def test_a_council_that_will_not_converge_asks_instead_of_spending_another_round():
+    """The split is a fact of the seats' own signed backings, so the ask needs nobody's permission and the wait is not optional."""
+    import asyncio
+
+    from mech_council.deliberation.escalations import effective_class
+
+    async def main():
+        built, port, records = engine(reply=split_council(), mode="plan", max_rounds=6)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    ask = built.docket.direction_ask()
+    assert ask is not None and ask.direction_ask and ask.item_id is None
+    assert ask.text == "which plan do you want?", "the chair words the ask"
+    assert ask.options == ["Agent1: do it → done", "Agent2: do it → done"], "one line per direction the council holds, and no others"
+    assert effective_class(built.docket, ask) == "blocking", "no seat can plan against a direction the council has not chosen"
+    notice = next(record for record in records if record["event"] == "direction_ask")
+    assert notice["directions"] == ["Agent1", "Agent2"] and notice["phrased_by"] == "chair"
+    assert notice["round"] == 2 and notice["camps_held"] == 2, "the first round nothing moved in, not one still being argued"
+    assert outcome == "needs_human"
+    assert port.checkpoints[-1]["waiting"], "the split ask holds the run: the round after it would be waste"
+    spent = [r["round"] for r in records if r["event"] == "round_summary"]
+    assert spent == [1, 2], f"the run asked instead of spending rounds 3 to 6: {spent}"
+    reasons = [r.get("reason", "") for r in records if r["event"] == "round_continue"]
+    assert any("different directions" in reason for reason in reasons), "round 1 says what it is still going on about"
+
+
+def test_a_council_still_laying_plans_buys_its_split_one_more_round():
+    """A seat laying a fresh plan is still trying to win a camp over, so the ask waits out the rounds it is working in — three at
+    the latest, whatever it is drawing.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.kind == "direction":
+            return payload(question="which order of work?", context="two gates")
+        if ask.who == "Agent2" and ask.phase != "phase0":
+            # The same backing restated and the same plan redrawn: nothing the docket's own signature would notice.
+            return payload(
+                positions=[],
+                backing="merged: gate first",
+                signoff=True,
+                revised_plan={"name": "gate first", "stages": [{"state": f"the gate, drawn {ask.round}"}]},
+            )
+        return split_council()(ask)
+
+    async def main():
+        built, _port, records = engine(reply=reply, mode="plan", max_rounds=6)
+        return await built.run(), built, records
+
+    outcome, _built, records = asyncio.run(main())
+    notice = next(record for record in records if record["event"] == "direction_ask")
+    assert notice["round"] == 3 and notice["camps_held"] == 3, "the two rounds it was working in were not counted against it"
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1, 2, 3]
+    assert outcome == "needs_human"
+
+
+def test_a_split_on_the_last_round_is_asked_however_busy_the_council_was():
+    """Waiting for an idle round buys nothing when there is no round left to wait for: a split that ends unasked is the failure
+    mode this ask exists to avoid, so the ceiling asks regardless of how much work that round was doing.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.kind == "direction":
+            return payload(question="which order of work?", context="two gates")
+        if ask.who == "Agent2" and ask.phase != "phase0":
+            return payload(
+                positions=[],
+                backing="merged: gate first",
+                signoff=True,
+                revised_plan={"name": "gate first", "stages": [{"state": "drawn again"}]},
+            )
+        return split_council()(ask)
+
+    async def main():
+        built, _port, records = engine(reply=reply, mode="plan", max_rounds=2)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    ask = built.docket.direction_ask()
+    assert ask is not None and "unasked" not in ask.markers, "the round limit swallowed the split instead of asking it"
+    assert next(r for r in records if r["event"] == "direction_ask")["round"] == 2
+    assert outcome == "needs_human"
+
+
+def test_renaming_a_merge_is_no_movement_to_a_split():
+    """The clock counts camps, not labels: a seat re-stamping its merge every round is fidgeting, and fidgeting runs out at three."""
+    import asyncio
+
+    def reply(ask):
+        if ask.kind == "direction":
+            return payload(question="which order of work?", context="two gates")
+        if ask.who == "Agent2" and ask.phase != "phase0":
+            return payload(positions=[], backing=f"merged: v{ask.round}", signoff=True)
+        return split_council()(ask)
+
+    async def main():
+        built, _port, records = engine(reply=reply, mode="plan", max_rounds=6)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert next(r for r in records if r["event"] == "direction_ask")["round"] == 3, "the camps never changed, whatever they were called"
+    assert built.docket.direction_ask().options == ["Agent1: do it → done", "merged: v3: do it → done"], "the current label is the menu's"
+    assert outcome == "needs_human"
+
+
+def test_a_split_menu_offers_the_directions_in_ids_and_prints_them_in_names():
+    """A taken line is recorded verbatim as what the seats plan against, so the menu is stored in the ids they read; the console is
+    where a seat becomes a name — over the chair's sentence too, which is worded from a listing headed by those ids.  Every line
+    carries the plan's own claim and stages — a `merged:` token alone names nothing.
+    """
+    import asyncio
+
+    from mech_council.humaninput import render_ask_set
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(approach=dict(PLANS))
+        if ask.kind == "compare":
+            return payload(agreed=[], conflicts=[], uncovered=[])
+        if ask.kind == "direction":
+            return payload(
+                question="Agent1 gates before anything ships; Agent2 ships and gates after",
+                context="Agent1 buys a safe first release; Agent2 buys the first week",
+            )
+        if ask.who == "Agent2":
+            return payload(
+                positions=[],
+                backing="merged: ship the gate first",
+                signoff=True,
+                revised_plan={"name": "ship the gate first", "stages": [{"state": "the gate is green"}, {"state": "the helper is called"}]},
+            )
+        return payload(positions=[], backing={"Agent1": "Agent1", "Agent3": "no_preference"}[ask.who], signoff=True)
+
+    async def main():
+        built, _port, _records = engine(reply=reply, mode="plan", max_rounds=6)
+        return await built.run(), built
+
+    _outcome, built = asyncio.run(main())
+    ask = built.docket.direction_ask()
+    assert ask.options == [
+        "Agent1: do it → done",
+        "merged: ship the gate first: the gate is green → the helper is called",
+    ]
+    menu = render_ask_set(built.docket, [ask], names=NAMES, waiting=True)
+    assert "1) Metic: do it → done" in menu, menu
+    assert "2) the merge `ship the gate first`: the gate is green" in menu, menu
+    assert "Metic gates before anything ships" in menu and "Metic buys a safe first release" in menu, menu
+    assert "Agent" not in menu, "the console leaves an id where the human needs a name"
+    assert "Agent1" in ask.text, "what the seats are shown keeps the id they answer with"
+
+
+def test_an_answer_at_the_round_limit_buys_the_round_it_promised():
+    """The split ask lands on the last allowed round, so the ceiling has to move or the answer buys nothing."""
+    import asyncio
+
+    async def main():
+        built, _port, records = engine(
+            reply=split_council(following="Agent1"),
+            mode="plan",
+            max_rounds=2,
+            answers={"H1": "Agent1: do it → done"},
+            selections={"H1": 1},
+        )
+        return await built.run(), records
+
+    outcome, records = asyncio.run(main())
+    assert outcome == "consensus", [r for r in records if r["event"] == "termination"]
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1, 2, 3], "round 3 is the one the answer paid for"
+
+
+def test_an_answer_to_the_split_ask_buys_the_round_that_converges_on_it():
+    import asyncio
+
+    async def main():
+        built, port, records = engine(
+            reply=split_council(following="Agent1"),
+            mode="plan",
+            max_rounds=6,
+            answers={"H1": "Agent1: do it → done"},
+            selections={"H1": 1},
+        )
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    ask = built.docket.direction_ask()
+    assert ask.state == "answered" and ask.answer_option == 1, "a numbered answer names the direction it was shown"
+    shown = next(ask_.text for ask_ in port.asks if ask_.round == 3 and ask_.who == "Agent2")
+    assert "ANSWER (authoritative): Agent1: do it → done" in shown, "the seat is told the direction in the id it answers with"
+    assert "Metic" not in shown, "a name would be a direction the seats have no token for"
+    assert built.docket.backing == {"Agent1": "Agent1", "Agent2": "Agent1", "Agent3": "Agent1"}, "the seats followed it"
+    assert outcome == "consensus", [r for r in records if r["event"] == "termination"]
+
+
+def test_a_chair_that_cannot_word_the_split_costs_the_run_neither_the_ask_nor_the_run():
+    import asyncio
+
+    def reply(ask):
+        if ask.kind == "direction":
+            return RawAsk(failure="chair: the answer never came")
+        return split_council()(ask)
+
+    async def main():
+        built, port, records = engine(reply=reply, mode="plan", max_rounds=3)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome != "aborted", "the split is the docket's own fact; the chair's sentence is a nicety"
+    ask = built.docket.direction_ask()
+    assert ask is not None and ask.text == "The seats will not converge on one direction: which do you want?"
+    assert ask.options == ["Agent1: do it → done", "Agent2: do it → done"], "the menu never depended on the chair"
+    assert ask.context == "2 rounds: Metic, Senior still standing, no camp changed.", "the human is told names, not protocol ids"
+    assert any(r["event"] == "chair_direction_unreadable" for r in records), "the run says the wording is the docket's"
+    assert next(r for r in records if r["event"] == "direction_ask")["phrased_by"] == "docket"
+    assert outcome == "needs_human" and port.checkpoints[-1]["ask_set"] == [ask.id]
+
+
+def test_a_second_needs_human_says_so_on_the_event_feed():
+    """A stance is what usually moves an escalation's effective class, and the seat that moved it never re-asks."""
+    import asyncio
+
+    decision = "is the tenant fixed by contract?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            reported = [
+                {"claim": "the cache ignores tenants", "severity": "major", "evidence": "src/app.py:1"},
+                {"claim": "the retry hides 5xx", "severity": "major", "evidence": "src/app.py:9"},
+            ]
+            return payload(findings=reported if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return payload(groups=[])
+        # F2 stays refuted, so the run is still working while the escalation on F1 gathers its second holder.
+        escalating = ask.who == "Agent2" or (ask.who == "Agent3" and ask.round > 1)
+        return payload(
+            positions=[
+                {"item": "F1", "stance": "needs_human" if escalating else "agree", "note": decision if escalating else ""},
+                {"item": "F2", "stance": "disagree", "note": "the guard sits upstream", "evidence": "src/app.py:12"}
+                if ask.who == "Agent1"
+                else {"item": "F2", "stance": "agree"},
+            ],
+            backing="no_preference",
+            signoff=True,
+        )
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=4)
+        return await built.run(), built, records
+
+    _outcome, built, records = asyncio.run(main())
+    assert built.docket.question_order == ["H1"], "one question, held by two seats"
+    flips = [r for r in records if r["event"] == "question_effective_class"]
+    assert [(r["prior"], r["effective"], r["round"]) for r in flips] == [("deferred", "blocking", 2)], flips
+    assert any(r["event"] == "human_checkpoint" and r["waited"] for r in records), "the wait follows the class the run derived"
+
+
 # --------------------------------------------------------------------------- plan mode
 
 
@@ -838,28 +1156,6 @@ def test_plan_mode_reaches_consensus_on_one_backer_and_two_shrugs():
 
     outcome, records = asyncio.run(main())
     assert outcome == "consensus", [r for r in records if r["event"] == "termination"]
-
-
-def test_plan_mode_objects_loudly_when_two_seats_name_different_directions():
-    """A seat naming another plan is an objection, not a lost vote (the direction rule's second condition)."""
-    import asyncio
-
-    def reply(ask):
-        if ask.phase == "phase0":
-            return payload(approach={"claim": "do it", "stages": [{"state": "done", "gate": "green", "scope": "src/", "exceptions": []}]})
-        if ask.kind == "compare":
-            return payload(agreed=[], conflicts=[], uncovered=[])
-        backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
-        return payload(positions=[], backing=backing[ask.who], signoff=True)
-
-    async def main():
-        built, _port, records = engine(reply=reply, mode="plan", max_rounds=2)
-        return await built.run(), records
-
-    outcome, records = asyncio.run(main())
-    assert outcome == "round_limit_reached", "a different token is an objection"
-    reasons = [r.get("reason", "") for r in records if r["event"] == "round_continue"]
-    assert any("different directions" in reason for reason in reasons), reasons
 
 
 def test_an_answer_naming_its_addressee_instead_of_a_q_id_still_lands():

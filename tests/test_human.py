@@ -128,6 +128,36 @@ def test_the_listing_prints_even_when_nothing_waits():
     assert "retention policy" in text
 
 
+def test_the_split_ask_prints_as_a_choice_of_directions():
+    """The human answers a split by typing a number, so it has to read as a choice and not as another seat's question."""
+    docket = state.Docket(mode="plan", goal="g", roster=["Agent1", "Agent2", "Agent3"])
+    docket.backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
+    ask = escalations.raise_direction_ask(
+        docket,
+        text="which plan do you want?",
+        context="two seats, two orders of work",
+        options=["Agent1: land it first", "Agent2: cut over now"],
+        round_=2,
+    )
+    text = render_ask_set(docket, [ask], names=NAMES, waiting=True)
+    assert "the council will not converge" in text and "[blocking]" in text and "asked by Gavel" in text
+    assert "1) Metic: land it first" in text and "2) Senior: cut over now" in text
+    assert "Agent1" not in text, "the menu is stored in the ids the seats answer with and printed in the names the human knows"
+
+
+def test_taking_a_split_option_records_the_id_and_echoes_the_name():
+    """A taken line becomes the answer the seats plan against, so it keeps the id even though the human was shown a name."""
+    docket = state.Docket(mode="plan", goal="g", roster=["Agent1", "Agent2", "Agent3"])
+    docket.backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
+    ask = escalations.raise_direction_ask(
+        docket, text="which plan do you want?", context="", options=["Agent1: land it first", "Agent2: cut over now"], round_=2
+    )
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: 1", ""])
+    outcome = asyncio.run(cp.run([ask], ask_set=[ask], round_=2, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "Agent1: land it first"} and outcome.answer_options == {"H1": 1}
+    assert any("Metic: land it first" in line for line in console.lines), "the echo is in the words the human was shown"
+
+
 def test_an_empty_checkpoint_says_so_and_waits_for_nothing():
     docket = build()
     assert "no question for you" in render_ask_set(docket, [], names=NAMES, waiting=False)
@@ -348,17 +378,17 @@ def test_explain_asks_the_asker_and_records_a_recommendation_not_an_answer():
     assert any("recommendation" in line.lower() for line in console.lines)
 
 
-def test_explain_of_a_chair_raised_question_asks_no_one():
-    """The chair holds no roster ID and never receives a deliberation ask."""
+def test_explain_of_the_split_ask_asks_no_one():
+    """No seat stands behind the council's split: the chair words it and holds no roster ID to ask."""
     docket = build()
-    listing = questions(docket, ("what should we optimise for?", "chair", None, True))
+    ask = escalations.raise_direction_ask(docket, text="which plan?", context="", options=["Agent1: a", "Agent2: b"], round_=1)
     calls = []
 
     async def ask_seat(agent, text, *, round_, phase):
         calls.append(agent)
 
     cp, console, _reader = make_checkpoint(docket, lines=["explain H1", ""], ask_seat=ask_seat)
-    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    outcome = asyncio.run(cp.run([ask], ask_set=[ask], round_=1, terminal=True, waiting=True))
     assert calls == [] and not outcome.recommendations
     assert any("never deliberates" in line for line in console.lines)
 

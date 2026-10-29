@@ -16,8 +16,10 @@ from mech_council.deliberation.state import (
     DISPUTED,
     HUMAN,
     NEEDS_HUMAN,
+    NO_PREFERENCE,
     OPEN,
     REJECTED,
+    SKIPPED,
     STANDING,
     UNHEARD,
     UNSEEN,
@@ -196,10 +198,34 @@ def test_escalation_states_and_the_effective_class():
     stance(docket, "F1", "Agent2", NEEDS_HUMAN)
     stance(docket, "F1", "Agent3", NEEDS_HUMAN)
     assert escalations.effective_class(docket, question) == "blocking"
+    assert termination.blocking_questions(docket) == [question]
 
-    chair_question, _ = escalations.raise_question(docket, text="chair asks", asker="chair", item_id=None, blocking=False, round_=1)
-    assert escalations.effective_class(docket, chair_question) == "blocking"
-    assert termination.blocking_questions(docket) == [question, chair_question]
+
+def test_the_split_ask_blocks_only_while_the_split_it_reported_stands():
+    """Nobody holds the split the way seats hold an escalation, so nothing but the split itself can hold the run."""
+    docket = docket_with(3, mode="plan")
+    ask = escalations.raise_direction_ask(
+        docket, text="which plan do you want?", context="two seats, two orders of work", options=["Agent1: a", "Agent2: b"], round_=2
+    )
+    assert ask.direction_ask and ask.item_id is None and ask.askers == ["chair"]
+    assert escalations.effective_class(docket, ask) == "deferred", "nobody has named a direction yet"
+    docket.backing.update({"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": NO_PREFERENCE})
+    assert escalations.effective_class(docket, ask) == "blocking"
+    # Item-less and nobody's escalation, so it reaches the human on the ask set alone.
+    assert termination.blocking_questions(docket) == [ask] and termination.unsettled_questions(docket) == [ask]
+    docket.backing["Agent2"] = "Agent1"
+    assert escalations.effective_class(docket, ask) == "deferred", "the council converged: the ask is moot with no keystroke"
+
+
+def test_a_declined_split_ask_is_a_needs_human_while_two_directions_stand():
+    docket = docket_with(3, mode="plan", items=0)
+    for agent in docket.roster:
+        docket.signoffs[agent] = 1
+    ask = escalations.raise_direction_ask(docket, text="which plan?", context="", options=["a", "b"], round_=2)
+    docket.backing.update({"Agent1": "Agent1", "Agent2": "merged: both"})
+    ask.state = SKIPPED
+    assert termination.declined_blocking(docket) == [ask]
+    assert termination.evaluate(docket)[0] == termination.NEEDS_OUTCOME
 
 
 def test_an_item_less_question_is_never_blocking_however_many_ask():

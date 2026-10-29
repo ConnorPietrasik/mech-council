@@ -30,6 +30,10 @@ class Chair:
         message = self.brief.comparison(listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="compare", phase="compare", round_=round_)
 
+    async def direction(self, listing: str, *, round_: int) -> dict:
+        message = self.brief.direction(listing=listing, goal=self.council.goal)
+        return await self._publication(message, kind="direction", phase="direction", round_=round_)
+
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:
         refusal = "no JSON object"
         for attempt in (0, 1):

@@ -15,6 +15,8 @@ CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs
 
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
+#: A `backing` naming a merge one seat wrote down, by the label it spelled out: `merged: <label>`.
+MERGED = "merged:"
 
 #: The termination order's "keep going" is not an outcome, so it needs its own literal.
 GO = "go"
@@ -86,8 +88,9 @@ class Question:
     menu: dict[str, tuple[str, str]] = field(default_factory=dict)
     item_id: str | None = None
     askers: list[str] = field(default_factory=list)
-    chair_raised: bool = False
     blocking_requested: bool = False
+    #: the council's own split: the one ask that blocks with nobody holding it
+    direction_ask: bool = False
     raised_round: int = 0
     updated_round: int = 0
     state: str = ASKED  # asked / answered / skipped
@@ -215,6 +218,25 @@ class Docket:
 
     def standing_escalations(self, item_id: str) -> list[Escalation]:
         return [e for (iid, _a), e in self.escalations.items() if iid == item_id and e.state == STANDING]
+
+    def directions(self) -> tuple[str, ...]:
+        """The directions the seats actually named."""
+        named = {self.backing[a] for a in self.roster if self.backing.get(a) not in (None, NO_PREFERENCE, DECLINED)}
+        return tuple(sorted(named))
+
+    def camps(self) -> tuple[tuple[str, ...], ...]:
+        """The seats grouped by the direction they name, whatever that direction is called: re-stamping a merge under a new
+        label moves no seat.
+        """
+        groups: dict[str, list[str]] = {}
+        for agent in self.roster:
+            token = self.backing.get(agent)
+            if token not in (None, NO_PREFERENCE, DECLINED):
+                groups.setdefault(token, []).append(agent)
+        return tuple(sorted(tuple(group) for group in groups.values()))
+
+    def direction_ask(self) -> Question | None:
+        return next((q for q in (self.questions[i] for i in self.question_order) if q.direction_ask), None)
 
     def question(self, qid: str) -> Question | None:
         return self.questions.get(qid)

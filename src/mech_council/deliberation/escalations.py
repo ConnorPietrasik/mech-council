@@ -4,8 +4,9 @@ from .state import ASKED, CHAIR_ID, DISAGREE, NEEDS_HUMAN, RETIRED, STANDING, WI
 
 
 def effective_class(docket: Docket, question: Question) -> str:
-    if question.chair_raised:
-        return "blocking"
+    # Nothing anybody *marks* stops the run: an escalation stops it when enough seats hold it, the split ask while the split stands.
+    if question.direction_ask:
+        return "blocking" if len(docket.directions()) > 1 else "deferred"
     if question.item_id is None:
         return "deferred"
     holders = sum(1 for agent in docket.roster if docket.stated_stance(question.item_id, agent) == NEEDS_HUMAN)
@@ -58,7 +59,6 @@ def raise_question(
         menu=_menu(asker, options),
         item_id=item_id,
         askers=[asker],
-        chair_raised=(asker == CHAIR_ID),
         blocking_requested=blocking,
         raised_round=round_,
         updated_round=round_,
@@ -67,6 +67,24 @@ def raise_question(
     docket.questions[question.id] = question
     docket.question_order.append(question.id)
     return question, False
+
+
+def raise_direction_ask(docket: Docket, *, text: str, context: str, options: list[str], round_: int) -> Question:
+    """The council's split, put to the human: raised once, never deduped onto a seat's ask, worded but not raised by the chair."""
+    question = Question(
+        id=f"H{docket.next_question}",
+        text=text,
+        context=context,
+        menu=_menu(CHAIR_ID, options),
+        askers=[CHAIR_ID],
+        direction_ask=True,
+        raised_round=round_,
+        updated_round=round_,
+    )
+    docket.next_question += 1
+    docket.questions[question.id] = question
+    docket.question_order.append(question.id)
+    return question
 
 
 def refresh_question(

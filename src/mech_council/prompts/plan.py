@@ -41,7 +41,8 @@ DECIDE — stance every open decision point, with evidence.
 CONVERGE — `backing` is mandatory and is exactly one of `AgentN`, `merged: <label>` (a
 label you spelled out in a `revised_plan`), or `no_preference`. It is restated every
 round; `abstain` is never a legal backing, and a `merged:` token you never wrote down is not
-a plan.
+a plan. Two directions that hold through a round nothing else moved in stop the run and go to
+the human to choose, so a backing you will not move is a question you are asking.
 IMPROVE — new decision points, a revised plan of your own, questions and answers.
 ESCALATE — `human_input` for what only the human can settle.
 
@@ -103,9 +104,8 @@ build the decision map; you never plan anything yourself.
 - `uncovered`: what the council's goal needs and no plan covers.
 - Judge plans by consequence: mechanism is fair game, naming and phrasing are not worth a
   round.
-- A conflict you hand to the human carries `context` — what is at stake between the two
-  answers — and `options`: each seat's answer **in that seat's own words**, which is the one
-  thing this pass has and nobody else does. Quote the plans; never improve their wording.
+- You ask the human nothing from this pass. A conflict the seats cannot settle becomes their
+  escalation, and the council's own split goes to the human on its own.
 - Echo the agent IDs exactly; make none up.
 """
 
@@ -118,10 +118,30 @@ COMPARISON_SCHEMA = """\
   "conflicts": [{"claim": "the decision in one line",
                  "positions": [{"agent": "Agent1", "claim": "its answer"},
                                {"agent": "Agent2", "claim": "its answer"}]}],
-  "uncovered": ["…"],
-  "human_input": [{"question": "…", "context": "what is at stake between them",
-                   "options": ["Agent1's answer in Agent1's words", "Agent2's answer in Agent2's words"],
-                   "blocking": true}]
+  "uncovered": ["…"]
 }
+```
+"""
+
+# The one ask the chair words: the run raises it, and asks only for the sentence.
+DIRECTION = """\
+# Say what is at stake between these directions
+
+The council will not converge: two or more plans are still standing after a full round of trying,
+and the human is going to pick one. You never plan anything yourself and you never pick.
+
+- `question` — the choice in one line, in the terms the plans themselves use.
+- `context` — what is at stake between these directions and what guessing wrong costs, in two
+  lines.
+- The directions below are listed by the ID each seat answers with; the run numbers them for the
+  human and prints that seat's name over the ID. Write both lines as what is being chosen and not
+  who is being chosen between — the human reads the numbered menu, never this listing. Quote the
+  plans, invent nothing, and name no direction that is not listed.
+"""
+
+DIRECTION_SCHEMA = """\
+```json
+{"question": "the choice the human is making, one line",
+ "context": "what is at stake between these directions, and the cost of guessing wrong"}
 ```
 """

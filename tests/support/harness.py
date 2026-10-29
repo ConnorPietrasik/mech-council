@@ -65,8 +65,16 @@ class ScriptPort:
         from mech_council.extraction import parse_merge_plan
 
         text = self._chair_answer(Ask("chair", "merge", round_, "merge", listing))
-        data, questions, _errors = parse_merge_plan(text or "")
-        return {"groups": (data or {}).get("groups") or [], "questions": questions}
+        data, _errors = parse_merge_plan(text or "")
+        return {"groups": (data or {}).get("groups") or []}
+
+    async def chair_direction(self, listing: str, *, round_: int) -> dict:
+        self.asks.append(Ask("chair", "direction", round_, "direction", listing))
+        from mech_council.extraction import parse_direction
+
+        text = self._chair_answer(Ask("chair", "direction", round_, "direction", listing))
+        data, _errors = parse_direction(text or "")
+        return data or {}
 
     async def chair_compare(self, listing: str, *, round_: int) -> dict:
         self.asks.append(Ask("chair", "compare", round_, "compare", listing))

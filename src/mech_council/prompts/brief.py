@@ -45,6 +45,9 @@ class Brief:
     def comparison(self, *, listing: str, goal: str | None = None) -> str:
         return common.comparison_task(listing, goal)
 
+    def direction(self, *, listing: str, goal: str | None = None) -> str:
+        return common.direction_task(listing, goal)
+
     def watchdog(self, rows: list[dict], *, mode: str = "") -> str:
         return common.watchdog_task(render_digest(rows))
 

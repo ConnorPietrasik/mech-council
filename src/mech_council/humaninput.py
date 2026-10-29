@@ -55,6 +55,29 @@ def parse_line(text: str) -> Line:
     return Line("answer", id="", text=text.strip())
 
 
+def _direction_line(option: str, docket: Docket, names: dict[str, str]) -> str:
+    """A direction menu line in the names the human knows.  It is stored led by the token the seats answer with, because taking
+    the line records those words verbatim as what the council plans against.
+    """
+    from .render.text import direction_label
+
+    token = next((t for t in docket.directions() if option.startswith(f"{t}: ")), "")
+    if not token:
+        return option
+    return f"{direction_label(token, names)}: {option[len(token) + 2 :]}"
+
+
+def _spoken(question: Question, names: dict[str, str]) -> tuple[str, str]:
+    """The chair words the split from a listing headed by `AgentN`, so its sentence carries those ids; the ask set is the
+    human's screen, and a seat's docket keeps the ids it answers with.
+    """
+    from .render.text import spoken
+
+    if not question.direction_ask:
+        return question.text, question.context
+    return spoken(question.text, names), spoken(question.context, names)
+
+
 def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool) -> str:
     from .render.text import name_of
 
@@ -62,15 +85,17 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
         return "the council has no question for you right now"
     lines = ["the council needs you" if waiting else "open questions (the run keeps working):"]
     for question in listing:
-        where = f" on {question.item_id}" if question.item_id else ""
+        where = f" on {question.item_id}" if question.item_id else " (the council will not converge)" if question.direction_ask else ""
         askers = ", ".join(name_of(a, names) for a in question.askers) or "the chair"
+        text, context = _spoken(question, names)
         lines.append(f"  {question.id}{where} [{effective_class(docket, question)}] asked by {askers} (round {question.raised_round})")
-        lines.append(f"    {question.text}")
-        if question.context:
-            lines.append(f"    context: {question.context}")
+        lines.append(f"    {text}")
+        if context:
+            lines.append(f"    context: {context}")
         # Numbered because the cheap reply is typing a number; `1)` is the whole of it.
         for number, option in enumerate(question.options, start=1):
-            lines.append(f"      {number}) {option}")
+            shown = _direction_line(option, docket, names) if question.direction_ask else option
+            lines.append(f"      {number}) {shown}")
     if waiting:
         lines += [
             "",
@@ -165,7 +190,8 @@ class Checkpoint:
                     continue
                 took_back = qid in skipped
                 skipped.discard(qid)
-                answer, number = take_selection(parsed.text, self.docket.questions[qid])
+                target = self.docket.questions[qid]
+                answer, number = take_selection(parsed.text, target)
                 result.answers[qid] = answer
                 if number:
                     result.answer_options[qid] = number
@@ -174,7 +200,8 @@ class Checkpoint:
                     # answer came from, and an answer in the human's own words came from none of them.
                     result.answer_options.pop(qid, None)
                 pending.discard(qid)
-                chose = f' "{answer}" (option {number})' if number else ""
+                echoed = _direction_line(answer, self.docket, self.names) if number and target.direction_ask else answer
+                chose = f' "{echoed}" (option {number})' if number else ""
                 back = ", and the decline you gave is withdrawn" if took_back else ""
                 self.console.say(f"{qid}: answered{chose} — the answer is authoritative and buys a full round{back}")
                 continue
@@ -196,8 +223,8 @@ class Checkpoint:
         if target is None:
             self.console.say(f"no question {qid}")
             return None
-        if target.chair_raised:
-            self.console.say(f"{qid} was raised by the chair, which holds no roster ID and never deliberates: there is nothing to explain")
+        if target.direction_ask:
+            self.console.say(f"{qid} is the council's split, worded by the chair, which holds no roster ID and never deliberates")
             return None
         asker = next((a for a in target.askers if a in self.docket.roster), None)
         if asker is None or self.ask_seat is None:

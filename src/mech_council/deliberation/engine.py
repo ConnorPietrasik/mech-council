@@ -6,7 +6,7 @@ from ..extraction import parse_phase0, parse_verdict
 from ..modes.base import adapter_for
 from . import gaps as gap_rules
 from .dispositions import closure_pass, derive
-from .escalations import challenges, demote, effective_class, raise_question, record_stance, refresh_question, retire
+from .escalations import challenges, demote, effective_class, raise_direction_ask, raise_question, record_stance, refresh_question, retire
 from .stalemate import signature
 from .state import (
     ABSTAIN,
@@ -15,6 +15,7 @@ from .state import (
     CHAIR_ID,
     DECLINED,
     GO,
+    MERGED,
     NEEDS_HUMAN,
     QA,
     ROUND_LIMIT,
@@ -69,15 +70,17 @@ class Engine:
         emit=None,
         brief=None,
         max_rounds: int = 10,
+        names: dict[str, str] | None = None,
     ) -> None:
         self.docket = docket
         self.port = port
         self.adapter = adapter_for(docket.mode)
         self.goal = goal
         self.project = project
-        self.max_rounds = max_rounds
         self.emit = emit or (lambda name, **fields: None)
         self.brief = brief
+        # Protocol id → the name to print for it: the split ask is the one string the engine writes for the human to read.
+        self.names = names or {}
         self.previous_signature: tuple | None = None
         self.checkpoint_moved = False
         self.shown: dict[str, list[str]] = {}
@@ -89,6 +92,9 @@ class Engine:
         self.phase0_counts: dict[str, int] = {}
         self._phase0_summary: dict[str, str] = {}
         self._class_of: dict[str, str] = {}
+        self._camps_seen: tuple[tuple[str, ...], ...] | None = None
+        self._camps_held = 0
+        self._ceiling = max_rounds  # an answer given at the ceiling buys one more round, so it can outgrow the configured limit
         self._demoted_this_round: set[tuple[str, str]] = set()
         self._stale = False
 
@@ -200,7 +206,6 @@ class Engine:
             self.docket.add_item(item)
         for gap_text in comparison.get("uncovered") or []:
             self.docket.add_item(Item(id=self.new_id(), claim=gap_text[:600], raised_by=[CHAIR_ID], opened_round=0))
-        self._chair_questions(comparison.get("human_input") or [], CHAIR_ID, 0)
         self.emit(
             "chair_compare",
             agreed=len(self.docket.agreed_points),
@@ -217,6 +222,99 @@ class Engine:
             stages = " → ".join(_stage_name(stage) for stage in approach.stages)
             blocks.append(f"### {agent}\n\n{approach.original}" + (f"\n\nStages: {stages}" if stages else ""))
         return "\n\n".join(blocks)
+
+    # -- the council's split ------------------------------------------------------
+
+    async def _direction_ask(self, round_: int) -> None:
+        """Camps that will not move are the council failing to converge, not deliberation still working, so the split goes to the
+        human rather than costing another round: on the first round that moved nothing, at the latest after `_SPLIT_ROUNDS` of
+        the same camps or on the run's last one.  Once per run: the answer is authoritative, a council that ignores it runs out.
+        """
+        from ..render.text import direction_label
+
+        if self.docket.mode != "plan" or self.docket.direction_ask() is not None:
+            return
+        camps = self.docket.camps()
+        if len(camps) < 2 or camps != self._camps_seen:
+            # A camp is held from the round it is first seen in.
+            self._camps_seen, self._camps_held = camps, 1 if camps else 0
+            return
+        self._camps_held += 1
+        # Whether to wait is the stalemate rule's own answer: the docket's signature unchanged, a freshly drawn plan included.
+        # And at the ceiling there is no round left to wait for — a split that ends unasked is the one thing this ask must never be.
+        if not self._stale and self._camps_held < _SPLIT_ROUNDS and round_ < self._ceiling:
+            return
+        split = self.docket.directions()
+        held = ", ".join(direction_label(token, self.names) for token in split)
+        wording = await self._direction_wording(split, round_)
+        question = raise_direction_ask(
+            self.docket,
+            text=wording.get("question") or "The seats will not converge on one direction: which do you want?",
+            context=wording.get("context") or f"{self._camps_held} rounds: {held} still standing, no camp changed.",
+            options=[self._direction_option(token) for token in split],
+            round_=round_,
+        )
+        self._recheck_class(question, round_)
+        self.emit(
+            "direction_ask",
+            id=question.id,
+            directions=list(split),
+            round=round_,
+            camps_held=self._camps_held,
+            phrased_by="chair" if wording.get("question") else "docket",
+        )
+
+    async def _direction_wording(self, split: tuple[str, ...], round_: int) -> dict:
+        """The chair words the ask; the menu stays the run's, so no number the human types names a direction nobody held."""
+        try:
+            wording = await self.port.chair_direction(self._split_listing(split), round_=round_)
+        except Abort as failure:
+            self.emit("chair_direction_unreadable", round=round_, reason=str(failure))
+            return {}
+        return {key: str(wording.get(key) or "")[:600] for key in ("question", "context")}
+
+    def _split_listing(self, split: tuple[str, ...]) -> str:
+        blocks = []
+        for token in split:
+            lines = [f"### {token}"]
+            for agent in self.docket.roster:
+                if self.docket.backing.get(agent) != token:
+                    continue
+                approach = self.docket.approaches.get(agent)
+                artifact = approach.artifact() if approach else {}
+                text = _plan_text(artifact) or "(no plan text)"
+                lines.append(f"- {agent}, backing `{artifact.get('name') or 'the original plan'}`:\n{text}")
+            blocks.append("\n\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def _direction_plan(self, token: str) -> dict:
+        """The plan a direction stands on: the named seat's, or what the seats behind a `merged:` label actually wrote down."""
+        if not token.startswith(MERGED):
+            approach = self.docket.approaches.get(token)
+            return approach.artifact() if approach else {}
+        label = token.partition(MERGED)[2].strip()
+        fallback: dict = {}
+        for agent in self.docket.roster:
+            approach = self.docket.approaches.get(agent)
+            if approach is None or self.docket.backing.get(agent) != token:
+                continue
+            for revision in approach.revisions:
+                if revision.get("name") == label:
+                    return revision
+            fallback = fallback or approach.artifact()
+        return fallback
+
+    def _direction_option(self, token: str) -> str:
+        """One line per direction, led by the token itself: a taken option is recorded verbatim as the authoritative answer, and
+        the seats that plan against it read `AgentN`, never a name.  The console prints the seat's name over that token.
+        """
+        plan = self._direction_plan(token)
+        states = [_one_line(state) for state in _stage_states(plan)]
+        tail = " → ".join(states[:_MENU_STAGES]) + (" → …" if len(states) > _MENU_STAGES else "")
+        claim = _one_line(plan.get("text") or "")
+        if claim:
+            return f"{token}: {claim}" + (f" → {tail}" if tail else "")
+        return f"{token}: {tail}" if tail else token
 
     # -- rounds ---------------------------------------------------------------
 
@@ -272,16 +370,14 @@ class Engine:
             item = self.docket.items.get(position["item"])
             if item is None:
                 continue
-            for event, fields in record_stance(
-                self.docket,
+            self._stance(
                 item_id=item.id,
                 agent=agent,
                 stance=position["stance"],
                 note=position.get("note", ""),
                 evidence=position.get("evidence", ""),
                 round_=round_,
-            ):
-                self.emit(event, **fields)
+            )
         for entry in data.get("new_items") or []:
             self.add_item(entry, agent, round_)
         self._answers(data.get("answers") or [], agent, round_)
@@ -363,28 +459,11 @@ class Engine:
             if item_id:
                 # The escalation and its question are one act: stance the item `needs_human`.
                 if self.docket.stated_stance(item_id, asker) != NEEDS_HUMAN:
-                    for event, fields in record_stance(
-                        self.docket, item_id=item_id, agent=asker, stance=NEEDS_HUMAN, note=entry["question"], round_=round_
-                    ):
-                        self.emit(event, **fields)
+                    self._stance(item_id=item_id, agent=asker, stance=NEEDS_HUMAN, note=entry["question"], round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
                 if escalation is not None:
                     escalation.question_id = question.id
             self._recheck_class(question, round_)
-
-    def _chair_questions(self, entries: list[dict], asker: str, round_: int) -> None:
-        for entry in entries:
-            question, _ = raise_question(
-                self.docket,
-                text=entry["question"],
-                asker=asker,
-                item_id=None,
-                blocking=True,
-                round_=round_,
-                context=entry.get("context", ""),
-                options=entry.get("options"),
-            )
-            self.emit("chair_question", id=question.id, effective="blocking", round=round_)
 
     def _re_or_raise(self, asker: str, *, item_id: str | None, entry: dict, round_: int):
         fields = {
@@ -408,6 +487,15 @@ class Engine:
         if question is None or question.state != ASKED or asker not in question.askers:
             return None
         return question
+
+    def _stance(self, *, item_id: str, agent: str, stance: str, note: str = "", evidence: str = "", round_: int) -> None:
+        """A stance moves an escalation's effective class with no `human_input` entry to hang the recheck on."""
+        for event, fields in record_stance(
+            self.docket, item_id=item_id, agent=agent, stance=stance, note=note, evidence=evidence, round_=round_
+        ):
+            self.emit(event, **fields)
+        for question in self.docket.questions_for_item(item_id):
+            self._recheck_class(question, round_)
 
     def _recheck_class(self, question, round_: int) -> None:
         now = effective_class(self.docket, question)
@@ -483,16 +571,14 @@ class Engine:
         for position in data.get("positions") or []:
             if position["item"] not in asked_items:
                 continue
-            for event, fields in record_stance(
-                self.docket,
+            self._stance(
                 item_id=position["item"],
                 agent=agent,
                 stance=position["stance"],
                 note=position.get("note", ""),
                 evidence=position.get("evidence", ""),
                 round_=round_,
-            ):
-                self.emit(event, **fields)
+            )
             # A gap answer may withdraw a sign-off, never re-grant it.
             if self.docket.signoffs.get(agent) == round_ and position["item"] in self.shown.get(agent, []):
                 del self.docket.signoffs[agent]
@@ -566,10 +652,14 @@ class Engine:
                 continue
             restated = position["stance"] == NEEDS_HUMAN
             note, evidence = position.get("note", ""), position.get("evidence", "")
-            for event, fields in record_stance(
-                self.docket, item_id=item_id, agent=asker, stance=position["stance"], note=note, evidence=evidence, round_=round_
-            ):
-                self.emit(event, **fields)
+            self._stance(
+                item_id=item_id,
+                agent=asker,
+                stance=position["stance"],
+                note=note,
+                evidence=evidence,
+                round_=round_,
+            )
         for entry in data.get("human_input") or []:
             if entry.get("item") == item_id and entry.get("question"):
                 # A defense is a verdict like any other, so the menu the seat offered rides with it — the schema asks for one, and this is
@@ -598,7 +688,6 @@ class Engine:
     async def _merge_pass(self, round_: int, ids: list[str]) -> None:
         listing = "\n".join(_merge_entry(self.docket.items[i], self.adapter.detail_label) for i in ids)
         merged = await self.port.chair_merge(listing, round_=round_)
-        self._chair_questions(merged.get("questions") or [], CHAIR_ID, round_)
         applied, reason = self._apply_merge(merged.get("groups") or [])
         if applied is None:
             self.merge_refusals += 1
@@ -682,23 +771,27 @@ class Engine:
             await self.publish_review()
         self.docket.round = 1
         await self._checkpoint(round_=0, terminal=False)
-        for round_ in range(1, self.max_rounds + 1):
+        round_ = 1
+        while round_ <= self._ceiling:
             await self.run_round(round_)
             outcome = await self._after_round(round_)
             if outcome != GO:
                 return outcome
+            round_ += 1
         return ROUND_LIMIT
 
     async def _after_round(self, round_: int) -> str:
+        await self._direction_ask(round_)
         provisional, _ = evaluate(self.docket)
         stale = getattr(self, "_stale", False) and not self.checkpoint_moved
-        terminal = provisional != GO or stale or round_ >= self.max_rounds
+        terminal = provisional != GO or stale or round_ >= self._ceiling
         outcome = await self._checkpoint(round_=round_, terminal=terminal, provisional=provisional, stale=stale)
         if outcome is not None:
             return outcome
         if self.checkpoint_moved:
             # an answer buys a round — unconditionally, ahead of the round limit, and as a full round.  Re-evaluating
             # here would let the answer itself settle the run and throw away the round it paid for.
+            self._ceiling = max(self._ceiling, round_ + 1)
             self.previous_signature = signature(self.docket)
             self.checkpoint_moved = False
             self.emit("round_continue", round=round_, reason="an answer buys a full round")
@@ -710,15 +803,12 @@ class Engine:
         if stale:
             self.emit("termination", outcome=STALEMATE, reason="two consecutive rounds with no movement", round=round_)
             return STALEMATE
-        if self.checkpoint_moved:
-            self.previous_signature = signature(self.docket)
-            self.checkpoint_moved = False
-        if round_ >= self.max_rounds:
+        if round_ >= self._ceiling:
             # This is the only exit that ends a run with a question unasked, and the report has to say so rather than
             # print a question that reads as merely deferred.  Marked here, at the exit, and nowhere earlier: a
             # mid-run checkpoint that does not wait for a deferred question may still be followed by one that does.
             unasked = self._mark_unasked()
-            self.emit("termination", outcome=ROUND_LIMIT, reason=f"round limit ({self.max_rounds}) reached", round=round_, unasked=unasked)
+            self.emit("termination", outcome=ROUND_LIMIT, reason=f"round limit ({self._ceiling}) reached", round=round_, unasked=unasked)
             return ROUND_LIMIT
         self.emit("round_continue", round=round_, reason=reason)
         return GO
@@ -728,7 +818,7 @@ class Engine:
 
         marked = []
         for question in unsettled_questions(self.docket):
-            if question.state == "asked" and "unasked" not in question.markers:
+            if question.state == ASKED and "unasked" not in question.markers:
                 question.markers.append("unasked")
                 marked.append(question.id)
         return marked
@@ -746,7 +836,7 @@ class Engine:
             return None
         # Only an outcome the human can still change makes the run wait.  The
         # round-limit exit is the one exempt — there the questions print `unasked`.
-        at_round_limit = round_ >= self.max_rounds and provisional == GO and not stale
+        at_round_limit = round_ >= self._ceiling and provisional == GO and not stale
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
         waiting = bool(ask) and (terminal or blocking) and not at_round_limit
         outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting)
@@ -841,6 +931,30 @@ class Engine:
                 continue
             retire(escalation, round_)
             self.emit("escalation_retired", item=item_id, asker=asker, question=question.id, round=round_, answered=answered)
+
+
+#: How many rounds the same camps may stand before the split goes to the human whatever else the council is doing.
+_SPLIT_ROUNDS = 3
+
+#: How many of a plan's stages reach the human's menu, where the choice is made.
+_MENU_STAGES = 3
+
+
+def _one_line(text: str, width: int = 90) -> str:
+    """The first line of a plan, short enough for a menu the human reads top to bottom."""
+    line = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+    return line if len(line) <= width else line[: width - 1] + "…"
+
+
+def _plan_text(artifact: dict) -> str:
+    """What the plan says, then the stages it is made of — the chair words the split from both."""
+    text = (artifact.get("text") or "").strip()
+    stages = [f"- stage: {state}" for state in _stage_states(artifact)]
+    return "\n".join(([text] if text else []) + stages)
+
+
+def _stage_states(artifact: dict) -> list[str]:
+    return [str(stage.get("state") or "").strip() for stage in artifact.get("stages") or [] if str(stage.get("state") or "").strip()]
 
 
 def _partial(docket: Docket, agent: str, round_: int) -> bool:
