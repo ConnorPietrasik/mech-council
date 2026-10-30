@@ -17,9 +17,21 @@ from .support.harness import RawAsk, ScriptPort, events_collector, payload
 NAMES = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
 
 
-def engine(n=3, *, mode="review", max_rounds=4, grace_rounds=1, seconding=True, reply=None, answers=None, skip=None, selections=None):
+def engine(
+    n=3,
+    *,
+    mode="review",
+    max_rounds=4,
+    grace_rounds=1,
+    seconding=True,
+    reply=None,
+    answers=None,
+    skip=None,
+    selections=None,
+    off_cycle=None,
+):
     docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)], seconding=seconding)
-    port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [], selections=selections or {})
+    port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [], selections=selections or {}, off_cycle=off_cycle or {})
     records, emit = events_collector()
     built = Engine(
         docket,
@@ -1347,6 +1359,99 @@ def test_an_answer_at_the_terminal_checkpoint_buys_a_full_round():
     assert any(r["event"] == "answer_buys_a_round" for r in records)
     rounds = sorted({ask.round for ask in port.asks if ask.phase == "round"})
     assert rounds == [1, 2], f"a full round after the answer, not a partial one: {rounds}"
+
+
+def test_an_answer_typed_while_the_seats_work_lands_before_the_next_brief():
+    """The human answers a deferred ask mid-round: the run does not wait for a checkpoint to take it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1" and ask.round == 1:
+            return stance_all(ask, "agree", human_input=[{"question": "which tenant owns the cache key?"}])
+        if ask.who == "Agent2" and ask.round == 1:
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, off_cycle={"H1": "the tenant is fixed by contract"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    off = [r for r in records if r["event"] == "human_answer_off_cycle"]
+    assert [(r["round"], r["answered"]) for r in off] == [(1, ["H1"])]
+    question = built.docket.questions["H1"]
+    assert (question.state, question.answer, question.answer_round) == ("answered", "the tenant is fixed by contract", 1)
+    assert any(r["event"] == "answer_buys_a_round" for r in records), "an answer is movement wherever it arrives"
+    assert not any(c["waiting"] and "H1" in c["ask_set"] for c in port.checkpoints), "nothing was put in front of the human"
+    briefs = [ask.text for ask in port.asks if ask.phase == "round" and ask.round == 2]
+    assert briefs and all("ANSWER (authoritative): the tenant is fixed by contract" in text for text in briefs)
+    assert outcome == "consensus", "the answer took the question off the table"
+
+
+def test_the_grace_budget_caps_the_run_however_the_answers_arrive():
+    """Answers from both the checkpoint and mid-round spend the one grace round, and nothing beyond it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            asked = ["which tenant owns the cache key?"] + (["which palette?"] if ask.round == 1 else [])
+            return stance_all(ask, "agree", human_input=[{"question": text} for text in asked])
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1", "H2", "H3", "H4"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(
+            reply=reply,
+            max_rounds=1,
+            grace_rounds=2,
+            off_cycle={"H1": "the fixed one", "H3": "the pale one", "H4": "the plain one"},
+            answers={"H2": "the house one"},
+        )
+        return await built.run(), built, port, records
+
+    _outcome, built, port, records = asyncio.run(main())
+    bought = [r["grace_left"] for r in records if r["event"] == "grace_round_bought"]
+    assert bought == [1, 0], f"one grace round per round of answers, not one per answer: {bought}"
+    assert sorted({ask.round for ask in port.asks if ask.phase == "round"}) == [1, 2, 3], "max_rounds + grace_rounds, never more"
+    answered = {qid: q.answer_round for qid, q in built.docket.questions.items() if q.state == "answered"}
+    assert answered == {"H1": 1, "H2": 1, "H3": 2, "H4": 3}, "every answer is on the docket, the one that bought nothing included"
+    assert [r["round"] for r in records if r["event"] == "answer_buys_no_round"] == [3], "and that one is said aloud"
+
+
+def test_an_off_cycle_answer_at_the_ceiling_leaves_the_checkpoint_open():
+    """Paying for the grace round off-cycle must not close the checkpoint that asks about everything else."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1" and ask.round == 1:
+            return stance_all(ask, "agree", human_input=[{"question": "which tenant?"}, {"question": "which palette?"}])
+        if ask.who == "Agent2" and ask.round == 1:
+            return stance_all(ask, "agree", second=["H1", "H2"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(
+            reply=reply, max_rounds=1, grace_rounds=1, off_cycle={"H1": "the fixed one"}, answers={"H2": "the house one"}
+        )
+        return await built.run(), built, port, records
+
+    _outcome, built, port, _records = asyncio.run(main())
+    assert [c["waiting"] for c in port.checkpoints] == [True], "an answer typed early does not spend the human's turn"
+    assert [built.docket.questions[i].state for i in ("H1", "H2")] == ["answered", "answered"]
+    assert "unasked" not in built.docket.questions["H2"].markers
 
 
 # ------------------------------------------------------------------ The gap ladder gaps

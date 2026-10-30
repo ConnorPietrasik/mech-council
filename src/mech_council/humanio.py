@@ -15,15 +15,15 @@ class LineReader:
         self.lines: queue.Queue = queue.Queue()
         self.eof = False
         self._thread: threading.Thread | None = None
+        try:
+            self.tty = bool(self.stream.isatty())
+        except AttributeError, ValueError:
+            self.tty = False
 
     @property
     def interactive(self) -> bool:
-        if self.eof:
-            return False
-        try:
-            return bool(self.stream.isatty())
-        except AttributeError, ValueError:
-            return False
+        """Whether anyone is at the keyboard: `tty` is what the stream was when it opened, so closing it ends the listening."""
+        return self.tty and not self.eof
 
     def start(self) -> None:
         if self._thread is not None:
@@ -44,6 +44,7 @@ class LineReader:
             self.lines.put(line.rstrip("\n"))
 
     def read_nowait(self):
+        """A line if one arrived, None if nothing has, EOF once stdin closed — queued lines outlive the close."""
         try:
             return self.lines.get_nowait()
         except queue.Empty:

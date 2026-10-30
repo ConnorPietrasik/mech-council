@@ -328,6 +328,7 @@ class Engine:
 
     async def run_round(self, round_: int) -> None:
         self.docket.round = round_
+        await self._listen(round_)
         self.asks_used = {}
         self.shown = {agent: [item.id for item in self.docket.open_items()] for agent in self.docket.roster}
         batch = []
@@ -910,6 +911,7 @@ class Engine:
         return ROUND_LIMIT
 
     async def _after_round(self, round_: int) -> str:
+        await self._listen(round_)
         await self._direction_ask(round_)
         provisional, _ = evaluate(self.docket)
         stale = getattr(self, "_stale", False) and not self.checkpoint_moved
@@ -1102,8 +1104,9 @@ class Engine:
             return None
         at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
-        # the ceiling asks too, on the grace budget
-        waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0)
+        # the ceiling asks too, on the grace budget — and an answer already given off-cycle has paid it for this round,
+        # which is no reason to stop asking the human about the rest
+        waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
         if terminal and not waiting:
             self._mark_unasked()  # the ledger has to say the run ended without asking
         outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting, notes=pending_notes)
@@ -1121,6 +1124,29 @@ class Engine:
             terminal=terminal,
             notes=[n.id for n, _kind in pending_notes],
         )
+        self._apply_human(outcome, round_, at_ceiling=at_ceiling)
+        # an answer is the one thing that outranks a terminal reading of the docket
+        if terminal and provisional != GO and not outcome.any_answer:
+            self.emit("termination", outcome=provisional, reason="the checkpoint closed the run", round=round_)
+            return provisional
+        return None
+
+    async def _listen(self, round_: int) -> None:
+        """Answers the human gave while the run was working, applied at a boundary with no ask in flight."""
+        outcome = await self.port.drain_human()
+        if not (outcome.answers or outcome.skipped or outcome.recommendations):
+            return
+        self.emit(
+            "human_answer_off_cycle",
+            round=round_,
+            answered=sorted(outcome.answers),
+            declined=list(outcome.skipped),
+            explained=sorted(outcome.recommendations),
+        )
+        self._apply_human(outcome, round_, at_ceiling=round_ >= self._ceiling)
+
+    def _apply_human(self, outcome: CheckpointOutcome, round_: int, *, at_ceiling: bool) -> None:
+        """What the human's dispositions do to the docket: the checkpoint and the off-cycle drain apply them alike."""
         selections: dict[str, int] = {}
         for qid, number in outcome.answer_options.items():
             question = self.docket.questions.get(qid)
@@ -1175,23 +1201,23 @@ class Engine:
             question = self.docket.questions.get(qid)
             if question is not None:
                 question.recommendation, question.recommendation_round = text, round_
-        if outcome.any_answer:
-            if at_ceiling:
-                self._grace_left -= 1
-                self.emit(
-                    "grace_round_bought",
-                    round=round_ + 1,
-                    answered=len(outcome.answers),
-                    grace_left=self._grace_left,
-                    round_limit=self._ceiling,
-                )
-            self.checkpoint_moved = True
-            self.emit("answer_buys_a_round", round=round_ + 1, answered=len(outcome.answers))
-            return None
-        if terminal and provisional != GO:
-            self.emit("termination", outcome=provisional, reason="the checkpoint closed the run", round=round_)
-            return provisional
-        return None
+        if not outcome.any_answer:
+            return
+        if at_ceiling and not self.checkpoint_moved:
+            if self._grace_left <= 0:
+                # the answer is on the docket and in the report; a round past the ceiling is the one thing it cannot buy
+                self.emit("answer_buys_no_round", round=round_, answered=len(outcome.answers))
+                return
+            self._grace_left -= 1
+            self.emit(
+                "grace_round_bought",
+                round=round_ + 1,
+                answered=len(outcome.answers),
+                grace_left=self._grace_left,
+                round_limit=self._ceiling,
+            )
+        self.checkpoint_moved = True
+        self.emit("answer_buys_a_round", round=round_ + 1, answered=len(outcome.answers))
 
     def _mark_held_back(self, held_asks: list, round_: int) -> None:
         """Mark the asks the human will not be shown; one a seat backs later loses the mark."""

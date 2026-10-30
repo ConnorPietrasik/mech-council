@@ -108,8 +108,8 @@ seat.
 
 ```
 H1: keep it 30 days          # an answer is authoritative, and buys a round
-H1: 2                        # a bare number takes that option verbatim; to take it with a
-                             # qualifier, answer in your own words
+H1: 2                        # takes that option verbatim; to take it with a qualifier,
+                             # answer in your own words
 explain H2: what breaks?     # routes your question to the seat that asked
 skip                         # decline everything on the table
 skip H1 H2                   # decline these two and answer the rest
@@ -117,10 +117,17 @@ skip H1 H2                   # decline these two and answer the rest
 ```
 
 The last line you type about a question is your word on it: answering one you declined takes it
-back, and declining one you answered withdraws the answer. From the next round on, the docket every
-seat is shown prints your answer as authoritative — but nothing settles the run but the seats'
-own stances, so a council that keeps planning against your answer ends `stalemate` or out of rounds,
-and the report says so.
+back, and declining one you answered withdraws the answer — until the answer is applied, after which
+that id answers nothing further. From the next round on, the docket every seat is shown prints your
+answer as authoritative — but nothing settles the run but the seats' own stances, so a council that
+keeps planning against your answer ends `stalemate` or out of rounds, and the report says so.
+
+You can type any of those lines **while the seats are working**, not only when the run stops for
+you: an answer is read at the next round boundary, so it is already in the docket the seats are
+shown next, and it buys the round exactly as a checkpoint answer does — the same grace budget, so an
+answer typed once the grace rounds are spent is recorded and reported but keeps the run no longer. A
+`skip` typed mid-round declines the asks open at that moment, and `explain H1` waits for that same
+boundary because it costs an ask of the seat that raised it.
 
 Only backed questions appear here. The ones no second seat wanted are in the report and in
 `human_input.json`, marked `unseconded`; an ask a seat answered in your place is marked `settled`,

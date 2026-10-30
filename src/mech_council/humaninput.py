@@ -4,8 +4,10 @@ import re
 from collections.abc import Sequence
 
 from .deliberation.engine import CheckpointOutcome
-from .deliberation.escalations import effective_class, stop_holders
-from .deliberation.state import Docket, Note, Question
+from .deliberation.escalations import effective_class, showable, stop_holders
+from .deliberation.state import ASKED, Docket, Note, Question
+from .deliberation.termination import unsettled_questions
+from .humanio import EOF
 
 #: The id and the separator are both tolerant.
 _ANSWER = re.compile(r"^\s*(h\d+)\s*[:=]\s*(.*)$", re.DOTALL | re.IGNORECASE)
@@ -13,12 +15,14 @@ _EXPLAIN = re.compile(r"^\s*(?:explain|ask)\s+(h\d+)\s*(?:[:=]\s*(.*))?$", re.DO
 _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
 #: `skip H1`, `skip h1 h2`: the whole line has to be ids
 _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
-#: a line that opens like a command gets the grammar said back to it
-_COMMAND_HEAD = re.compile(r"^\s*(?:(?:skip|none)\b|(?:explain|ask)\s+h\d+)", re.IGNORECASE)
 #: `N1:` reads like `H1:`, and would answer whichever ask happens to be open
 _NOTE_LINE = re.compile(r"^\s*(?:note\s+)?n\d+\s*[:=]", re.IGNORECASE)
-#: a bare number takes that option, and only when the question offered that many
+#: an answer that is only a number takes that option, and only when the question offered that many
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
+
+#: what the human is told about the explain ask in flight, by the mode that asks it
+_PARKED = "the run stays parked and this is the only ask in flight"
+_BETWEEN = "the run is between rounds and this is the only ask in flight"
 
 _GRAMMAR = (
     "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), and "
@@ -36,7 +40,8 @@ class Line:
 def parse_line(text: str) -> Line:
     """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
 
-    A bare line answers the first still-unanswered question.
+    Every line names the question it answers: a bare sentence or a bare number is refused, because whichever ask
+    happens to be open first is not ours to guess at, off-cycle least of all.
     """
     if not (text or "").strip():
         return Line("end")
@@ -49,11 +54,9 @@ def parse_line(text: str) -> Line:
         return Line("answer", id=match.group(1).upper(), text=match.group(2).strip())
     if match := _EXPLAIN.match(text):
         return Line("explain", id=match.group(1).upper(), text=(match.group(2) or "").strip() or "Why are you asking this?")
-    if _COMMAND_HEAD.match(text):
-        return Line("error", text=_GRAMMAR)
     if _NOTE_LINE.match(text):
         return Line("error", text="a note needs no answer and nothing you type retracts one; `H1: <text>` answers an open question")
-    return Line("answer", id="", text=text.strip())
+    return Line("error", text=_GRAMMAR)
 
 
 def _direction_line(option: str, docket: Docket, names: dict[str, str]) -> str:
@@ -157,12 +160,20 @@ def take_selection(text: str, question: Question) -> tuple[str, int]:
 
 
 class Checkpoint:
+    """The human's side of the run: what prints, what a line means, and where a disposition lands.
+
+    The only consumer of the reader — `run` for the lines typed while the run waits, `drain` for the ones
+    typed while it worked — so nothing else decides what a line was answering.
+    """
+
     def __init__(self, docket: Docket, reader, *, console, names: dict[str, str], ask_seat=None) -> None:
         self.docket = docket
         self.reader = reader
         self.console = console
         self.names = names
         self.ask_seat = ask_seat
+        #: `run` owns the reader's lines for as long as it is waiting
+        self.parked = False
 
     async def run(
         self,
@@ -188,79 +199,130 @@ class Checkpoint:
             self.console.say("stdin is not interactive: every question is declined for this run, and the report lists them")
             result.skipped = sorted({q.id for q in ask_set})
             return result
+        pending = [qid for qid in self.docket.question_order if qid in {q.id for q in ask_set}]
+        declined: set[str] = set()
         result.waited = True
-        pending = {q.id for q in ask_set}
-        skipped: set[str] = set()
-        while pending:
-            line = await self.reader.next_line()
-            from .humanio import EOF
+        self.parked = True
+        try:
+            while pending:
+                line = await self.reader.next_line()
+                if line is EOF:
+                    self.reader.eof = True
+                    self._decline_all(pending, declined, result)
+                    break
+                parsed = parse_line(line if isinstance(line, str) else "")
+                if parsed.kind == "end":
+                    break
+                if parsed.kind == "error":
+                    self.console.say(parsed.text)
+                    continue
+                if parsed.kind == "skip":
+                    if not parsed.ids:
+                        self._decline_all(pending, declined, result)
+                        break
+                    self._decline_named(parsed, pending, declined, result)
+                    continue
+                if parsed.kind == "answer":
+                    self._answer(parsed, pending, declined, result, said=" — the answer is authoritative and buys a full round")
+                    continue
+                if parsed.kind == "explain":
+                    reply = await self._explain(parsed.id, parsed.text)
+                    if reply is not None:
+                        result.recommendations[parsed.id] = reply
+        finally:
+            self.parked = False
+        result.skipped = sorted(declined)
+        return result
 
-            if line is EOF:
+    async def drain(self) -> CheckpointOutcome:
+        """What the human typed while the run was working, read at a boundary and applied without a checkpoint.
+
+        Only an ask the human would have been shown is answerable here, a blank line means nothing with no
+        checkpoint open, and a closed stdin stops the listening without declining anything.
+        """
+        result = CheckpointOutcome(waited=False)
+        declined: set[str] = set()
+        if self.parked or not self.reader.tty:
+            return result
+        pending = self._open_ids()
+        while (item := self.reader.read_nowait()) is not None:
+            if item is EOF:
                 self.reader.eof = True
-                skipped |= pending
                 break
-            parsed = parse_line(line if isinstance(line, str) else "")
+            parsed = parse_line(item if isinstance(item, str) else "")
             if parsed.kind == "end":
-                break
+                self.console.say("nothing is waiting on you: `H1: <text>` answers an open question, `explain H1` asks the asker why")
+                continue
             if parsed.kind == "error":
                 self.console.say(parsed.text)
                 continue
             if parsed.kind == "skip":
                 if not parsed.ids:
-                    skipped |= pending
-                    break
-                for one in parsed.ids:
-                    if one not in pending and one not in result.answers:
-                        self.console.say(f"no open question {one}; the open ones are {', '.join(sorted(pending)) or '(none)'}")
-                        continue
-                    took_back = result.answers.pop(one, None) is not None
-                    result.answer_options.pop(one, None)
-                    skipped.add(one)
-                    pending.discard(one)
-                    said = f"{one}: declined — the report lists it as asked and not answered"
-                    self.console.say(said + (", and the answer you gave is withdrawn" if took_back else ""))
+                    self._decline_all(pending, declined, result)
+                    continue
+                self._decline_named(parsed, pending, declined, result)
                 continue
             if parsed.kind == "answer":
-                qid = parsed.id or self._first_pending(pending)
-                if qid is None:
-                    self.console.say("no question is open; an empty line ends this checkpoint")
-                    continue
-                open_ids = ", ".join(sorted(pending)) or "(none)"
-                if qid not in self.docket.questions:
-                    self.console.say(f"no question {qid}; the open ones are {open_ids}")
-                    continue
-                if qid not in pending and qid not in skipped and qid not in result.answers:
-                    self.console.say(f"no open question {qid}; the open ones are {open_ids}")
-                    continue
-                took_back = qid in skipped
-                skipped.discard(qid)
-                target = self.docket.questions[qid]
-                answer, number = take_selection(parsed.text, target)
-                result.answers[qid] = answer
-                if number:
-                    result.answer_options[qid] = number
-                else:
-                    result.answer_options.pop(qid, None)
-                pending.discard(qid)
-                echoed = _direction_line(answer, self.docket, self.names) if number and target.direction_ask else answer
-                chose = f' "{echoed}" (option {number})' if number else ""
-                back = ", and the decline you gave is withdrawn" if took_back else ""
-                self.console.say(f"{qid}: answered{chose} — the answer is authoritative and buys a full round{back}")
+                self._answer(
+                    parsed, pending, declined, result, said=" — it is authoritative, and the next docket the seats are shown carries it"
+                )
                 continue
             if parsed.kind == "explain":
-                reply = await self._explain(parsed.id, parsed.text)
+                reply = await self._explain(parsed.id, parsed.text, when=_BETWEEN)
                 if reply is not None:
                     result.recommendations[parsed.id] = reply
-        result.skipped = sorted(skipped)
+        result.skipped = sorted(declined)
         return result
 
-    def _first_pending(self, pending: set[str]) -> str | None:
-        for qid in self.docket.question_order:
-            if qid in pending:
-                return qid
-        return None
+    def _open_ids(self) -> list[str]:
+        """The asks off-cycle input may answer: still open, and of the kind the human is shown."""
+        return [q.id for q in unsettled_questions(self.docket) if q.state == ASKED and showable(self.docket, q)]
 
-    async def _explain(self, qid: str, question: str) -> str | None:
+    def _decline_all(self, pending: list[str], declined: set[str], result: CheckpointOutcome) -> None:
+        for qid in list(pending):
+            self._decline(qid, pending, declined, result)
+
+    def _decline_named(self, parsed: Line, pending: list[str], declined: set[str], result: CheckpointOutcome) -> None:
+        for one in parsed.ids:
+            if one not in pending and one not in result.answers:
+                self.console.say(f"no open question {one}; the open ones are {_ids(pending)}")
+                continue
+            self._decline(one, pending, declined, result)
+
+    def _decline(self, qid: str, pending: list[str], declined: set[str], result: CheckpointOutcome) -> None:
+        took_back = result.answers.pop(qid, None) is not None
+        result.answer_options.pop(qid, None)
+        declined.add(qid)
+        if qid in pending:
+            pending.remove(qid)
+        said = f"{qid}: declined — the report lists it as asked and not answered"
+        self.console.say(said + (", and the answer you gave is withdrawn" if took_back else ""))
+
+    def _answer(self, parsed: Line, pending: list[str], declined: set[str], result: CheckpointOutcome, *, said: str) -> None:
+        qid = parsed.id
+        if qid not in self.docket.questions:
+            self.console.say(f"no question {qid}; the open ones are {_ids(pending)}")
+            return
+        if qid not in pending and qid not in declined and qid not in result.answers:
+            self.console.say(f"no open question {qid}; the open ones are {_ids(pending)}")
+            return
+        took_back = qid in declined
+        declined.discard(qid)
+        target = self.docket.questions[qid]
+        answer, number = take_selection(parsed.text, target)
+        result.answers[qid] = answer
+        if number:
+            result.answer_options[qid] = number
+        else:
+            result.answer_options.pop(qid, None)
+        if qid in pending:
+            pending.remove(qid)
+        echoed = _direction_line(answer, self.docket, self.names) if number and target.direction_ask else answer
+        chose = f' "{echoed}" (option {number})' if number else ""
+        back = ", and the decline you gave is withdrawn" if took_back else ""
+        self.console.say(f"{qid}: answered{chose}{said}{back}")
+
+    async def _explain(self, qid: str, question: str, *, when: str = _PARKED) -> str | None:
         target = self.docket.questions.get(qid)
         if target is None:
             self.console.say(f"no question {qid}")
@@ -276,12 +338,16 @@ class Checkpoint:
         from .render.text import name_of
 
         who = name_of(asker, self.names)
-        self.console.say(f"asking {who} to explain {qid}; the run stays parked and this is the only ask in flight")
+        self.console.say(f"asking {who} to explain {qid}; {when}")
         outcome = await self.ask_seat(asker, common.explain_ask(target.text, question), round_=self.docket.round, phase="explain")
         text = (getattr(outcome, "text", "") or "").strip()
         if text:
             self.console.say(f"{qid}, {who}'s recommendation: {_clip(text)}")
         return text
+
+
+def _ids(pending: Sequence[str]) -> str:
+    return ", ".join(sorted(pending)) or "(none)"
 
 
 def _clip(text: str) -> str:

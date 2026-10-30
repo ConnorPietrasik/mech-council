@@ -6,7 +6,7 @@ from .asks import AskLost, AskUnusable, Lanes
 from .chairwork import Chair, ChairUnusable
 from .config import Council
 from .console import Console
-from .deliberation.engine import Abort, RawAsk
+from .deliberation.engine import Abort, CheckpointOutcome, RawAsk
 from .deliberation.state import CHAIR_ID, Docket
 from .humaninput import Checkpoint
 from .prompts.brief import Brief
@@ -77,6 +77,10 @@ class Port:
 
     async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool, notes=()):
         return await self.checkpoint_run.run(listing, ask_set=ask_set, round_=round_, terminal=terminal, waiting=waiting, notes=notes)
+
+    async def drain_human(self) -> CheckpointOutcome:
+        """What the human typed while the run was working; the engine calls it only at a round boundary."""
+        return await self.checkpoint_run.drain()
 
 
 def _raw(outcome) -> RawAsk:

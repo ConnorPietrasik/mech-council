@@ -44,14 +44,12 @@ def test_the_line_grammar(text, kind, qid, body, ids):
     assert (line.kind, line.id, line.text, line.ids) == (kind, qid, body, ids)
 
 
-def test_a_bare_line_answers_the_first_open_question_rather_than_being_dropped():
-    line = parse_line("the tenant is fixed by contract")
-    assert line.kind == "answer" and line.id == "" and line.text
-
-
-@pytest.mark.parametrize("text", ["skip the cache one", "skip H1 and H2", "skip all H1", "none of the above", "explain H1 why?"])
-def test_a_line_that_opened_like_a_command_gets_the_grammar_and_is_never_an_answer(text):
-    """A near miss must not be recorded as an authoritative answer to whichever question is open first."""
+@pytest.mark.parametrize(
+    "text",
+    ["skip the cache one", "skip H1 and H2", "skip all H1", "none of the above", "explain H1 why?", "the tenant is fixed", "2"],
+)
+def test_a_line_that_is_not_the_grammar_is_never_an_answer(text):
+    """Neither a near miss nor a line naming no question may answer whichever ask happens to be open."""
     line = parse_line(text)
     assert line.kind == "error" and "`skip H1` declines one" in line.text
 
@@ -106,14 +104,6 @@ def test_a_number_with_any_word_after_it_stays_the_human_s_own_words():
     outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
     assert outcome.answers == {"H1": "1, only for new installs"} and outcome.answer_options == {}
     assert outcome.answers["H1"] != question.options[0], "the option was not taken on the human's behalf"
-
-
-def test_a_bare_number_selects_on_the_first_open_question():
-    docket = build()
-    question = offered(docket, "one", "two")
-    cp, _console, _reader = make_checkpoint(docket, lines=["2"])
-    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
-    assert outcome.answers == {"H1": "two"} and outcome.answer_options == {"H1": 2}
 
 
 # --------------------------------------------------------------------------- what prints
@@ -180,19 +170,32 @@ def test_an_empty_checkpoint_says_so_and_waits_for_nothing():
 
 
 class Reader:
-    """A scripted stdin: lines, then EOF; `interactive` is the tty question."""
+    """A scripted stdin: lines, then EOF; `interactive` is the tty question.
 
-    def __init__(self, lines=(), interactive=True):
+    `read_nowait` is the off-cycle shape: a line if one arrived, None if nothing has, EOF when `closed`.
+    """
+
+    def __init__(self, lines=(), interactive=True, closed=False):
         self.lines = list(lines)
-        self.interactive = interactive
+        self.tty = interactive
         self.eof = False
+        self.closed = closed
         self.asked: list[str] = []
+
+    @property
+    def interactive(self):
+        return self.tty and not self.eof
 
     async def next_line(self):
         self.asked.append("line")
         if not self.lines:
             return EOF
         return self.lines.pop(0)
+
+    def read_nowait(self):
+        if self.lines:
+            return self.lines.pop(0)
+        return EOF if self.closed else None
 
 
 class Console:
@@ -203,10 +206,20 @@ class Console:
         self.lines.append(text % args if args else text)
 
 
-def make_checkpoint(docket, lines=(), interactive=True, ask_seat=None):
+def make_checkpoint(docket, lines=(), interactive=True, ask_seat=None, closed=False):
     console = Console()
-    reader = Reader(lines, interactive)
+    reader = Reader(lines, interactive, closed)
     return Checkpoint(docket, reader, console=console, names=NAMES, ask_seat=ask_seat), console, reader
+
+
+def backed(docket, *texts):
+    """Asks a second seat has backed: the kind the human is shown, and so the kind off-cycle input may answer."""
+    out = []
+    for text in texts:
+        question = escalations.raise_question(docket, text=text, asker="Agent1", item_id=None, blocking=False, round_=1)[0]
+        escalations.second(docket, qid=question.id, agent="Agent2", round_=1)
+        out.append(question)
+    return out
 
 
 def questions(docket, *specs):
@@ -223,14 +236,6 @@ def test_the_ask_set_waits_and_an_answer_is_applied():
     cp, _console, _reader = make_checkpoint(docket, lines=["H1: the fixed one"])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert outcome.waited and outcome.answers == {"H1": "the fixed one"}
-
-
-def test_a_line_without_an_id_answers_the_first_still_open_question():
-    docket = build()
-    listing = questions(docket, ("first?", "Agent1", "F1", True), ("second?", "Agent2", "F1", True))
-    cp, _console, _reader = make_checkpoint(docket, lines=["the answer"])
-    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
-    assert outcome.answers == {"H1": "the answer"}
 
 
 def test_a_skip_declines_everything_still_open_and_the_run_moves_on():
@@ -464,3 +469,56 @@ def test_typing_to_a_note_answers_nothing():
     cp, _console, _reader = make_checkpoint(docket, lines=["N1: forget it"])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert not outcome.answers, "the line was refused, not taken as the answer to whichever question was open"
+
+
+# --------------------------------------------------------------------------- answering while the run works
+
+
+def test_an_answer_typed_while_the_seats_work_lands_without_a_checkpoint():
+    docket = build()
+    backed(docket, "which tenant owns the key?")
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: the fixed one"])
+    outcome = asyncio.run(cp.drain())
+    assert outcome.answers == {"H1": "the fixed one"} and not outcome.waited
+    assert any("next docket" in line for line in console.lines), "the echo says when the seats read it"
+
+
+def test_off_cycle_input_answers_no_ask_the_human_was_never_shown():
+    """An unbacked ask is in the report and never on the screen: answering it off-cycle would be answering a question nobody asked."""
+    docket = build()
+    questions(docket, ("which tenant?", "Agent1", None, False))
+    cp, console, _reader = make_checkpoint(docket, lines=["H1: the fixed one"])
+    outcome = asyncio.run(cp.drain())
+    assert not outcome.answers and not outcome.skipped
+    assert any("no open question H1" in line for line in console.lines)
+
+
+def test_a_blank_line_off_cycle_answers_nothing_and_declines_nothing():
+    docket = build()
+    backed(docket, "which tenant?")
+    cp, console, _reader = make_checkpoint(docket, lines=[""])
+    outcome = asyncio.run(cp.drain())
+    assert not outcome.answers and not outcome.skipped
+    assert docket.questions["H1"].state == "asked"
+    assert any("nothing is waiting on you" in line for line in console.lines), "the grammar, not silence"
+
+
+def test_a_closed_stdin_off_cycle_keeps_its_lines_and_declines_nothing():
+    """A fast answer and a Ctrl-D in one breath: the lines already given are taken, and the close declines nothing."""
+    docket = build()
+    backed(docket, "a?", "b?")
+    cp, _console, reader = make_checkpoint(docket, lines=["H1: the fixed one"], closed=True)
+    outcome = asyncio.run(cp.drain())
+    assert outcome.answers == {"H1": "the fixed one"} and not outcome.skipped
+    assert docket.questions["H2"].state == "asked", "an ask nobody was shown is not declined for them"
+    assert reader.eof and not reader.interactive, "and nothing is asked of the keyboard after it closes"
+
+
+def test_the_drain_takes_no_lines_while_a_checkpoint_holds_the_reader():
+    """One consumer at a time: a second reader would decide which disposition a line belonged to."""
+    docket = build()
+    backed(docket, "which tenant?")
+    cp, _console, reader = make_checkpoint(docket, lines=["H1: the fixed one"])
+    cp.parked = True
+    assert not asyncio.run(cp.drain()).answers
+    assert reader.lines == ["H1: the fixed one"], "the line is left for the checkpoint that is waiting"

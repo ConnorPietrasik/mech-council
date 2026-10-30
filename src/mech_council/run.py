@@ -272,6 +272,13 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"round {fields['round']}: {fields['signed_off']} signed off · {states or 'nothing open'}"
     if name == "human_checkpoint":
         return f"checkpoint: {fields['answered']} answered, {fields['skipped']} declined, {'waited' if fields['waited'] else 'kept going'}"
+    if name == "human_answer_off_cycle":
+        said = " · ".join(
+            f"{', '.join(ids)} {verb}" for ids, verb in ((fields["answered"], "answered"), (fields["declined"], "declined")) if ids
+        )
+        if not said:
+            return ""
+        return f"{said} while the seats were working"
     if name == "termination":
         return f"outcome: {fields['outcome']} — {fields['reason']}"
     if name == "merge_refused":
@@ -280,6 +287,11 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"{fields['answered']} answer(s) settled: round {fields['round']} is a full one"
     if name == "grace_round_bought":
         return f"{fields['answered']} answer(s) at the round limit: one more round, {fields['grace_left']} to spare"
+    if name == "answer_buys_no_round":
+        return (
+            f"{fields['answered']} answer(s) with no grace round left: the answer is on the record and in the report, "
+            "and the round limit still closes the run"
+        )
     if name == "peer_pass_start":
         return f"the seats get one last look at {', '.join(fields['asks'])} before the council asks you"
     if name == "question_seconded":

@@ -1,4 +1,3 @@
-Answer deferred questions mid-round too
 An aborted run should make a report based on the current state
 Set a different report location
 A way to message agents?

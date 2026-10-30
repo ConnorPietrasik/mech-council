@@ -32,6 +32,7 @@ class ScriptPort:
     skip: list[str] = field(default_factory=list)
     recommendations: dict = field(default_factory=dict)
     selections: dict = field(default_factory=dict)  # H-id → the option number the answer took (what the Checkpoint records)
+    off_cycle: dict = field(default_factory=dict)  # H-id → an answer the human typed while the run was working
 
     asks: list[Ask] = field(default_factory=list)
     checkpoints: list[dict] = field(default_factory=list)
@@ -132,6 +133,11 @@ class ScriptPort:
         recommended = {qid: text for qid, text in self.recommendations.items() if qid in ids}
         options = {qid: number for qid, number in self.selections.items() if qid in answered}
         return CheckpointOutcome(answers=answered, answer_options=options, skipped=skipped, waited=waiting, recommendations=recommended)
+
+    async def drain_human(self) -> CheckpointOutcome:
+        """The off-cycle answers: the first round boundary where the ask is still open takes each one."""
+        live = [q.id for q in self.docket.questions.values() if q.state == "asked"]
+        return CheckpointOutcome(answers={qid: self.off_cycle.pop(qid) for qid in live if qid in self.off_cycle}, waited=False)
 
     # -- convenience for assertions --------------------------------------------
 
