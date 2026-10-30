@@ -57,6 +57,11 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "blocking": ("blocking", "block", "is_blocking", "urgent"),
     "options": ("options", "choices", "alternatives"),
     "context": ("context", "background"),
+    "second": ("second", "seconds", "second_question", "backs_question", "agree_with_question", "seconded"),
+    "blocking_for": ("blocking_for", "block_for", "blocking", "stop_for", "wait_for", "blocks"),
+    "retract": ("retract", "withdraw", "retract_question", "withdraw_question", "drop_question", "no_longer_needed"),
+    "answer_question": ("answer_question", "answer_human_question", "answers_for_human", "human_answers", "answer_ask"),
+    "insist": ("insist", "insisted", "insist_on", "not_enough", "answer_not_enough", "reject_answer"),
     "approach": ("approach", "plan", "proposal"),
 }
 
@@ -335,10 +340,15 @@ def parse_verdict(
     out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"), text=("answer", "text", "reply"))
     out.data["questions"] = _entries(pick(data, "questions"), ("to",), text=("question", "text", "ask"))
     out.data["human_input"] = _human_input(data)
+    out.data["second"] = _ids(pick(data, "second"))
+    out.data["blocking_for"] = _ids(pick(data, "blocking_for"))
+    out.data["retract"] = _ids(pick(data, "retract"))
+    out.data["answer_question"] = _ids_entries(pick(data, "answer_question"))
+    out.data["insist"] = _ids(pick(data, "insist"))
     signoff = pick(data, "signoff")
     out.data["signoff"] = bool(signoff) if signoff is not None else False
     out.data["summary"] = text_of(pick(data, "summary"))
-    out.data["open_questions"] = _strings(pick(data, "open_questions"))
+    out.data["open_questions"] = _texts(pick(data, "open_questions"))
     if mode == "plan":
         revised = pick(data, "revised_plan")
         out.data["revised_plan"] = _revised_plan(revised)
@@ -380,6 +390,50 @@ def _strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [text_of(v) for v in value if text_of(v).strip()]
+
+
+def _texts(value: object) -> list[str]:
+    """`open_questions` lines, whether a seat wrote strings or `{"question": …}` objects."""
+    raw = [value] if isinstance(value, dict) else value if isinstance(value, list) else [value] if isinstance(value, str) else []
+    out = []
+    for entry in raw:
+        text = text_of(pick(entry, "question")) if isinstance(entry, dict) else text_of(entry)
+        if text.strip() and text not in out:
+            out.append(text)
+    return out
+
+
+#: an ask id and nothing else
+_ASK_ID = re.compile(r"H\d+")
+
+
+def _ids(value: object) -> list[str]:
+    """Docket ids as a seat typed them: `h1`, `#H1` and ` H1 ` all name H1. Near misses survive to be refused."""
+    out = []
+    for entry in _strings(value):
+        token = entry.strip().lstrip("#").upper().replace(" ", "")[:12]
+        if token and token not in out:
+            out.append(token)
+    return out
+
+
+def _ids_entries(value: object) -> list[dict]:
+    """`{"id": "H1", "answer": …}`: the ask a seat settled, and what it settled it with."""
+    raw = value if isinstance(value, list) else [value]
+    out = []
+    for entry in raw:
+        if isinstance(entry, str):
+            entry = {"id": entry}
+        if not isinstance(entry, dict):
+            continue
+        token = _ids(pick(entry, "id", ("question_id", "qid", "h")))
+        answer = text_of(pick(entry, "answer")) or text_of(pick(entry, "text"))
+        if not token and answer:
+            # only an id names an ask: a sentence in `question` names none
+            token = [one for one in _ids(pick(entry, "question")) if _ASK_ID.fullmatch(one)]
+        if token:
+            out.append({"id": token[0], "text": answer})
+    return out
 
 
 def _human_input(data: dict) -> list[dict]:
@@ -496,7 +550,7 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
             out.errors.append("`findings` was present but no entry carried a claim")
             out.repaired = True
     out.data["summary"] = text_of(pick(data, "summary"))
-    out.data["open_questions"] = _strings(pick(data, "open_questions"))
+    out.data["open_questions"] = _texts(pick(data, "open_questions"))
     out.data["human_input"] = _human_input(data)
     return out
 
@@ -519,6 +573,26 @@ def parse_merge_plan(payload: str) -> tuple[dict | None, list[str]]:
             continue
         clean.append({"canonical": canonical, "duplicates": [text_of(d).strip() for d in dups if text_of(d).strip()]})
     return {"groups": clean}, []
+
+
+def parse_ask_merge(payload: str) -> tuple[dict | None, list[str]]:
+    """The chair's ask fold: the item merge's shape, with the docket's `H1` ids read however the chair typed them."""
+    plan, errors = parse_merge_plan(payload)
+    if plan is None:
+        return None, errors
+    groups = []
+    for group in plan["groups"]:
+        canonical = _ask_token(group["canonical"])
+        duplicates = list(dict.fromkeys(one for one in map(_ask_token, group["duplicates"]) if one and one != canonical))
+        if canonical and duplicates:
+            groups.append({"canonical": canonical, "duplicates": duplicates})
+    return {"groups": groups}, errors
+
+
+def _ask_token(text: str) -> str:
+    """`h1`, `#H1` and ` H1 ` all name H1; anything that is not an ask id names nothing."""
+    token = text.strip().lstrip("#").upper()
+    return token if _ASK_ID.fullmatch(token) else ""
 
 
 def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
@@ -611,6 +685,9 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
         return parse_verdict(text, **kwargs)
     if kind == "merge":
         plan, errors = parse_merge_plan(text)
+        return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
+    if kind == "asks":
+        plan, errors = parse_ask_merge(text)
         return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
     if kind == "direction":
         wording, errors = parse_direction(text)

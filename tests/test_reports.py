@@ -180,6 +180,48 @@ def test_the_console_names_a_split_the_way_the_menu_does():
     assert "Metic" in line and "Agent1" not in line and "both" in line
 
 
+def test_the_console_tells_a_dropped_ask_from_the_last_asker_walking_away():
+    """`still_asking` empty is the only signal that nobody asks it any more."""
+    from mech_council.run import _summary_line
+
+    names = {"Agent1": "Metic", "Agent2": "Senior"}
+
+    def line(askers):
+        return _summary_line("question_retracted", {"id": "H1", "seat": "Agent1", "still_asking": askers, "round": 2}, names)
+
+    assert "still asked by Senior" in line(["Agent2"]) and "nobody" not in line(["Agent2"])
+    assert "nobody asks it" in line([])
+
+
+def test_the_console_says_what_a_second_that_bought_nothing_was_up_against():
+    """A second that leaves an ask from the human has two reasons and one event: naming an answer that never came
+    tells the run's reader about a settlement that does not exist.
+    """
+    from mech_council.run import _summary_line
+
+    names = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
+
+    def line(held, answered_by):
+        fields = {"id": "H1", "seat": "Agent3", "askers": ["Agent1", "Agent3"], "held": held, "answered_by": answered_by, "round": 2}
+        return _summary_line("question_seconded_but_held_back", fields, names)
+
+    settled = line("settled", ["Agent2"])
+    assert "Senior answered it" in settled and "not enough" in settled
+    moot = line("moot", [])
+    assert "answered" not in moot, "nothing answered this ask"
+    assert "stop" in moot
+
+
+def test_the_console_names_the_ask_whose_words_survive_a_fold_the_chair_misnamed():
+    from mech_council.run import _summary_line
+
+    names = {"Agent1": "Metic", "Agent2": "Senior"}
+    fields = {"id": "H2", "into": "H1", "askers": ["Agent1", "Agent2"], "chair_named": "H2", "round": 3}
+    named = _summary_line("question_merged", fields, names)
+    assert "H1 keeps its words" in named and "the chair named H2" in named
+    assert "keeps its words" not in _summary_line("question_merged", {**fields, "chair_named": "H1"}, names)
+
+
 def test_the_write_journal_names_the_member_rather_than_its_directory(cli, project):
     """The directory is named by `file_base` and lives in `run.json`; the line about it names the member."""
     script = json.loads(SCRIPT)

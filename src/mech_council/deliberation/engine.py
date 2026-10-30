@@ -6,7 +6,33 @@ from ..extraction import parse_phase0, parse_verdict
 from ..modes.base import adapter_for
 from . import gaps as gap_rules
 from .dispositions import closure_pass, derive
-from .escalations import challenges, demote, effective_class, raise_direction_ask, raise_question, record_stance, refresh_question, retire
+from .escalations import (
+    HELD_BACK,
+    MOOT,
+    SETTLED,
+    UNBACKED,
+    answer_by_seat,
+    ask_to_stop,
+    challenges,
+    demote,
+    drop_ask,
+    effective_class,
+    held_back,
+    insist,
+    merge_asks,
+    moot_item_asks,
+    raise_direction_ask,
+    raise_question,
+    record_stance,
+    refresh_question,
+    release_stops,
+    retire,
+    retract,
+    second,
+    settlements,
+    showable,
+    stop_for,
+)
 from .stalemate import signature
 from .state import (
     ABSTAIN,
@@ -14,6 +40,7 @@ from .state import (
     ASKED,
     CHAIR_ID,
     DECLINED,
+    DISAGREE,
     GO,
     MERGED,
     NEEDS_HUMAN,
@@ -70,6 +97,7 @@ class Engine:
         emit=None,
         brief=None,
         max_rounds: int = 10,
+        grace_rounds: int = 1,
         names: dict[str, str] | None = None,
     ) -> None:
         self.docket = docket
@@ -93,7 +121,12 @@ class Engine:
         self._class_of: dict[str, str] = {}
         self._camps_seen: tuple[tuple[str, ...], ...] | None = None
         self._camps_held = 0
-        self._ceiling = max_rounds  # an answer given at the ceiling buys one more round
+        self._ceiling = max_rounds
+        self._grace_left = max(0, grace_rounds)  # how many rounds past the ceiling an answer may buy in total
+        self._peer_pass_done = False
+        self._folded_asks: tuple | None = None  # the open asks the chair last read, so an unchanged set is not folded twice
+        self._asked_of_human: set[str] = set()  # asks a waiting checkpoint actually put in front of the human
+        self._insists: list[tuple[str, str, int]] = []  # (seat, ask id, round): read once every answer of the pass landed
         self._demoted_this_round: set[tuple[str, str]] = set()
         self._stale = False
 
@@ -151,19 +184,20 @@ class Engine:
                 for entry in findings:
                     self.add_item(entry, agent, 0)
             for question in parsed.data.get("open_questions") or []:
-                raise_question(self.docket, text=question, asker=agent, item_id=None, blocking=False, round_=0)
+                raise_question(self.docket, text=question, asker=agent, item_id=None, round_=0)
             for entry in parsed.data.get("human_input") or []:
                 if entry.get("question"):
-                    raise_question(
+                    question, _ = raise_question(
                         self.docket,
                         text=entry["question"],
                         asker=agent,
                         item_id=None,
-                        blocking=False,
                         round_=0,
                         context=entry.get("context", ""),
                         options=entry.get("options"),
                     )
+                    if entry.get("blocking") and ask_to_stop(self.docket, question, agent):
+                        self.emit("question_stop_requested", id=question.id, seat=agent, holders=list(question.blocked_by), round=0)
             self._phase0_summary[agent] = parsed.data.get("summary", "")
         if len(valid) < 2:
             raise Abort(
@@ -323,8 +357,9 @@ class Engine:
         await self._merge_new_items(round_)
         await self._gap_ladder(round_, rejected)
         await self._challenge_pass(round_)
-        for event, fields in closure_pass(self.docket, round_):
-            self.emit(event, **fields)
+        self._read_insists(seen=round_ - 1)
+        await self._merge_asks(round_)
+        self._closure(round_)
         self._summarize(round_)
         current = signature(self.docket)
         self._stale = current == self.previous_signature and round_ > 1
@@ -354,12 +389,88 @@ class Engine:
         self._answers(data.get("answers") or [], agent, round_)
         self._questions(data.get("questions") or [], agent, round_)
         self._human_input(data.get("human_input") or [], agent, round_)
+        self._apply_asks(agent, data, round_)
         for question in data.get("open_questions") or []:
-            raise_question(self.docket, text=question, asker=agent, item_id=None, blocking=False, round_=round_)
+            raise_question(self.docket, text=question, asker=agent, item_id=None, round_=round_)
         if self.docket.mode == "plan":
             self._apply_plan_fields(agent, data, round_)
         if data.get("signoff"):
             self.docket.signoffs[agent] = round_
+
+    def _apply_asks(self, agent: str, data: dict, round_: int) -> None:
+        """What a verdict says about the council's asks for the human: back one, answer one, drop one."""
+        for qid in data.get("second") or []:
+            question, reason = second(self.docket, qid=qid, agent=agent, round_=round_)
+            if question is None or reason:
+                self.emit("verdict_ask_refused", member=agent, id=qid, field="second", round=round_, reason=reason or "no such question")
+                continue
+            if showable(self.docket, question):
+                self.emit("question_seconded", id=question.id, seat=agent, askers=list(question.askers), round=round_)
+                self._recheck_class(question, round_)
+                continue
+            self.emit(
+                "question_seconded_but_held_back",
+                id=question.id,
+                seat=agent,
+                askers=list(question.askers),
+                held=held_back(self.docket, question),
+                answered_by=sorted(settlements(question)),
+                round=round_,
+            )
+        for qid in data.get("blocking_for") or []:
+            question, reason = stop_for(self.docket, qid=qid, agent=agent, round_=round_)
+            if question is None or reason:
+                self.emit(
+                    "verdict_ask_refused", member=agent, id=qid, field="blocking_for", round=round_, reason=reason or "no such question"
+                )
+                continue
+            self.emit("question_stop_requested", id=question.id, seat=agent, holders=list(question.blocked_by), round=round_)
+            self._recheck_class(question, round_)
+        for entry in data.get("answer_question") or []:
+            question, reason = answer_by_seat(self.docket, qid=entry["id"], agent=agent, text=entry["text"], round_=round_)
+            if question is None or reason:
+                self.emit("verdict_ask_refused", member=agent, id=entry["id"], field="answer_question", round=round_, reason=reason)
+                continue
+            self.emit("question_answered_by_seat", id=question.id, seat=agent, round=round_)
+            self._recheck_class(question, round_)
+        for qid in data.get("retract") or []:
+            question, reason = retract(self.docket, qid=qid, agent=agent, round_=round_)
+            if question is None or reason:
+                self.emit("verdict_ask_refused", member=agent, id=qid, field="retract", round=round_, reason=reason)
+                continue
+            self.emit(
+                "question_retracted",
+                id=question.id,
+                seat=agent,
+                round=round_,
+                state=question.state,
+                still_asking=list(question.askers),
+            )
+            if question.item_id:
+                # only a stance lets go of an item, and retract is not one
+                for one in self.docket.questions_for_item(question.item_id):
+                    self._recheck_class(one, round_)
+            else:
+                self._recheck_class(question, round_)
+        for qid in data.get("insist") or []:
+            # queued: an insistence reads the docket once every answer this pass carries has landed
+            self._insists.append((agent, qid, round_))
+
+    def _read_insists(self, *, seen: int) -> None:
+        """Read the insists a pass queued, once every answer it carries is on the docket.
+
+        Draining here rather than where the verdict was applied keeps the order the engine applied the seats from
+        deciding what an insistence was aimed at. `seen` is the latest round of peer answers those seats were shown:
+        the last pass shows them the answers it carries, a round does not show them its own.
+        """
+        pending, self._insists = self._insists, []
+        for agent, qid, round_ in pending:
+            question, reason = insist(self.docket, qid=qid, agent=agent, round_=round_, seen=seen)
+            if question is None or reason:
+                self.emit("verdict_ask_refused", member=agent, id=qid, field="insist", round=round_, reason=reason or "no such question")
+                continue
+            self.emit("question_insisted", id=question.id, seat=agent, round=round_)
+            self._recheck_class(question, round_)
 
     def _apply_plan_fields(self, agent: str, data: dict, round_: int) -> None:
         revised = data.get("revised_plan")
@@ -424,15 +535,28 @@ class Engine:
                     "verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a human_input entry named an unknown item"
                 )
                 item_id = None
+            if item_id and self.docket.items[item_id].closed:
+                # the closure is the council's answer about that item; a question left over is a question of its own
+                self.emit(
+                    "verdict_ask_refused",
+                    member=asker,
+                    id=item_id,
+                    field="human_input",
+                    round=round_,
+                    reason=f"{item_id} is settled as {self.docket.items[item_id].disposition}: ask over no item what the closure left "
+                    "open, or stance the item again to reopen it",
+                )
+                item_id = None
             question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
             if updated:
                 self.emit("question_updated", id=question.id, asker=asker, round=round_)
             if item_id:
-                if self.docket.stated_stance(item_id, asker) != NEEDS_HUMAN:
-                    self._stance(item_id=item_id, agent=asker, stance=NEEDS_HUMAN, note=entry["question"], round_=round_)
+                # only a needs_human stance holds the item
                 escalation = self.docket.escalations.get((item_id, asker))
-                if escalation is not None:
+                if escalation is not None and escalation.state == STANDING:
                     escalation.question_id = question.id
+            if entry.get("blocking") and ask_to_stop(self.docket, question, asker):
+                self.emit("question_stop_requested", id=question.id, seat=asker, holders=list(question.blocked_by), round=round_)
             self._recheck_class(question, round_)
 
     def _re_or_raise(self, asker: str, *, item_id: str | None, entry: dict, round_: int):
@@ -440,7 +564,6 @@ class Engine:
             "text": entry["question"],
             "context": entry.get("context", ""),
             "options": entry.get("options"),
-            "blocking": entry.get("blocking", False),
         }
         owned = self._owned_open_question(item_id, asker)
         if owned is not None:
@@ -559,6 +682,7 @@ class Engine:
             if token:
                 self.docket.backing[agent] = token
                 landed += 1
+        self._apply_asks(agent, data, round_)
         return landed
 
     def _decline(self, agent: str, missing: list[str], round_: int) -> None:
@@ -596,8 +720,11 @@ class Engine:
                 continue
             demote(escalation, round_)
             escalation.undefended = True
+            release_stops(self.docket, item_id=item_id, agent=asker)
             self._demoted_this_round.add((item_id, asker))
             self.emit("escalation_demoted", item=item_id, asker=asker, round=round_)
+            for event, fields in drop_ask(self.docket, escalation, asker, round_):
+                self.emit(event, **fields)
 
     def _apply_defense(self, item_id: str, asker: str, result: RawAsk, round_: int) -> str | None:
         if result.rejected:
@@ -627,10 +754,12 @@ class Engine:
             if entry.get("item") == item_id and entry.get("question"):
                 question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
-                if escalation is not None:
+                # only a standing hold owns an ask: a defense that released the item must not adopt the ask it just raised
+                if escalation is not None and escalation.state == STANDING:
                     escalation.question_id = question.id
                 if updated:
                     self.emit("question_updated", id=question.id, asker=asker, round=round_)
+        self._apply_asks(asker, data, round_)
         if not restated:
             return ""
         if (item_id, asker) in self._demoted_this_round:
@@ -718,11 +847,26 @@ class Engine:
         self.emit("console_note", text=text)
 
     async def run(self) -> str:
+        outcome = await self._deliberate()
+        # the report's pass: close what the last passes settled, reopen nothing
+        self._closure(self.docket.round, reopen=False)
+        return outcome
+
+    def _closure(self, round_: int, *, reopen: bool = True) -> None:
+        """Close what the seats settled, and moot the deferred asks that asked about an item they settled."""
+        for event, fields in closure_pass(self.docket, round_, reopen=reopen):
+            self.emit(event, **fields)
+            if event == "item_closed":
+                for moot, detail in moot_item_asks(self.docket, item_id=fields["id"], disposition=fields["disposition"], round_=round_):
+                    self.emit(moot, **detail)
+
+    async def _deliberate(self) -> str:
         await self.phase0()
         if self.docket.mode == "plan":
             await self.publish_plan()
         else:
             await self.publish_review()
+        await self._merge_asks(round_=0)
         self.docket.round = 1
         await self._checkpoint(round_=0, terminal=False)
         round_ = 1
@@ -739,6 +883,14 @@ class Engine:
         provisional, _ = evaluate(self.docket)
         stale = getattr(self, "_stale", False) and not self.checkpoint_moved
         terminal = provisional != GO or stale or round_ >= self._ceiling
+        if terminal:
+            settled = signature(self.docket)
+            await self._peer_pass(round_)
+            # what that pass lets go of is the last movement the run may see, so read the end again
+            if (moved := signature(self.docket)) != settled:
+                self.previous_signature = moved
+                stale = False
+            provisional, _ = evaluate(self.docket)
         outcome = await self._checkpoint(round_=round_, terminal=terminal, provisional=provisional, stale=stale)
         if outcome is not None:
             return outcome
@@ -762,29 +914,153 @@ class Engine:
         self.emit("round_continue", round=round_, reason=reason)
         return GO
 
+    def _open_asks(self) -> list:
+        """The asks a seat raised and that are still open — everything the chair can fold."""
+        return [q for q in self.docket.questions.values() if q.state == ASKED and not q.direction_ask and q.askers]
+
+    async def _merge_asks(self, round_: int) -> None:
+        """The chair folds the asks that want one decision; a chair that cannot read this pass costs the run nothing.
+
+        An ask set the chair has already read is not read again, so a fold costs nothing while nothing moves. A
+        refusal or an unreadable chair leaves the next round armed.
+        """
+        asks = self._open_asks()
+        if len(asks) < 2 or len({agent for q in asks for agent in q.askers}) < 2:
+            return
+        if _ask_signature(asks) == self._folded_asks:
+            return
+        try:
+            merged = await self.port.chair_merge_questions(self._ask_listing(asks), round_=round_)
+        except Abort as failure:
+            self.emit("chair_ask_merge_unreadable", round=round_, reason=str(failure), asks=len(asks))
+            return
+        events, reason = merge_asks(self.docket, groups=merged.get("groups") or [], round_=round_)
+        if reason:
+            self.emit("chair_ask_merge_refused", round=round_, reason=reason, asks=len(asks))
+            return
+        for event, fields in events:
+            self.emit(event, **fields)
+        for question in asks:
+            self._recheck_class(question, round_)
+        self._folded_asks = _ask_signature(self._open_asks())
+
+    async def _peer_pass(self, round_: int) -> None:
+        """Once, before the run ends: every seat gets one last look at the asks the human will not be shown.
+
+        It lets go — answer one, back one, drop one's own, or stance away from an item a peer settled — and it lets
+        the seat that raised an ask say a peer's answer was not enough. Nothing else in that reply is read.
+        """
+        from .termination import held_back_questions
+
+        if self._peer_pass_done:
+            return
+        weighing = held_back_questions(self.docket)
+        if not weighing:
+            return
+        self._peer_pass_done = True
+        self.emit("peer_pass_start", round=round_, asks=[q.id for q in weighing])
+        message = self.brief.peer_pass(self._ask_listing(weighing))
+        results = await self.port.ask_seats([(agent, message) for agent in self.docket.roster], round_=round_, phase="seconding")
+        known = set(self.docket.items)
+        closed = {i for i in known if self.docket.items[i].closed}
+        replies: dict[str, dict] = {}
+        for agent in self.docket.roster:
+            result = results.get(agent) or RawAsk()
+            # a seat that fails this pass simply says nothing
+            if result.failure or result.rejected:
+                continue
+            replies[agent] = parse_verdict(result.text or "", mode=self.docket.mode, me=agent, known_items=known, closed_items=closed).data
+        # every seat's answers and seconds land before any insistence is read, and releases go last: a releasing
+        # stance takes its own stop and ask with it. One loop over the roster would let that order decide what a
+        # peer's reply means.
+        for agent, data in replies.items():
+            self._apply_asks(agent, data, round_)
+        self._read_insists(seen=round_)
+        for agent, data in replies.items():
+            self._release_holds(agent, data, round_)
+        self._closure(round_, reopen=False)
+
+    def _release_holds(self, agent: str, data: dict, round_: int) -> None:
+        """One kind of stance is read on that pass, and one only: a seat letting go of an item it holds."""
+        for position in data.get("positions") or []:
+            item_id, stance = position["item"], position["stance"]
+            if stance == NEEDS_HUMAN:
+                reason = "opening or keeping a hold is a round's work: leave the item out of this reply"
+            elif self.docket.is_standing(item_id, agent):
+                self._stance(
+                    item_id=item_id,
+                    agent=agent,
+                    stance=stance,
+                    note=position.get("note", ""),
+                    evidence=position.get("evidence", ""),
+                    round_=round_,
+                )
+                self.emit("hold_released", item=item_id, seat=agent, stance=stance, round=round_)
+                continue
+            elif stance == DISAGREE:
+                reason = "that pass releases holds and opens none: an objection belongs in a round"
+            else:
+                continue  # a seat that holds nothing changes nothing
+            self.emit("verdict_ask_refused", member=agent, id=item_id, field="positions", round=round_, reason=reason)
+
+    def _ask_listing(self, questions: list) -> str:
+        blocks = []
+        for question in questions:
+            lines = [f"### {question.id}" + (f" (on {question.item_id})" if question.item_id else ""), question.text]
+            if question.context:
+                lines.append(f"context: {question.context}")
+            lines.append(f"asked by: {', '.join(question.askers) or 'the chair'}")
+            if question.raised_by and question.raised_by != question.askers:
+                lines.append(f"raised by: {', '.join(question.raised_by)}")
+            for seat, said in question.also_asked.items():
+                lines.append(f"asked as well by {seat}: {said}")
+            for seat, answer in question.peer_answers.items():
+                lines.append(f"answered instead of asking: {seat}: {answer}")
+            for number, option in enumerate(question.options, start=1):
+                lines.append(f"{number}) {option}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
     def _mark_unasked(self) -> list[str]:
+        """Label the asks the run ends on, and return the ones the human was never shown."""
         from .termination import unsettled_questions
 
-        marked = []
+        never_asked = []
         for question in unsettled_questions(self.docket):
-            if question.state == ASKED and "unasked" not in question.markers:
-                question.markers.append("unasked")
-                marked.append(question.id)
-        return marked
+            # a held-back marker already says why the human never saw it
+            if question.state != ASKED or any(marker in question.markers for marker in HELD_BACK):
+                continue
+            # a waiting checkpoint showed it: not the same silence as never asking
+            marker = "unanswered" if question.id in self._asked_of_human else "unasked"
+            if marker not in question.markers:
+                question.markers.append(marker)
+            if marker == "unasked":
+                never_asked.append(question.id)
+        return never_asked
 
     async def _checkpoint(self, round_: int, *, terminal: bool, provisional: str = "", stale: bool = False):
         from .escalations import effective_class
         from .termination import unsettled_questions
 
-        ask = unsettled_questions(self.docket)
+        open_asks = unsettled_questions(self.docket)
+        ask = [q for q in open_asks if showable(self.docket, q)]
+        if terminal:
+            self._mark_held_back([q for q in open_asks if q not in ask], round_)
         listing = ask
-        if not listing and not ask:
+        if not listing:
+            if terminal and len(open_asks) > len(ask):
+                self.emit_note(_held_back_note(self.docket, open_asks))
             self.emit("human_checkpoint", round=round_, ask_set=[], waited=False, answered=0, skipped=0, terminal=terminal)
             return None
-        at_round_limit = round_ >= self._ceiling and provisional == GO and not stale
+        at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
-        waiting = bool(ask) and (terminal or blocking) and not at_round_limit
+        # the ceiling asks too, on the grace budget
+        waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0)
+        if terminal and not waiting:
+            self._mark_unasked()  # the ledger has to say the run ended without asking
         outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting)
+        if outcome.waited:
+            self._asked_of_human.update(q.id for q in ask)
         self.emit(
             "human_checkpoint",
             round=round_,
@@ -849,6 +1125,15 @@ class Engine:
             if question is not None:
                 question.recommendation, question.recommendation_round = text, round_
         if outcome.any_answer:
+            if at_ceiling:
+                self._grace_left -= 1
+                self.emit(
+                    "grace_round_bought",
+                    round=round_ + 1,
+                    answered=len(outcome.answers),
+                    grace_left=self._grace_left,
+                    round_limit=self._ceiling,
+                )
             self.checkpoint_moved = True
             self.emit("answer_buys_a_round", round=round_ + 1, answered=len(outcome.answers))
             return None
@@ -856,6 +1141,19 @@ class Engine:
             self.emit("termination", outcome=provisional, reason="the checkpoint closed the run", round=round_)
             return provisional
         return None
+
+    def _mark_held_back(self, held_asks: list, round_: int) -> None:
+        """Mark the asks the human will not be shown; one a seat backs later loses the mark."""
+        for question in held_asks:
+            marker = held_back(self.docket, question)
+            if not marker or marker in question.markers:
+                continue
+            question.markers.append(marker)
+            if marker == UNBACKED:
+                self.emit("question_unseconded", id=question.id, askers=list(question.askers), round=round_)
+        for question in self.docket.questions.values():
+            if showable(self.docket, question):
+                question.markers = [m for m in question.markers if m not in HELD_BACK]
 
     def _retire_covered(self, question, round_: int, *, answered: bool) -> None:
         for (item_id, asker), escalation in list(self.docket.escalations.items()):
@@ -877,6 +1175,28 @@ _MENU_STAGES = 3
 def _one_line(text: str, width: int = 90) -> str:
     line = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
     return line if len(line) <= width else line[: width - 1] + "…"
+
+
+def _ask_signature(questions: list) -> tuple:
+    """What the chair reads about the asks: a signature it has seen holds nothing new to fold."""
+    return tuple((q.id, q.text, q.item_id, tuple(q.askers), tuple(sorted(q.peer_answers))) for q in questions)
+
+
+def _held_back_note(docket: Docket, held_asks: list) -> str:
+    """Why the run ends without asking you anything, said per ask: a seat answered it, no seat backed it, its item settled."""
+    answered = [q.id for q in held_asks if held_back(docket, q) == SETTLED]
+    unbacked = [q.id for q in held_asks if held_back(docket, q) == UNBACKED]
+    moot = [q.id for q in held_asks if held_back(docket, q) == MOOT]
+    said = []
+    if answered:
+        said.append(
+            f"{', '.join(answered)}: a seat answered {'these' if len(answered) > 1 else 'this'} from the workspace instead of asking you"
+        )
+    if unbacked:
+        said.append(f"{', '.join(unbacked)}: no second seat backed {'them' if len(unbacked) > 1 else 'it'}, so the council never asked you")
+    if moot:
+        said.append(f"{', '.join(moot)}: {'those items were' if len(moot) > 1 else 'that item was'} settled among the seats")
+    return " · ".join(said) + ". The report lists them."
 
 
 def _plan_text(artifact: dict) -> str:

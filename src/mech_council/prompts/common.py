@@ -50,16 +50,37 @@ human what you cannot settle.
 ESCALATION = """\
 # Asking the human
 
-- `human_input` entries that name an item are escalation requests: say which item it
-  blocks and what evidence would settle it without a human.
-- `human_input` may also name no item at all — a question about the brief, the scope or
-  the goal. That question is put to the human when the run would otherwise end; it never
-  stops the run. To stop the council, stance `needs_human` on an item.
-- A question you no longer need answered is dropped by restancing that item (an
-  `abstain` does it), not by going quiet.
-- Only an escalation several seats hold stops the council mid-run to ask. Everything else is
-  asked at the checkpoint the run reaches when it would otherwise end, so an unanswered
-  question is never a way to avoid stancing.
+- `human_input` entries ask. Naming an item says what the ask is about; it does **not**
+  escalate it, hold it open, or stop the run. Only the stance `needs_human` says you will not
+  sign that item off, and that is the act a peer can challenge you to defend.
+- An ask is a proposal to the council, not a message to the human. It reaches them only once
+  a **second seat backs it** with `second: ["H1"]`; an unbacked ask is reported and never
+  asked. Back the ones you would act on and leave the rest alone.
+- A peer who wants the same decision will word it differently. Two of you holding **one item** raise
+  one ask together — each of you the other's second seat, without either saying so — and the chair
+  folds asks that want one answer into the ask raised first. So word yours such that the answer you
+  need is the only answer that fits — a sharp ask folded into a vague one stops nothing.
+- Every ask carries an id (`H1`) on the docket, and most of them belong to the council, not
+  to the human: `answer_question` answers a peer's ask from the workspace, `insist: ["H1"]` says a
+  peer's answer to one of yours was not enough, and `retract: ["H1"]` drops one you raised and no
+  longer need. Say so — never go quiet.
+- Dropping an ask releases nothing but itself: an item you hold with `needs_human` goes only by
+  **stancing that item again** as one you now accept or abstain from. And the reverse: letting go of
+  the item drops the ask your hold raised, so re-ask it if you still need the answer. The council
+  **settling the item** answers an ask about it the same way — a declared stop is the one claim that
+  outranks a closure — so ask over no item what the closure left open.
+- A peer's answer holds an ask back — they are telling the council the workspace settles it. Only a
+  seat that **raised** the ask can call that answer not enough, with `insist: ["H1"]` in a round
+  **after** the answer lands: an answer that arrived in the round you are answering in is not one you
+  have read, so it is not one you can refuse. Backing an ask another seat raised cannot un-answer it,
+  and your own answer stops counting the moment you ask that ask too — what you wrote is kept, it just
+  stops keeping it from the human. Insisting still takes a second seat.
+- Nothing stops the run but a **declared stop**: `blocking: true` on an ask you raise, or
+  `blocking_for: ["H1"]` on a peer's. A majority of the council has to want that stop before
+  the council waits, so claim it only where you genuinely cannot do the work without the
+  answer. A taste call, a name, a colour is not it — ask, or decide it yourself. A stop is sticky:
+  sending `blocking: false` back releases nothing, and there is no other way to give one up than
+  `retract` the ask or let go of the item it was declared on.
 - If a peer challenges your escalation with cited evidence, answer the challenge.
 """
 
@@ -83,7 +104,11 @@ acceptable answer, say why in `context` — that is a real result too.
 
 The menu is yours: when you re-ask, what you send **replaces the candidates you offered
 before**, so send the whole menu you stand behind now and never a fragment of it. A peer
-asking the same question keeps its own candidates beside yours.
+asking the same question keeps its own candidates beside yours, and asking it twice is also
+the second seat that gets the ask put to the human.
+
+`blocking` is a separate claim from the ask: it says the council must *wait* for the answer,
+and it takes a majority making the same claim to mean anything.
 """
 
 ANSWER_SHAPE = """\
@@ -182,6 +207,42 @@ def gap_ask(missing: list[str], *, reason: str, deliberate: bool) -> str:
     return line + f"\n\nWhy I am asking again: {reason}\n"
 
 
+def peer_pass_task(listing: str, mode: str) -> str:
+    return "\n".join(
+        [
+            "# Before the council ends: the asks that will not reach the human",
+            "",
+            "None of the asks below reaches the human as things stand, and the listing says why for each: no second",
+            "seat backed it, a seat answered it from the workspace, or the council settled the item it asked about.",
+            "For each one, do whichever is true:",
+            "",
+            "- you can settle it from the workspace → `answer_question`: its id and your answer;",
+            "- you want the human's word on it too → `second`: its id. Only a peer can back an ask, so `second` is not yours",
+            "  on one you raised; `blocking_for`: its id is the claim that the council should wait for the answer, and that",
+            "  one you may declare on an ask of your own — it takes a majority declaring the same stop for it to bite;",
+            "- you raised it, a seat answered it, and that answer misses the point → `insist`: its id — the only way an",
+            "  answered ask comes back to the human;",
+            "- you raised it and no longer need it → `retract`: its id.",
+            "",
+            "An ask mooted by a settled item comes back only on a declared stop at the bar: the closure is the council's",
+            "answer about that item.",
+            "",
+            "This pass lets go and calls one answer not enough. Findings, sign-offs, new asks and `human_input` belong to",
+            "a round and are read by nobody here; `positions` are read for one thing — if a peer's answer settles an item",
+            "you are holding with `needs_human`, stance it as you now see it and that hold goes. You cannot",
+            "open a hold, take another seat's, or keep one by stancing `needs_human` again. Say nothing",
+            "about an ask you have nothing on.",
+            "",
+            ANSWER_SHAPE,
+            schema_hint(mode, phase="round"),
+            "---",
+            "## The asks",
+            "",
+            listing,
+        ]
+    )
+
+
 def repair_ask(mode: str, phase: str, error: str, previous: str) -> str:
     return "\n".join(
         [
@@ -204,13 +265,21 @@ def merge_schema(mode: str) -> str:
     return chair.MERGE_SCHEMA.replace("{id}", adapter_for(mode).id_prefix)
 
 
+#: the passes where a seat owes a verdict-shaped reply, so a repair re-ask quotes the round schema back to it
+SEAT_PHASES = ("round", "gap", "defense", "explain", "seconding")
+
+
 def schema_hint(mode: str, *, phase: str) -> str:
     if phase == "phase0":
         return _mode_text(mode).PHASE0_SCHEMA
-    if phase == "round":
+    if phase in SEAT_PHASES:
         return _mode_text(mode).ROUND_SCHEMA
     if phase == "merge":
         return merge_schema(mode)
+    if phase == "asks":
+        from . import chair as chair_text
+
+        return chair_text.ASK_MERGE_SCHEMA
     if phase == "compare":
         from . import plan as plan_text
 
@@ -237,6 +306,23 @@ def merge_task(mode: str, listing: str, goal: str | None = None) -> str:
             merge_schema(mode),
             "---",
             "## The new items",
+            "",
+            listing,
+        ]
+    )
+
+
+def ask_merge_task(listing: str) -> str:
+    """The chair's ask fold: ids are `H1`-shaped in every mode, so no id prefix goes in."""
+    from . import chair
+
+    return "\n".join(
+        [
+            chair.ASK_MERGE,
+            ANSWER_SHAPE,
+            chair.ASK_MERGE_SCHEMA,
+            "---",
+            "## The open asks",
             "",
             listing,
         ]

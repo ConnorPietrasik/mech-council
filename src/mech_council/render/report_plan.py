@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import effective_class
+from ..deliberation.escalations import HELD_BACK, effective_class, held_back
 from ..deliberation.state import (
     ANSWERED,
     ASKED,
@@ -9,6 +9,7 @@ from ..deliberation.state import (
     NO_PREFERENCE,
     REJECTED,
     SKIPPED,
+    WITHDRAWN,
     Docket,
     Question,
 )
@@ -142,19 +143,27 @@ def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
         out.append("None the council had to make: every open question was answered.")
         return out + [""]
     for question in questions:
-        kind = (
-            "unasked"
-            if "unasked" in question.markers
-            else "skipped"
-            if question.state == SKIPPED
-            else "undefended"
-            if any(e.undefended for e in _escalations(docket, question))
-            else "deferred"
-        )
+        kind = _assumption_kind(docket, question)
         out.append(f"- **{kind}** ({question.id}, {effective_class(docket, question)}): {question.text}")
         out.append(f"  assumed: {question.answer or 'whatever the seats did in its place'}")
     out.append("")
     return out
+
+
+def _assumption_kind(docket: Docket, question: Question) -> str:
+    """Why this ask became an assumption, in the word the ledger uses."""
+    held = held_back(docket, question) if question.state == ASKED else next((m for m in question.markers if m in HELD_BACK), "")
+    if "unasked" in question.markers:
+        return "unasked"
+    if "unanswered" in question.markers:
+        return "unanswered"
+    if held:
+        return held
+    if question.state == SKIPPED:
+        return "skipped"
+    if any(e.undefended for e in _escalations(docket, question)):
+        return "undefended"
+    return "deferred"
 
 
 def _agreed_points(docket: Docket, context: ReportContext) -> list[str]:
@@ -205,8 +214,19 @@ def _human_input(docket: Docket, context: ReportContext) -> list[str]:
     for question in questions:
         state = question.state if question.state != ASKED else "standing"
         out.append(f"- {question.id} ({state}) {_names(question.askers, context)}: {question.text}")
+        for seat, said in question.also_asked.items():
+            out.append(f"  - asked as well by {_names([seat], context)}: {said}")
+        if question.retracted_by:
+            out.append(f"  - retracted by {_names([question.retracted_by], context)} in round {question.retracted_round}")
+        if question.merged_into:
+            out.append(f"  - folded into {question.merged_into}: the same ask in other words")
+        for seat, answer in question.peer_answers.items():
+            said = "answered it and asks it still" if seat in question.askers else "answered instead of asking"
+            out.append(f"  - {said}: {_names([seat], context)}: {answer}")
         if question.answer:
             out.append(f"  - authoritative answer (round {question.answer_round}): {question.answer}")
+        elif question.moot_with:
+            out.append(f"  - moot with {question.moot_with}: the council settled that item, so nothing was assumed in its place")
         else:
             out.append("  - assumed in its place: whatever the council did with it — never settled")
     out.append("")
@@ -262,7 +282,7 @@ def _rounds(docket: Docket, context: ReportContext) -> list[str]:
 def _touches_direction(docket: Docket, question: Question) -> bool:
     if question.direction_ask:
         return False  # the split itself, printed under "Chosen direction", never one of the plan's assumptions
-    if question.state == ANSWERED:
+    if question.state in (ANSWERED, WITHDRAWN):
         return False
     if question.item_id is None:
         return True

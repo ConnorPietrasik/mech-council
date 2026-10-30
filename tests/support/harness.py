@@ -68,6 +68,15 @@ class ScriptPort:
         data, _errors = parse_merge_plan(text or "")
         return {"groups": (data or {}).get("groups") or []}
 
+    async def chair_merge_questions(self, listing: str, *, round_: int) -> dict:
+        # `Port` runs the extractor, so the harness does too: the chair's fold is JSON text first.
+        self.asks.append(Ask("chair", "asks", round_, "asks", listing))
+        from mech_council.extraction import parse_ask_merge
+
+        text = self._chair_answer(Ask("chair", "asks", round_, "asks", listing))
+        data, _errors = parse_ask_merge(text or "")
+        return {"groups": (data or {}).get("groups") or []}
+
     async def chair_direction(self, listing: str, *, round_: int) -> dict:
         self.asks.append(Ask("chair", "direction", round_, "direction", listing))
         from mech_council.extraction import parse_direction
@@ -114,6 +123,9 @@ class ScriptPort:
             }
         )
         ids = [q.id for q in ask_set]
+        if not waiting:
+            # the real Checkpoint prints and keeps going: nothing was put to the human, so nothing is answered
+            return CheckpointOutcome(waited=False)
         answered = {qid: text for qid, text in self.answers.items() if qid in ids}
         skipped = [qid for qid in ids if qid in self.skip]
         recommended = {qid: text for qid, text in self.recommendations.items() if qid in ids}

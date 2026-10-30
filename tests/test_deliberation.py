@@ -23,6 +23,7 @@ from mech_council.deliberation.state import (
     STANDING,
     UNHEARD,
     UNSEEN,
+    WITHDRAWN,
     Docket,
     Item,
     Stance,
@@ -153,6 +154,21 @@ def test_a_reasoned_challenge_reopens_and_the_ladder_applies_again():
     assert dispositions.derive(docket, "F1") == UNSEEN
 
 
+def test_the_report_s_closure_pass_closes_and_never_reopens():
+    """The last pass before the report settles what the seats settled; reopening is a round's business."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which tenant?", round=1)
+    stance(docket, "F1", "Agent2", AGREE, round=1)
+    stance(docket, "F1", "Agent3", AGREE, round=1)
+    assert dispositions.derive(docket, "F1") == HUMAN
+    stance(docket, "F1", "Agent1", AGREE, round=2)  # the seat's own release, as the pass before the report records it
+    assert [name for name, _ in dispositions.closure_pass(docket, 2, reopen=False)] == ["item_closed"]
+    assert (docket.items["F1"].closed, docket.items["F1"].disposition) == (True, AGREED)
+    stance(docket, "F1", "Agent2", DISAGREE, note="wrong on X", round=2)
+    assert dispositions.closure_pass(docket, 2, reopen=False) == [], "an objection after the last round reopens nothing"
+    assert (docket.items["F1"].closed, docket.items["F1"].disposition) == (True, AGREED)
+
+
 def test_reopen_reclose_moves_the_stalemate_signature():
     docket = docket_with(3)
     for agent in docket.roster:
@@ -197,6 +213,9 @@ def test_escalation_states_and_the_effective_class():
     assert escalations.effective_class(docket, question) == "deferred", "one of three"
     stance(docket, "F1", "Agent2", NEEDS_HUMAN)
     stance(docket, "F1", "Agent3", NEEDS_HUMAN)
+    assert escalations.effective_class(docket, question) == "deferred", "three stances are still not a declared stop"
+    escalations.stop_for(docket, qid=question.id, agent="Agent1", round_=1)
+    escalations.stop_for(docket, qid=question.id, agent="Agent2", round_=1)
     assert escalations.effective_class(docket, question) == "blocking"
     assert termination.blocking_questions(docket) == [question]
 
@@ -228,30 +247,342 @@ def test_a_declined_split_ask_is_a_needs_human_while_two_directions_stand():
     assert termination.evaluate(docket)[0] == termination.NEEDS_OUTCOME
 
 
-def test_an_item_less_question_is_never_blocking_however_many_ask():
+def test_an_ask_needs_a_second_seat_before_the_human_sees_it():
     docket = docket_with(3)
-    for agent in docket.roster:
-        escalations.raise_question(docket, text="a rule question", asker=agent, item_id=None, blocking=True, round_=1)
+    question, _ = escalations.raise_question(docket, text="which brand palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    assert escalations.held_back(docket, question) == escalations.UNBACKED
+    assert termination.held_back_questions(docket) == [question]
+    backed, reason = escalations.second(docket, qid="H1", agent="Agent2", round_=2)
+    assert (backed, reason) == (question, "") and question.askers == ["Agent1", "Agent2"]
+    assert escalations.showable(docket, question) and termination.held_back_questions(docket) == []
+    assert escalations.second(docket, qid="H9", agent="Agent3", round_=2)[0] is None, "no such ask to back"
+    escalations.second(docket, qid="H1", agent="Agent1", round_=2)
+    assert question.askers == ["Agent1", "Agent2"], "a seat that asks it already cannot second it"
+
+
+def test_only_the_split_ask_and_the_knob_bypass_the_second():
+    plan = docket_with(3, mode="plan", items=0)
+    split = escalations.raise_direction_ask(plan, text="which order?", context="", options=["a", "b"], round_=1)
+    assert escalations.showable(plan, split), "the split ask is backed by the camps it reports"
+    three = docket_with(3)
+    only, _ = escalations.raise_question(three, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    assert not escalations.showable(three, only)
+    three.seconding = False
+    assert escalations.showable(three, only), "the knob turns the gate off"
+
+
+def test_a_declared_stop_needs_the_bar_and_letting_go_releases_it():
+    docket = docket_with(3)
+    escalations.raise_question(docket, text="which tenant owns the key?", asker="Agent1", item_id=None, round_=1)
+    escalations.stop_for(docket, qid="H1", agent="Agent1", round_=1)
+    assert escalations.effective_class(docket, docket.questions["H1"]) == "deferred", "one seat cannot stop the council"
+    escalations.stop_for(docket, qid="H1", agent="Agent2", round_=2)
+    assert escalations.effective_class(docket, docket.questions["H1"]) == "blocking", "the bar of 3 is two"
+    escalations.retract(docket, qid="H1", agent="Agent2", round_=3)
+    assert docket.questions["H1"].blocked_by == ["Agent1"], "walking away from the ask walks away from the stop"
+    assert escalations.effective_class(docket, docket.questions["H1"]) == "deferred"
+
+
+def test_no_seat_backs_drops_or_answers_the_split_ask():
+    """The camps are what the split ask reports, so no seat's `second`, `retract` or `answer_question` reaches it."""
+    plan = docket_with(3, mode="plan", items=0)
+    split = escalations.raise_direction_ask(plan, text="which order?", context="", options=["a", "b"], round_=1)
+    for refuse in (escalations.second, escalations.retract, escalations.stop_for):
+        question, reason = refuse(plan, qid=split.id, agent="Agent1", round_=1)
+        assert question is split and reason, "a seat has no claim on the camps' ask"
+    answered, reason = escalations.answer_by_seat(plan, qid=split.id, agent="Agent1", text="one tenant, decided")
+    assert answered is split and reason and split.peer_answers == {}, "answering the camps from the workspace is no claim either"
+    insisted, reason = escalations.insist(plan, qid=split.id, agent="Agent1", round_=1, seen=1)
+    assert insisted is split and reason, "echoing the camps' ask asks nothing of them"
+    assert split.state == ASKED and "Agent1" not in split.askers, "the guard did not sneak a seat into the camps"
+
+
+def test_a_peer_answer_holds_an_ask_back_until_a_raiser_insists():
+    """`insist` names the ask by id, and only a seat that raised it can mean it."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    assert escalations.showable(docket, question)
+    answered, reason = escalations.answer_by_seat(docket, qid="H1", agent="Agent3", text="the tokens file names brand-primary", round_=1)
+    assert (answered, reason) == (question, "")
+    assert escalations.held_back(docket, question) == escalations.SETTLED, "a seat answered it: the human is not asked"
+
+    assert escalations.insist(docket, qid="H9", agent="Agent1", round_=2, seen=1)[0] is None, "an id that names nothing"
+    assert escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=0)[1], "nothing has been answered to refuse"
+    backed, reason = escalations.insist(docket, qid="H1", agent="Agent2", round_=2, seen=1)
+    assert (backed, question.insisted) == (question, False) and reason, "a backer has no claim on an answer it did not get"
+    again, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=2)
+    assert again is question and not question.insisted, "restating an ask only keeps it alive"
+
+    raised, reason = escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=1)
+    assert (raised, reason) == (question, "") and question.insisted, "only the seat that raised it can say so"
+    assert escalations.insist(docket, qid="H1", agent="Agent1", round_=3, seen=2)[1], "it is said once"
+    assert escalations.showable(docket, question), "backed and insisted: the human is asked"
+
+
+def test_an_ask_raised_by_two_seats_in_two_wordings_is_insisted_on_by_either():
+    """The wording is not the ask: a co-raiser calls a peer's answer not enough by id, with no sentence to echo."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which palette wins?")
+    stance(docket, "F1", "Agent2", NEEDS_HUMAN, note="which colour file wins?")
+    ask = docket.questions["H1"]
+    assert ask.text == "which palette wins?" and ask.also_asked == {"Agent2": "which colour file wins?"}
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent3", text="tokens.json names it", round_=1)
+    insisted, reason = escalations.insist(docket, qid="H1", agent="Agent2", round_=2, seen=1)
+    assert (insisted, reason) == (ask, "") and ask.insisted, "its own wording was never the ask"
+
+
+def test_an_answer_landing_in_its_own_round_is_not_rebuttable_in_it():
+    """A verdict cannot refuse an answer that was not on the docket it was written against; the pass before the
+    report is the one pass that does show a seat the answers it carries.
+    """
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent3", text="tokens.json names brand-primary", round_=2)
+    assert escalations.held_back(docket, question) == escalations.SETTLED
+
+    same_round, reason = escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=1)
+    assert (same_round, question.insisted) == (question, False) and reason, "the round's own answer is not one it has read"
+    assert not escalations.showable(docket, question)
+
+    next_round, reason = escalations.insist(docket, qid="H1", agent="Agent1", round_=3, seen=2)
+    assert (next_round, reason) == (question, "") and question.insisted, "the next round is where a rebuttal lands"
+    assert escalations.showable(docket, question)
+
+
+def test_the_last_asker_to_walk_away_withdraws_the_ask():
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    assert escalations.retract(docket, qid="H1", agent="Agent1", round_=2) == (question, "")
+    assert question.state == ASKED and question.askers == ["Agent2"], "another seat still asks it"
+    assert escalations.retract(docket, qid="H1", agent="Agent3", round_=2)[1], "a seat cannot drop an ask it does not ask"
+    assert (question.state, question.askers) == (ASKED, ["Agent2"])
+    escalations.retract(docket, qid="H1", agent="Agent2", round_=3)
+    assert question.state == WITHDRAWN and question.retracted_by == "Agent2"
+    assert termination.unsettled_questions(docket) == []
+    again, updated = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=4)
+    assert not updated and again.id == "H2", "a withdrawn ask is history, so the same words raise a new one"
+
+
+def test_letting_go_of_the_item_releases_the_stop_declared_on_its_ask():
+    """A stop that outlives the hold it was declared with parks the run on a question nobody is asking."""
+    docket = docket_with(3)
+    for agent in ("Agent1", "Agent2"):
+        stance(docket, "F1", agent, NEEDS_HUMAN, note="which tenant owns the key?")
     question = docket.questions["H1"]
-    assert question.askers == docket.roster
+    for agent in ("Agent1", "Agent2"):
+        escalations.stop_for(docket, qid="H1", agent=agent, round_=1)
+    assert escalations.effective_class(docket, question) == "blocking"
+    for agent in ("Agent1", "Agent2"):
+        stance(docket, "F1", agent, AGREE)
+    assert question.blocked_by == [], "the hold is gone, and the stop it declared goes with it"
     assert escalations.effective_class(docket, question) == "deferred"
     assert termination.blocking_questions(docket) == []
 
 
+def test_the_chair_folds_asks_that_want_one_decision():
+    """Two seats wanting one decision word it differently: apart, neither is backed and the human is asked twice."""
+    docket = docket_with(3)
+    escalations.raise_question(docket, text="which tenant owns the cache key?", asker="Agent1", item_id="F1", round_=1)
+    escalations.raise_question(docket, text="who is accountable for tenancy?", asker="Agent2", item_id="F1", round_=1)
+    first, second = docket.questions["H1"], docket.questions["H2"]
+    escalations.stop_for(docket, qid="H1", agent="Agent1", round_=1)
+    escalations.stop_for(docket, qid="H2", agent="Agent2", round_=1)
+    escalations.offer_options(second, "Agent2", ["the billing service", "the storage team"], replace=True)
+    assert not escalations.showable(docket, first) and not escalations.showable(docket, second), "two wordings, neither backed"
+
+    events, reason = escalations.merge_asks(docket, groups=[{"canonical": "H1", "duplicates": ["H2"]}], round_=2)
+    assert reason == "" and [name for name, _ in events] == ["question_merged"]
+    assert first.askers == ["Agent1", "Agent2"] and first.blocked_by == ["Agent1", "Agent2"]
+    assert escalations.effective_class(docket, first) == "blocking", "one ask with a majority wanting the stop"
+    assert [entry[0] for entry in first.menu.values()] == ["the billing service", "the storage team"]
+    assert (second.state, second.merged_into, second.askers) == (WITHDRAWN, "H1", [])
+    assert "merged" in second.markers
+    assert termination.unsettled_questions(docket) == [first], "one ask reaches the human, not two"
+    assert escalations.retract(docket, qid="H2", agent="Agent2", round_=3)[1].startswith("that ask is now H1")
+
+
+def test_the_fold_keeps_the_words_of_the_ask_raised_first():
+    """The ask raised first survives whichever one the chair names; a chair that reads the order backwards loses that
+    wording, not the fold — and not the groups it named properly.
+    """
+    docket = docket_with(3)
+    escalations.raise_question(docket, text="which tenant owns the cache key?", asker="Agent1", item_id="F1", round_=1)
+    escalations.raise_question(docket, text="who is accountable for tenancy?", asker="Agent2", item_id="F1", round_=2)
+    escalations.raise_question(docket, text="which palette wins?", asker="Agent1", item_id=None, round_=2)
+    escalations.raise_question(docket, text="which colour file?", asker="Agent3", item_id=None, round_=2)
+    escalations.stop_for(docket, qid="H2", agent="Agent2", round_=2)
+
+    events, reason = escalations.merge_asks(
+        docket, groups=[{"canonical": "H2", "duplicates": ["H1"]}, {"canonical": "H3", "duplicates": ["H4"]}], round_=3
+    )
+    assert reason == ""
+    assert [(f["id"], f["into"], f["chair_named"]) for _name, f in events] == [("H2", "H1", "H2"), ("H4", "H3", "H3")]
+    first = docket.questions["H1"]
+    assert (first.text, first.askers, first.blocked_by) == ("which tenant owns the cache key?", ["Agent1", "Agent2"], ["Agent2"])
+    assert (docket.questions["H2"].state, docket.questions["H2"].merged_into) == (WITHDRAWN, "H1")
+    assert docket.questions["H4"].merged_into == "H3", "the groups the chair worded well still fold"
+
+
+def test_a_fold_cannot_launder_the_answer_a_seat_gave_and_then_asked_about():
+    """A seat answers a peer's ask and wants the human's word in its own words: the fold makes it an asker, so its
+    answer stops being a reason to keep the ask from the human — and stays on the record all the same.
+    """
+    docket = docket_with(3)
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.raise_question(docket, text="which colour file?", asker="Agent2", item_id=None, round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="tokens.json, and nothing reads it", round_=2)
+    assert escalations.held_back(docket, docket.questions["H1"]) == escalations.SETTLED
+
+    escalations.merge_asks(docket, groups=[{"canonical": "H1", "duplicates": ["H2"]}], round_=2)
+    first = docket.questions["H1"]
+    assert first.peer_answers == {"Agent2": "tokens.json, and nothing reads it"}, "the answer the human should still get"
+    assert escalations.settlements(first) == {}, "an answer from a seat that asks it is not a settlement"
+    assert escalations.showable(docket, first) and escalations.held_back(docket, first) == ""
+
+    escalations.retract(docket, qid="H1", agent="Agent2", round_=3)
+    assert escalations.held_back(docket, first) == escalations.SETTLED, "walk away and the answer counts again"
+
+
+def test_answering_an_ask_and_then_backing_it_is_asking_for_the_human_s_word():
+    """The one way a seat's own answer stops holding an ask back: it wants the human's word on it too."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="tokens.json, and nothing reads it", round_=1)
+    assert escalations.held_back(docket, question) == escalations.SETTLED
+
+    escalations.second(docket, qid="H1", agent="Agent2", round_=2)
+    assert escalations.showable(docket, question), "a seat asking it is no answer to it"
+    assert question.peer_answers == {"Agent2": "tokens.json, and nothing reads it"}, "the answer is kept, not undone"
+
+
+def test_two_seats_holding_one_item_raise_one_ask_together():
+    """The second seat is usually there already: two seats holding one item want the same decision."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which tenant owns the cache key?")
+    events = escalations.record_stance(docket, item_id="F1", agent="Agent2", stance=NEEDS_HUMAN, note="who owns it?", round_=1)
+
+    asked = list(docket.questions.values())
+    assert [q.id for q in asked] == ["H1"], "one item, one ask"
+    first = asked[0]
+    assert (first.askers, first.raised_by) == (["Agent1", "Agent2"], ["Agent1", "Agent2"]), "each asked for it, in their own words"
+    assert first.also_asked == {"Agent2": "who owns it?"}, "no wording is lost"
+    assert escalations.showable(docket, first), "the second seat was there all along"
+    assert [fields["asked_with"] for _name, fields in events] == [["Agent1"]]
+    assert docket.escalations[("F1", "Agent2")].question_id == "H1", "the second hold points at the same ask"
+    escalations.stop_for(docket, qid="H1", agent="Agent1", round_=1)
+    escalations.stop_for(docket, qid="H1", agent="Agent2", round_=1)
+    assert escalations.effective_class(docket, first) == "blocking", "two declared stops on the one ask about their item"
+
+
+def test_a_seat_that_shares_an_ask_does_not_reword_it():
+    """Two seats, one ask: the words the human reads belong to the seat that raised it first."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which tenant owns the cache key?")
+    stance(docket, "F1", "Agent2", NEEDS_HUMAN, note="who is accountable for tenancy?")
+    first = docket.questions["H1"]
+    changed = escalations.refresh_question(first, asker="Agent2", text="who is accountable for tenancy?", round_=2)
+    assert not changed and first.text == "which tenant owns the cache key?", "this seat has no words to take the ask's place"
+    assert escalations.refresh_question(first, asker="Agent1", text="config or KMS, which?", round_=3), "the raiser rewords its own ask"
+    assert first.text == "config or KMS, which?"
+
+
+def test_a_folded_ask_keeps_the_peer_answer_that_was_holding_it_back():
+    """Folding must not launder a settled question back in front of the human, nor lose the round it was settled in."""
+    docket = docket_with(3)
+    first, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.raise_question(docket, text="which colour file?", asker="Agent2", item_id=None, round_=1)
+    escalations.answer_by_seat(docket, qid="H2", agent="Agent3", text="tokens.json, and nothing reads it", round_=2)
+    escalations.merge_asks(docket, groups=[{"canonical": "H1", "duplicates": ["H2"]}], round_=2)
+    assert first.peer_answers == {"Agent3": "tokens.json, and nothing reads it"}
+    assert not escalations.showable(docket, first), "backed by two seats, and still settled by a peer"
+    assert escalations.held_back(docket, first) == escalations.SETTLED
+
+    same_round, reason = escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=1)
+    assert not first.insisted and reason, "the answer's round travels with the answer through the fold"
+    next_round, reason = escalations.insist(docket, qid="H1", agent="Agent1", round_=3, seen=2)
+    assert (next_round, reason) == (first, "") and first.insisted and escalations.showable(docket, first)
+
+
+def test_the_ask_fold_is_one_plan_or_none():
+    docket = docket_with(3)
+    for agent, text in (("Agent1", "which palette?"), ("Agent2", "which colour file?"), ("Agent3", "which theme?")):
+        escalations.raise_question(docket, text=text, asker=agent, item_id=None, round_=1)
+    groups = [{"canonical": "H1", "duplicates": ["H2"]}, {"canonical": "H3", "duplicates": ["H1"]}]
+    events, reason = escalations.merge_asks(docket, groups=groups, round_=2)
+    assert events == [] and "reused" in reason
+    assert [q.state for q in docket.questions.values()] == [ASKED, ASKED, ASKED], "half a fold is no fold"
+    events, _reason = escalations.merge_asks(docket, groups=[{"canonical": "H9", "duplicates": ["H2"]}], round_=2)
+    assert events == [] and docket.questions["H2"].state == ASKED, "an id that is not an open ask is skipped"
+
+
+def test_a_seat_cannot_answer_its_own_ask():
+    """An answer holds an ask back from the human, so the asker writing one is not how it goes away."""
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    assert escalations.answer_by_seat(docket, qid="H1", agent="Agent1", text="I would guess the tokens file")[1]
+    assert question.peer_answers == {} and escalations.showable(docket, question)
+
+
+def test_retracting_an_answered_ask_leaves_the_human_s_word_standing():
+    docket = docket_with(3)
+    question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    question.state, question.answer = ANSWERED, "brand-primary"
+    escalations.retract(docket, qid="H1", agent="Agent1", round_=2)
+    assert question.state == ANSWERED and question.answer == "brand-primary", "the human's word outlives the ask"
+    assert "moot" in question.markers
+
+
+def test_an_item_less_ask_blocks_only_on_a_declared_stop():
+    docket = docket_with(3)
+    for agent in docket.roster:
+        escalations.raise_question(docket, text="a rule question", asker=agent, item_id=None, round_=1)
+    question = docket.questions["H1"]
+    assert question.askers == docket.roster
+    assert escalations.effective_class(docket, question) == "deferred", "three askers are not a declared stop"
+    assert termination.blocking_questions(docket) == []
+    for agent in ("Agent1", "Agent2"):
+        escalations.stop_for(docket, qid="H1", agent=agent, round_=1)
+    assert escalations.effective_class(docket, question) == "blocking", "the bar counts declared stops"
+
+
+def test_an_ask_about_an_item_the_council_settled_goes_moot_with_it():
+    """The closure is the council's answer about its item; a deferred ask about it is no question left over."""
+    docket = docket_with(3)
+    for agent in docket.roster:
+        stance(docket, "F1", agent, AGREE)
+    deferred, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id="F1", round_=1)
+    blocking, _ = escalations.raise_question(docket, text="who owns the key?", asker="Agent1", item_id="F1", round_=1)
+    for agent in ("Agent1", "Agent2"):
+        escalations.stop_for(docket, qid="H2", agent=agent, round_=1)
+    assert [event for event, _ in dispositions.closure_pass(docket, 1)] == ["item_closed"]
+
+    events = escalations.moot_item_asks(docket, item_id="F1", disposition=AGREED, round_=1)
+    assert [(event, detail["id"]) for event, detail in events] == [("question_mooted", "H1")]
+    assert deferred.state == WITHDRAWN and deferred.moot_with == "F1" and deferred.blocked_by == []
+    assert blocking.state == ASKED and blocking.moot_with == "", "a declared stop outranks the closure"
+    assert termination.unsettled_questions(docket) == [blocking]
+
+
 def test_the_entry_that_names_an_item_gives_the_deduped_question_its_item():
-    """The same words, first as a request and then as an escalation: the item comes with the escalation."""
+    """The same words, first with no item and then bound to one: the item and the intent land on one question."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(docket, text="which tenant key?", asker="Agent1", item_id=None, blocking=False, round_=0)
-    assert escalations.effective_class(docket, question) == "deferred", "no item, so never a way to hold the run"
+    assert escalations.effective_class(docket, question) == "deferred", "one ask is not a stop"
 
     again, _ = escalations.raise_question(docket, text="Which tenant key?", asker="Agent1", item_id="F1", blocking=True, round_=1)
     assert again is question, "one question, deduplicated as ever"
-    assert question.item_id == "F1" and question.blocking_requested is True
+    assert question.item_id == "F1" and question.blocked_by == ["Agent1"], "the entry's blocking flag is one seat's claim"
 
     stance(docket, "F1", "Agent2", NEEDS_HUMAN)
-    assert escalations.effective_class(docket, question) == "deferred", "one seat of three is below the bar"
+    assert escalations.effective_class(docket, question) == "deferred", "one declared stop is below the bar"
     stance(docket, "F1", "Agent3", NEEDS_HUMAN)
-    assert escalations.effective_class(docket, question) == "blocking", "the bar counts stances, not a lost item"
+    assert escalations.effective_class(docket, question) == "deferred", "a majority of stances is still not a majority of stops"
+    escalations.stop_for(docket, qid="H1", agent="Agent2", round_=2)
+    assert escalations.effective_class(docket, question) == "blocking", "the bar counts declared stops"
 
 
 def test_an_item_is_adopted_once_and_never_lost():
@@ -312,7 +643,6 @@ def test_a_reasking_seat_replaces_its_own_menu_and_leaves_a_peers_alone():
         asker="Agent1",
         text="which retention window?",
         item_id="F1",
-        blocking=True,
         round_=2,
         options=["keep 30 days", "wipe it nightly"],
     )
@@ -326,7 +656,7 @@ def test_a_reask_offering_no_menu_takes_it_from_nobody():
     question, _ = escalations.raise_question(
         docket, text="which retention?", asker="Agent1", item_id="F1", blocking=True, round_=1, options=["keep 30 days"]
     )
-    assert escalations.refresh_question(question, asker="Agent1", text="which retention, then?", item_id="F1", blocking=True, round_=2)
+    assert escalations.refresh_question(question, asker="Agent1", text="which retention, then?", item_id="F1", round_=2)
     assert question.options == ["keep 30 days"], "the human can still take the line they were shown"
 
 
@@ -350,7 +680,6 @@ def test_a_verbatim_reask_changes_nothing_and_says_no_more_than_that():
         item_id="F1",
         context="the policy predates the tenant work",
         options=["keep 30 days"],
-        blocking=True,
         round_=2,
     ), "the same words, context and menu changed nothing"
     assert escalations.refresh_question(question, asker="Agent1", text="which retention window?", round_=3), "a rephrase did"

@@ -65,6 +65,8 @@ ROUND_SCHEMA = """\
   "human_input": [{"question": "the decision, one line", "item": "T1", "blocking": false,
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
+  "second": ["H1"], "blocking_for": ["H4"], "retract": ["H2"], "insist": ["H3"],
+  "answer_question": [{"id": "H3", "answer": "what the workspace shows, so the human is not asked"}],
   "signoff": false
 }
 ```

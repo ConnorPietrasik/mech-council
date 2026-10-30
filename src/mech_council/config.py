@@ -14,6 +14,8 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "mode": "review",
     "goal": None,
     "max_rounds": 10,
+    "grace_rounds": 1,
+    "seconding": True,
     "watchdog_sec": 600,
     "chair_timeout_sec": 300,
     "max_concurrency": 4,
@@ -26,6 +28,8 @@ BUILTIN_DEFAULTS: dict[str, object] = {
 #: name → (type, `[defaults]`-allowed)
 SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "max_rounds": ("int>=1", True),
+    "grace_rounds": ("int>=0", True),
+    "seconding": ("bool", True),
     "watchdog_sec": ("int>=0", True),
     "chair_timeout_sec": ("int>=1", True),
     "max_concurrency": ("int>=1", True),
@@ -66,6 +70,8 @@ class Council:
     agents: list[MemberSpec]
     chair: MemberSpec
     max_rounds: int
+    grace_rounds: int
+    seconding: bool
     watchdog_sec: int
     chair_timeout_sec: int
     max_concurrency: int
@@ -513,6 +519,8 @@ def convene(
         agents=agents,
         chair=chair,
         max_rounds=args.rounds if args.rounds is not None else int(flat["max_rounds"]),
+        grace_rounds=int(flat["grace_rounds"]),
+        seconding=bool(flat["seconding"]),
         watchdog_sec=int(flat["watchdog_sec"]),
         chair_timeout_sec=int(flat["chair_timeout_sec"]),
         max_concurrency=int(flat["max_concurrency"]),

@@ -126,6 +126,8 @@ def council(n=2, *, concurrency=2, watchdog=0):
         agents=agents,
         chair=SPEC["chair"],
         max_rounds=3,
+        grace_rounds=0,
+        seconding=True,
         watchdog_sec=watchdog,
         chair_timeout_sec=60,
         max_concurrency=concurrency,

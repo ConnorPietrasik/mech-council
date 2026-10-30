@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import effective_class
+from ..deliberation.escalations import MOOT, SETTLED, UNBACKED, effective_class, held_back, showable, stop_holders
 from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, Docket, Question
 from ..modes.base import adapter_for
 
@@ -70,10 +70,15 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
                 out.append(f"  - {entry}")
         out.append("")
 
-    open_asks, answered_asks = _ask_sections(docket)
-    if open_asks:
-        out.append(f"## Questions for the human ({len(open_asks)})")
-        for question in open_asks:
+    shown_asks, weighing, answered_asks = _ask_sections(docket)
+    if shown_asks:
+        out.append(f"## Questions for the human ({len(shown_asks)})")
+        for question in shown_asks:
+            out.append(_question_line(docket, question, viewer))
+        out.append("")
+    if weighing:
+        out.append(f"## Asks not put to the human — second one, answer one, or retract your own ({len(weighing)})")
+        for question in weighing:
             out.append(_question_line(docket, question, viewer))
         out.append("")
     if answered_asks:
@@ -104,6 +109,28 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
     line = f"- {question.id}{where}, {state}: {question.text}"
     if question.askers:
         line += f"\n  asked by {_who(question.askers, viewer)}"
+    for seat, said in question.also_asked.items():
+        line += f"\n  asked as well by {_who([seat], viewer)}: {said}"
+    if question.blocked_by:
+        line += (
+            f"\n  asked to stop the run for it: {_who(question.blocked_by, viewer)}"
+            f" ({len(stop_holders(docket, question))}/{docket.bar()} at the bar)"
+        )
+    for seat, answer in question.peer_answers.items():
+        said = "answered it and asks it still" if seat in question.askers else "answered instead of asking"
+        line += f"\n  {said} — {_who([seat], viewer)}: {answer}"
+    held = held_back(docket, question) if question.state == ASKED else ""
+    if held == MOOT:
+        line += f"\n  moot: {question.item_id} was settled while this stood — retract it, or ask over no item what the closure left open"
+    elif held == SETTLED and viewer in question.raised_by:
+        backed = ", and a second seat must back it" if len(question.askers) < 2 else " — a peer already backs it"
+        line += f"\n  only you can call that answer not enough: `insist` on it if it misses something{backed}"
+    elif held == SETTLED:
+        line += f"\n  held back by that answer: only {_who(question.raised_by or question.askers[:1], viewer)} can call it not enough"
+    elif held == UNBACKED and viewer in question.askers:
+        line += "\n  no second seat: only a peer can `second` it — `retract` it if you no longer need the answer"
+    elif held == UNBACKED:
+        line += "\n  no second seat: it never reaches the human until you `second` it or answer it with `answer_question`"
     if question.state == ANSWERED and question.answer:
         line += f"\n  ANSWER (authoritative): {question.answer}"
     elif question.state == ASKED:
@@ -116,12 +143,17 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
     return line
 
 
-def _ask_sections(docket: Docket) -> tuple[list[Question], list[Question]]:
-    """The open asks and the human's answered ones, kept apart."""
+def _ask_sections(docket: Docket) -> tuple[list[Question], list[Question], list[Question]]:
+    """The asks that will be put to the human, the ones still weighing, and the human's answered ones."""
     from ..deliberation.termination import unsettled_questions
 
+    open_asks = unsettled_questions(docket)
     answered = [q for q in (docket.questions[i] for i in docket.question_order) if q.state == ANSWERED and q.answer]
-    return unsettled_questions(docket), answered
+    return (
+        [q for q in open_asks if showable(docket, q)],
+        [q for q in open_asks if not showable(docket, q)],
+        answered,
+    )
 
 
 def _plan_sections(docket: Docket, viewer: str) -> list[str]:

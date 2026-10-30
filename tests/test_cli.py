@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from .conftest import FAKE_PI, _kill_group_pid, canary_entries, write_project_config
+from .conftest import DEFAULT_CONFIG, FAKE_PI, _kill_group_pid, canary_entries, write_project_config
 
 TWO_COUNCILS = """\
 [defaults]
@@ -639,7 +639,8 @@ def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project
 
 
 def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_waits(cli, project):
-    """The human checkpoint's wait rule: `round_limit_reached` is the one way a question ends unasked."""
+    """The human checkpoint's wait rule with `grace_rounds = 0`: `round_limit_reached` is the one way a question ends unasked."""
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace("max_rounds = 2", "max_rounds = 2\ngrace_rounds = 0"))
     # Round 2 raises something new, so the run ends on the round limit and not on termination's stalemate.
     script = json.dumps(
         [

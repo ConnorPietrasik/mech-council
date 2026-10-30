@@ -35,8 +35,14 @@ class Brief:
     def defense(self, item_id: str, challenge: dict, question: str) -> str:
         return common.defense_ask(item_id, challenge, question)
 
+    def peer_pass(self, listing: str) -> str:
+        return common.peer_pass_task(listing, self.mode)
+
     def merge(self, *, mode: str, listing: str, goal: str | None = None) -> str:
         return common.merge_task(mode or self.mode, listing, goal)
+
+    def ask_merge(self, listing: str) -> str:
+        return common.ask_merge_task(listing)
 
     def comparison(self, *, listing: str, goal: str | None = None) -> str:
         return common.comparison_task(listing, goal)

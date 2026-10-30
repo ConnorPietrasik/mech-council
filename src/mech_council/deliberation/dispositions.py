@@ -32,12 +32,13 @@ def derive(docket: Docket, item_id: str) -> str:
     return UNSEEN
 
 
-def closure_pass(docket: Docket, judged_round: int) -> list[tuple[str, dict]]:
+def closure_pass(docket: Docket, judged_round: int, *, reopen: bool = True) -> list[tuple[str, dict]]:
+    """Close what the seats settled. `reopen=False` is the report's pass: it closes, and never reopens."""
     events: list[tuple[str, dict]] = []
     for item_id in list(docket.order):
         item = docket.items[item_id]
         if item.closed:
-            challenge = _reopen_trigger(docket, item, judged_round)
+            challenge = _reopen_trigger(docket, item, judged_round) if reopen else None
             if challenge is None:
                 _record_closed_notes(docket, item, judged_round)
                 continue

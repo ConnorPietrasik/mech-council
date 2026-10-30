@@ -1,28 +1,21 @@
 from __future__ import annotations
 
 from .dispositions import derive
-from .escalations import effective_class
+from .escalations import effective_class, held_back
 from .state import ASKED, CONSENSUS, DECLINED, DISPUTED, GO, NEEDS_OUTCOME, SKIPPED, UNSEEN, Docket
 
 
 def unsettled_questions(docket: Docket) -> list:
-    out = []
-    for qid in docket.question_order:
-        question = docket.questions[qid]
-        if question.state != ASKED:
-            continue
-        if question.item_id is not None:
-            holders = [
-                e for e in docket.standing_escalations(question.item_id) if e.question_id == question.id or e.asker in question.askers
-            ]
-            if not holders:
-                continue
-        out.append(question)
-    return out
+    return [docket.questions[qid] for qid in docket.question_order if docket.questions[qid].state == ASKED]
 
 
 def blocking_questions(docket: Docket) -> list:
     return [q for q in unsettled_questions(docket) if effective_class(docket, q) == "blocking"]
+
+
+def held_back_questions(docket: Docket) -> list:
+    """Unsettled asks the human will not be shown."""
+    return [q for q in unsettled_questions(docket) if held_back(docket, q)]
 
 
 def declined_blocking(docket: Docket) -> list:

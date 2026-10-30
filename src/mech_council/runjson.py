@@ -101,6 +101,8 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
         "chair": {"name": chair.name, "file_base": chair.file_base, "model": chair.model or "pi default", "provider": chair.provider},
         "settings": {
             "max_rounds": council.max_rounds,
+            "grace_rounds": council.grace_rounds,
+            "seconding": council.seconding,
             "watchdog_sec": council.watchdog_sec,
             "chair_timeout_sec": council.chair_timeout_sec,
             "max_concurrency": council.max_concurrency,

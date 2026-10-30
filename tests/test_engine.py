@@ -17,8 +17,8 @@ from .support.harness import RawAsk, ScriptPort, events_collector, payload
 NAMES = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
 
 
-def engine(n=3, *, mode="review", max_rounds=4, reply=None, answers=None, skip=None, selections=None):
-    docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)])
+def engine(n=3, *, mode="review", max_rounds=4, grace_rounds=1, seconding=True, reply=None, answers=None, skip=None, selections=None):
+    docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)], seconding=seconding)
     port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [], selections=selections or {})
     records, emit = events_collector()
     built = Engine(
@@ -28,6 +28,7 @@ def engine(n=3, *, mode="review", max_rounds=4, reply=None, answers=None, skip=N
         project="/project",
         brief=Brief(mode=mode, project="/project"),
         max_rounds=max_rounds,
+        grace_rounds=grace_rounds,
         names=NAMES,
         emit=emit,
     )
@@ -39,7 +40,7 @@ def finding(claim, severity="major", evidence="x.py:1"):
 
 
 def phase0(*findings, questions=()):
-    return payload(findings=[finding(f) for f in findings], open_questions=[{"text": q} for q in questions])
+    return payload(findings=[finding(f) for f in findings], open_questions=list(questions))
 
 
 def phase0_first(who, *findings, questions=()):
@@ -116,6 +117,24 @@ def test_no_chair_schema_offers_it_a_question_to_raise():
     assert "human_input" not in common.comparison_task("### Agent1\n\ndo it", "g"), "the comparison offers a question field"
     direction = common.direction_task("### Agent1\n\n- Agent1, backing `the original plan`:\ndo it", "g")
     assert "blocking" not in direction, "the chair was handed a stop button"
+    fold = common.ask_merge_task("### H1 (on F1)\nwhich name wins?\nasked by: Agent1")
+    assert "human_input" not in fold and "blocking" not in fold, "the ask fold was handed a question to raise"
+
+
+def test_the_ask_fold_brief_shows_the_chair_asks_and_their_ids():
+    """Ask ids are `H1` in both modes, so the fold's schema must not take the mode's item prefix."""
+    brief = common.ask_merge_task("### H1 (on F1)\nwhich tenant owns the key?\nasked by: Agent1")
+    assert '"canonical": "H1"' in brief and "which tenant owns the key?" in brief
+    assert common.schema_hint("review", phase="asks") == common.schema_hint("plan", phase="asks")
+
+
+def test_every_seat_phase_repairs_with_the_verdict_shape():
+    """A repair re-ask quotes the shape of the pass it repairs: the gap, defense, explain and seconding passes had the chair's."""
+    verdict = common.schema_hint("review", phase="round")
+    for phase in common.SEAT_PHASES:
+        assert common.schema_hint("review", phase=phase) == verdict
+    for phase in ("merge", "asks", "compare", "direction"):
+        assert common.schema_hint("review", phase=phase) != verdict, "a chair publication is not a seat's verdict"
 
 
 def test_the_merge_listing_words_an_item_s_detail_the_way_the_mode_does():
@@ -258,21 +277,23 @@ def test_a_phase_0_one_liner_the_seat_later_escalates_still_stops_the_run():
         if ask.kind == "merge":
             return {"groups": []}
         if ask.who in ("Agent1", "Agent2"):
-            return payload(positions=[{"item": "F1", "stance": "needs_human", "note": decision}], signoff=False)
+            return payload(positions=[{"item": "F1", "stance": "needs_human", "note": decision}], blocking_for=["H1"], signoff=False)
         return stance_all(ask, "agree")
 
     async def main():
-        built, port, _records = engine(reply=reply, max_rounds=3)
+        built, port, records = engine(reply=reply, max_rounds=3)
         await built.run()
-        return built, port
+        return built, port, records
 
-    built, port = asyncio.run(main())
+    built, port, records = asyncio.run(main())
     assert built.docket.question_order == ["H1"], "the phase-0 request and the escalation are one question"
     question = built.docket.questions["H1"]
     assert question.item_id == "F1", "the entry that named the item gave the question its item"
-    assert effective_class(built.docket, question) == "blocking", f"{built.docket.bar()} of 3 seats hold the escalation"
+    assert question.askers == ["Agent1", "Agent2"], "the second escalation is that ask's second seat"
+    assert effective_class(built.docket, question) == "blocking", "both holders declared the stop, which is the bar of 3"
+    opened = next(r for r in records if r["event"] == "human_checkpoint" and r["round"] == 0)
+    assert opened["ask_set"] == [] and not opened["waited"], "one seat asking over no item puts nothing in front of the human"
     waited = {c["round"]: c["waiting"] for c in port.checkpoints}
-    assert waited[0] is False, "at phase 0 it is a request over no item, and holds nothing"
     assert waited[1] and waited[2], "once a majority escalates it on the item, the run stops and asks"
 
 
@@ -293,7 +314,7 @@ def test_an_answer_that_took_an_option_records_the_line_it_took():
         return stance_all(ask, "agree")
 
     async def main():
-        built, _port, _records = engine(reply=reply, answers={"H1": "one tenant forever"}, selections={"H1": 2})
+        built, _port, _records = engine(reply=reply, answers={"H1": "one tenant forever"}, selections={"H1": 2}, seconding=False)
         outcome = await built.run()
         return outcome, built
 
@@ -318,7 +339,7 @@ def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stand
         return stance_all(ask, "agree")
 
     async def main():
-        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 9})
+        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 9}, seconding=False)
         outcome = await built.run()
         return outcome, built, records
 
@@ -346,7 +367,7 @@ def test_a_selection_whose_line_is_not_the_answer_records_no_line():
         return stance_all(ask, "agree")
 
     async def main():
-        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 2})
+        built, _port, records = engine(reply=reply, answers={"H1": "the only way"}, selections={"H1": 2}, seconding=False)
         outcome = await built.run()
         return outcome, built, records
 
@@ -418,20 +439,26 @@ def test_answered_words_do_not_silence_a_new_escalation():
                 human_input=[{"question": decision, "item": "F1", "blocking": True}],
                 signoff=False,
             )
+        if ask.round == 2:
+            # the human's answer settles F1; the same defect shows up one layer further out
+            return payload(
+                new_items=[{"claim": "the retry loop ignores the tenant too"}] if ask.who == "Agent1" else [],
+                positions=[{"item": "F1", "stance": "agree", "note": "the answer settles it"}],
+                signoff=True,
+            )
         return payload(
-            new_items=[{"claim": "the retry loop ignores the tenant too"}] if ask.who == "Agent1" else [],
-            positions=[{"item": "F1", "stance": "agree", "note": "the answer settles it"}],
+            positions=[{"item": "F1", "stance": "agree"}, {"item": "F2", "stance": "needs_human", "note": decision}],
             human_input=[{"question": decision, "item": "F2", "blocking": True}],
             signoff=True,
         )
 
     async def main():
-        built, port, _records = engine(reply=reply, max_rounds=3, answers={"H1": "put the tenant id in the key"})
+        built, port, _records = engine(reply=reply, max_rounds=4, answers={"H1": "put the tenant id in the key"})
         outcome = await built.run()
         return outcome, built, port
 
     outcome, built, port = asyncio.run(main())
-    assert outcome == "needs_human", "two seats hold F2, and the human has never been asked about F2"
+    assert outcome == "needs_human", "two seats escalate F2 and want the run to wait on it"
     first, second = built.docket.questions["H1"], built.docket.questions["H2"]
     assert (first.state, first.item_id) == ("answered", "F1") and (second.state, second.item_id) == ("asked", "F2")
     for (item_id, _asker), escalation in built.docket.escalations.items():
@@ -488,7 +515,11 @@ def test_an_open_question_never_blocks_consent_but_is_asked_at_the_terminal_chec
 
     def reply(ask):
         if ask.phase == "phase0":
-            return phase0_first(ask.who, "a bug", questions=["what is the retention policy?"])
+            # two seats ask the same thing, and that is what earns it a place at the checkpoint
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["what is the retention policy?"],
+            )
         if ask.kind == "merge":
             return {"groups": []}
         return stance_all(ask, "agree")
@@ -508,12 +539,472 @@ def test_an_open_question_never_blocks_consent_but_is_asked_at_the_terminal_chec
     assert terminal[-1]["waiting"] is True
 
 
+def test_a_second_seat_is_what_puts_an_ask_in_front_of_the_human():
+    """`second` is the gate: one seat asks, another backs it, and the ask reaches the checkpoint."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], open_questions=["what is the retention policy?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, answers={"H1": "30 days"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert [r for r in records if r["event"] == "question_seconded"][0]["seat"] == "Agent2"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "the backed ask is on the ask set"
+    assert built.docket.questions["H1"].answer == "30 days"
+
+
+def test_an_unbacked_ask_is_weighed_by_the_council_and_never_asked():
+    """Nobody backs it: the seats get one last look, the human gets the report, and the ask stays unanswered."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], open_questions=["what is the retention policy?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, answers={"H1": "30 days"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus", "an ask nobody backs holds nothing"
+    assert port.count(phase="seconding") == 3, "every seat is asked once more before the report"
+    assert [r for r in records if r["event"] == "peer_pass_start"][0]["asks"] == ["H1"]
+    assert all("H1" not in c["ask_set"] for c in port.checkpoints), "an unbacked ask is never put to the human"
+    question = built.docket.questions["H1"]
+    assert question.answer == "" and "unseconded" in question.markers
+    note = next(r for r in records if r["event"] == "console_note")["text"]
+    assert "no second seat" in note and "answered" not in note, "nothing was settled among itself: say why it went unasked"
+
+
+def test_a_seat_that_answers_a_peer_ask_keeps_the_human_out_of_it():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["which tenant owns the key?"] if ask.who == "Agent1" else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", answer_question=[{"id": "H1", "answer": "config names it: tenant_id"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, answers={"H1": "the tenant is fixed by contract"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert [r for r in records if r["event"] == "question_answered_by_seat"][0]["seat"] == "Agent2"
+    assert built.docket.questions["H1"].peer_answers == {"Agent2": "config names it: tenant_id"}
+    assert not any(c["waiting"] and "H1" in c["ask_set"] for c in port.checkpoints), "a seat answered it: nobody waits on the human"
+    assert built.docket.questions["H1"].answer == ""
+    assert "a seat answered this from the workspace" in next(r for r in records if r["event"] == "console_note")["text"]
+
+
+def test_the_seat_that_raised_an_ask_can_call_a_peer_s_answer_not_enough_on_the_last_pass():
+    """The pass that decides what the human is asked cannot be closed to the seat whose own ask was answered away."""
+    import asyncio
+
+    decision = "which tenant owns the key?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=[decision] if ask.who == "Agent1" else [],
+            )
+        if ask.kind in {"merge", "asks"}:
+            return {"groups": []}
+        if ask.phase == "seconding":
+            if ask.who == "Agent1":
+                # a sentence here asks nothing: that pass reads ids, and raises nothing
+                return payload(insist=["H1"], human_input=[{"question": "and which key store?"}])
+            return payload()
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", answer_question=[{"id": "H1", "answer": "config names it: tenant_id"}])
+        if ask.who == "Agent3":
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, answers={"H1": "the tenant is fixed by contract"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert [r["event"] for r in records if r["event"].startswith("question_seconded")] == ["question_seconded_but_held_back"]
+    assert [r for r in records if r["event"] == "question_insisted"][0]["seat"] == "Agent1"
+    assert list(built.docket.questions) == ["H1"], "the last pass raises no ask, whatever else a seat sends"
+    assert any(c["ask_set"] == ["H1"] and c["waiting"] for c in port.checkpoints), "the raiser's word reopens the gate"
+    assert (question.state, question.insisted) == ("answered", True) and outcome == "consensus"
+
+
+def test_the_asker_calling_a_peer_s_answer_not_enough_puts_the_ask_back_on_the_table():
+    """A peer's answer holds a seconded ask back until the asker says it was not enough — then it is the human's to settle."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}], open_questions=["which tenant owns the key?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.round == 1:
+            if ask.who == "Agent2":
+                # the item stays open, so the council gets a round to settle the ask among itself
+                return payload(
+                    positions=[{"item": "F1", "stance": "disagree", "evidence": "app.py:9"}],
+                    signoff=False,
+                    second=["H1"],
+                )
+            if ask.who == "Agent3":
+                return stance_all(ask, "agree", answer_question=[{"id": "H1", "answer": "config names it"}])
+            return stance_all(ask, "agree")
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", insist=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, answers={"H1": "the tenant is fixed by contract"})
+        return await built.run(), built, port
+
+    outcome, built, port = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert question.peer_answers and question.insisted, "the re-ask says config names it was not an answer"
+    assert question.state == "answered" and outcome == "consensus"
+    assert any(c["ask_set"] == ["H1"] and c["waiting"] for c in port.checkpoints), "a second seat plus insistence opens the gate"
+
+
+def test_a_seat_that_works_it_out_stances_the_item_and_frees_it():
+    """The pass reads a stance for this alone: the asker worked it out, so the hold goes and the item closes."""
+    import asyncio
+
+    from mech_council.deliberation.dispositions import derive
+    from mech_council.deliberation.state import AGREED
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[{"claim": "the cache ignores tenants"}] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload(positions=[{"item": "F1", "stance": "agree", "note": "the config names the tenant"}], retract=["H1"])
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant?"}],
+                human_input=[{"question": "which tenant?", "item": "F1"}],
+                signoff=True,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    item, question = built.docket.items["F1"], built.docket.questions["H1"]
+    assert outcome == "consensus"
+    assert (question.state, question.retracted_by) == ("withdrawn", "Agent1")
+    assert [r["event"] for r in records if r["event"] == "hold_released"] == ["hold_released"]
+    assert not built.docket.is_standing("F1", "Agent1"), "the stance let the hold go, never the dropped ask"
+    assert any(r["event"] == "escalation_withdrawn" and r["cause"] == "sent agree" for r in records)
+    assert derive(built.docket, "F1") == AGREED and (item.closed, item.disposition, item.closed_round) == (True, AGREED, 1)
+    assert all("H1" not in c["ask_set"] for c in port.checkpoints)
+
+
+def test_dropping_an_ask_leaves_the_hold_and_the_item_exactly_where_they_were():
+    """An ask is a proposal and a hold is a stance: dropping the one cannot move the other."""
+    import asyncio
+
+    from mech_council.deliberation.dispositions import derive
+    from mech_council.deliberation.state import HUMAN
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[{"claim": "the cache ignores tenants"}] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload(retract=["H1"])
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant?"}],
+                human_input=[{"question": "which tenant?", "item": "F1"}],
+                signoff=True,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert outcome == "consensus", "one seat holding an item below the stop bar ends nothing"
+    assert (question.state, question.retracted_by) == ("withdrawn", "Agent1")
+    assert built.docket.is_standing("F1", "Agent1") and derive(built.docket, "F1") == HUMAN
+    assert not built.docket.items["F1"].closed, "the item waits on the seat's own stance, not on its ask"
+    assert not [r for r in records if r["event"] in ("escalation_withdrawn", "hold_released", "item_closed")]
+
+
+def test_the_ask_a_hold_raised_goes_when_the_seat_lets_go_of_the_item():
+    """The ask was the sound of a seat being stuck: once it works the item out, the human is not asked about it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.round == 1 and ask.who in ("Agent1", "Agent2"):
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant owns the key?"}],
+                human_input=[{"question": "which tenant owns the key?", "item": "F1", "blocking": True}],
+                backing="no_preference",
+                signoff=False,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=2)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "while both seats hold F1 the human is asked"
+    assert outcome == "consensus" and built.docket.items["F1"].closed, "round 2: both worked it out from the workspace"
+    assert (question.state, question.askers) == ("withdrawn", []), "each release took its ask with it"
+    assert not any(c["round"] == 2 and "H1" in c["ask_set"] for c in port.checkpoints), "the settled item is not put to the human"
+    assert [r["cause"] for r in records if r["event"] == "question_retracted"] == ["released the hold", "released the hold"]
+
+
+def test_the_chair_fold_makes_two_wordings_one_blocking_ask():
+    """The second seat the gate asks for is often there all along, in another wording."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.kind == "asks":
+            return {"groups": [{"canonical": "H1", "duplicates": ["H2"]}]}
+        if ask.who in ("Agent1", "Agent2"):
+            wording = "which tenant owns the key?" if ask.who == "Agent1" else "who is accountable for tenancy?"
+            return payload(
+                positions=[{"item": "F1", "stance": "agree"}],
+                human_input=[{"question": wording, "item": "F1", "blocking": True}],
+                backing="no_preference",
+                signoff=False,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=2, reply=reply, answers={"H1": "the billing service owns it"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    first, second = built.docket.questions["H1"], built.docket.questions["H2"]
+    assert (first.askers, first.blocked_by) == (["Agent1", "Agent2"], ["Agent1", "Agent2"]), "the fold carries the stops too"
+    assert second.merged_into == "H1" and first.also_asked == {"Agent2": "who is accountable for tenancy?"}, "no wording is lost"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "asked once, not twice"
+    assert first.answer == "the billing service owns it", "the human's answer lands on the ask both seats wanted"
+    fold = next(r for r in records if r["event"] == "question_merged")
+    assert fold["into"] == "H1" and fold["askers"] == ["Agent1", "Agent2"]
+    moved = [r for r in records if r["event"] == "question_effective_class" and r["id"] == "H1"][-1]
+    assert (moved["prior"], moved["effective"]) == ("deferred", "blocking"), "one ask, a majority wanting the stop"
+
+
+def test_two_seats_holding_one_item_ask_the_human_without_the_chair_noticing():
+    """Two `needs_human` holds on one item are one ask: no chair, no second seat typed by anyone."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants")
+        if ask.kind in {"merge", "asks"}:
+            return {"groups": []}
+        if ask.round == 1 and ask.who in ("Agent1", "Agent2"):
+            wording = "which tenant owns the key?" if ask.who == "Agent1" else "who is accountable for tenancy?"
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": wording}],
+                human_input=[{"question": wording, "item": "F1", "blocking": True}],
+                backing="no_preference",
+                signoff=False,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=2, reply=reply, answers={"H1": "the billing service owns it"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    asked = list(built.docket.questions.values())
+    assert [q.id for q in asked] == ["H1"], "the second hold joined the first ask instead of raising a second one"
+    first = asked[0]
+    assert (first.askers, first.raised_by, first.blocked_by) == (
+        ["Agent1", "Agent2"],
+        ["Agent1", "Agent2"],
+        ["Agent1", "Agent2"],
+    ), "two wordings, one ask, both stops"
+    assert [(built.docket.escalations[("F1", seat)].question_id) for seat in ("Agent1", "Agent2")] == ["H1", "H1"]
+    assert not [a for a in port.asks if a.kind == "asks"], "one ask: nothing for the chair to fold"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "what two seats hold goes to the human"
+    assert (first.answer, outcome) == ("the billing service owns it", "consensus")
+
+
+def test_the_chair_is_not_asked_to_fold_asks_when_only_one_seat_has_asks():
+    """A chair pass costs a lane's whole turn: it runs when there is something to fold."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants", questions=["which tenant owns the key?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=2, reply=reply)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert [q.id for q in built.docket.questions.values()] == ["H1"] and built.docket.questions["H1"].askers == ["Agent1"]
+    assert not [a for a in port.asks if a.kind == "asks"], "one ask from one seat: nothing to fold"
+
+
+def test_the_chair_reads_the_asks_once_and_only_the_round_after_it_fails_to_read_them():
+    """A fold is a chair's whole turn: an ask set it has read is read again when it moves, or when the read failed."""
+    import asyncio
+
+    reads = {"n": 0}
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            words = {"Agent1": "which tenant owns the key?", "Agent2": "which palette wins?"}
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=[words[ask.who]] if ask.who in words else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.kind == "asks":
+            reads["n"] += 1
+            if reads["n"] == 1:
+                return {"groups": [{"canonical": "H1", "duplicates": ["H2"]}, {"canonical": "H2", "duplicates": ["H1"]}]}
+            return {"groups": []}
+        if ask.who == "Agent3":
+            # one disputed item keeps the run to the round limit
+            return stance_all(ask, "disagree", signoff=False)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=4, grace_rounds=0, reply=reply)
+        return await built.run(), built, port, records
+
+    _outcome, _built, port, records = asyncio.run(main())
+    assert [a.round for a in port.asks if a.kind == "asks"] == [0, 1], "one read that failed, one that landed, and no third"
+    assert len([r for r in records if r["event"] == "chair_ask_merge_refused"]) == 1
+
+
+def test_a_question_shown_at_the_grace_checkpoint_is_unanswered_never_unasked():
+    """The grace round asks: passing it over is not the same silence as never being asked."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["what is the retention policy?"] if ask.who == "Agent1" else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2":
+            # an open dispute keeps `evaluate` at GO, so the round limit is what ends the run
+            return stance_all(ask, "disagree")
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1, seconding=False)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "round_limit_reached"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "the grace round put it in front of the human"
+    question = built.docket.questions["H1"]
+    assert "unanswered" in question.markers and "unasked" not in question.markers, "the ledger says you were asked"
+    assert next(r for r in records if r["event"] == "termination")["unasked"] == [], "nothing was swallowed by the round limit"
+
+
+def test_the_pass_before_the_report_opens_no_hold_and_moves_none():
+    """One verb there, said out loud when a seat reaches past it."""
+    import asyncio
+
+    from mech_council.deliberation.state import AGREE, NEEDS_HUMAN
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[{"claim": "the cache ignores tenants"}] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            if ask.who == "Agent1":
+                return payload(positions=[{"item": "F1", "stance": "needs_human", "note": "I still hold it"}])
+            if ask.who == "Agent2":
+                return payload(positions=[{"item": "F1", "stance": "disagree", "evidence": "app.py:9"}])
+            return payload(positions=[{"item": "F1", "stance": "agree"}])
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant?"}],
+                human_input=[{"question": "which tenant?", "item": "F1"}],
+                signoff=True,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert built.docket.stance("F1", "Agent1").stance == NEEDS_HUMAN, "a pass restance kept nothing and recorded nothing"
+    assert built.docket.stance("F1", "Agent2").stance == AGREE, "an objection there neither landed nor replaced its agree"
+    assert built.docket.is_standing("F1", "Agent1")
+    assert not built.docket.items["F1"].closed
+    assert not [r for r in records if r["event"] == "hold_released"]
+    refused = [r for r in records if r["event"] == "verdict_ask_refused" and r["field"] == "positions"]
+    assert sorted(r["member"] for r in refused) == ["Agent1", "Agent2"], "the two stances with consequence were refused out loud"
+
+
 def test_a_needs_human_at_the_bar_holds_the_run_until_the_human_answers():
     import asyncio
 
     def needs_human(ask, note="needs the product owner"):
         return payload(
             positions=[{"item": item, "stance": "needs_human", "note": note} for item in shown_items(ask.text)],
+            human_input=[{"question": note, "item": item, "blocking": True} for item in shown_items(ask.text)],
             backing="no_preference",
             signoff=True,
         )
@@ -533,7 +1024,299 @@ def test_a_needs_human_at_the_bar_holds_the_run_until_the_human_answers():
 
     outcome, port = asyncio.run(main())
     assert outcome == "needs_human"
-    assert any(c["waiting"] for c in port.checkpoints), "a bar-held needs_human makes the checkpoint wait"
+    assert any(c["waiting"] for c in port.checkpoints), "a declared stop at the bar makes the checkpoint wait"
+
+
+def test_one_seat_cannot_stop_the_run_by_wanting_to():
+    """The bar counts declared stops, so one seat's insistence ends nothing: the council finishes and reports the ask."""
+    import asyncio
+
+    from mech_council.deliberation.dispositions import derive
+    from mech_council.deliberation.state import HUMAN
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": item, "stance": "needs_human", "note": "which tenant owns it?"} for item in shown_items(ask.text)],
+                human_input=[{"question": "which tenant owns it?", "item": item, "blocking": True} for item in shown_items(ask.text)],
+                signoff=True,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, answers={"H1": "the contract names it"})
+        return await built.run(), built, port
+
+    outcome, built, port = asyncio.run(main())
+    assert outcome == "consensus", "one declared stop is below the bar of two"
+    assert not any(c["waiting"] for c in port.checkpoints)
+    assert derive(built.docket, "F1") == HUMAN, "the stance still holds the item, which is the other half of the story"
+    question = built.docket.questions["H1"]
+    assert question.answer == "" and question.blocked_by == ["Agent1"] and "unseconded" in question.markers
+
+
+def test_an_ask_a_peer_answered_cannot_hold_the_run_even_at_the_bar():
+    """Blocking means the human is actually asked. A settled ask defers, however many seats wanted the stop."""
+    import asyncio
+
+    from mech_council.deliberation.escalations import SETTLED, held_back
+
+    decision = "which tenant owns it?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": item, "stance": "needs_human", "note": decision} for item in shown_items(ask.text)],
+                human_input=[{"question": decision, "item": item, "blocking": True} for item in shown_items(ask.text)],
+                signoff=True,
+            )
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1"], blocking_for=["H1"])
+        return stance_all(ask, "agree", answer_question=[{"id": "H1", "answer": "config names tenant_id"}])
+
+    async def main():
+        built, port, records = engine(reply=reply, answers={"H1": "the contract names it"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert outcome == "consensus"
+    assert question.blocked_by == ["Agent1", "Agent2"], "at the bar, and still not blocking"
+    assert held_back(built.docket, question) == SETTLED, "a seat that does not ask it answered it"
+    assert not any(c["waiting"] and "H1" in c["ask_set"] for c in port.checkpoints), "nothing waits on a question nobody is shown"
+    assert question.answer == "", "the human was never asked, so the human has not spoken"
+    flips = [(r["prior"], r["effective"]) for r in records if r["event"] == "question_effective_class"]
+    assert flips == [("deferred", "blocking"), ("blocking", "deferred")], "the answer that released the run is on the feed too"
+
+
+def test_a_council_that_settles_on_the_last_pass_does_not_end_needs_human():
+    """The ending is read after the pass that lets seats go, not before it."""
+    import asyncio
+
+    HELD = "who owns the runbook?"
+    PALETTE = "which palette wins?"
+    DECISION = "which tenant owns the key?"
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants")
+        if ask.kind in {"merge", "asks"}:
+            return {"groups": []}
+        if ask.phase == "seconding":
+            if ask.who == "Agent3":
+                return payload()
+            return payload(positions=[{"item": "F1", "stance": "agree", "note": "the config names the tenant"}])
+        if ask.who == "Agent3":
+            return payload(positions=[{"item": "F1", "stance": "agree"}], human_input=[{"question": HELD}], signoff=True)
+        return payload(
+            positions=[{"item": "F1", "stance": "needs_human", "note": DECISION}],
+            human_input=[{"question": DECISION, "item": "F1", "blocking": True}, {"question": PALETTE}],
+            signoff=True,
+        )
+
+    async def main():
+        built, _port, records = engine(reply=reply)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert [r["asks"] for r in records if r["event"] == "peer_pass_start"] == [["H3"]], "one unbacked ask opens the pass"
+    assert built.docket.items["F1"].closed and built.docket.questions["H1"].state == WITHDRAWN
+    assert outcome == "consensus", "both holders let go on that pass, so nothing is left to need a human"
+
+
+def test_a_second_on_an_ask_a_peer_already_answered_buys_nothing_and_says_so_once():
+    """The answer came first, so the second settled nothing: the seat gets the one line that says what the second did not buy."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "the cache ignores tenants"}], open_questions=["which tenant owns the key?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        if ask.round == 1 and ask.who == "Agent3":
+            return stance_all(ask, "agree", signoff=False, answer_question=[{"id": "H1", "answer": "the config names tenant_id"}])
+        if ask.round == 1 and ask.who == "Agent2":
+            return stance_all(ask, "disagree", signoff=False)
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply)
+        return await built.run(), records
+
+    outcome, records = asyncio.run(main())
+    assert outcome == "consensus"
+    backed = [r for r in records if r["event"].startswith("question_seconded")]
+    assert [r["event"] for r in backed] == ["question_seconded_but_held_back"], "no line claims the human was asked"
+    assert (backed[0]["held"], backed[0]["answered_by"]) == ("settled", ["Agent3"])
+
+
+def test_the_last_pass_hears_every_answer_before_it_hears_the_insistence():
+    """Otherwise the seat that happens to be asked first cannot call an answer not enough: it has not landed yet."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the login form re-hashes on every keystroke", questions=["which palette does the shell take?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            if ask.who == "Agent1":
+                return payload(insist=["H1"])
+            return payload(answer_question=[{"id": "H1", "answer": "tokens.json names brand-primary"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(2, reply=reply)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus"
+    refused = [r for r in records if r["event"] == "verdict_ask_refused" and r["field"] == "insist"]
+    assert not refused, f"the raiser speaks first on that pass: {refused}"
+    assert built.docket.questions["H1"].insisted, "the answer it rebuts landed on the same pass"
+    assert [r["id"] for r in records if r["event"] == "question_insisted"] == ["H1"]
+
+
+def test_an_ask_about_an_item_no_seat_escalated_leaves_the_item_to_the_seats():
+    """Asking about an item is not refusing it: the council closes the item, and the ask goes moot with it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the login form re-hashes on every keystroke")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", human_input=[{"question": "which brand palette?", "item": "F1"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, answers={"H1": "the tokens file names it"})
+        return await built.run(), built, port
+
+    outcome, built, port = asyncio.run(main())
+    assert outcome == "consensus"
+    assert built.docket.items["F1"].closed and built.docket.items["F1"].disposition == "agreed"
+    assert not built.docket.escalations, "an ask raises no escalation: only the stance does"
+    mooted = built.docket.questions["H1"]
+    assert mooted.state == "withdrawn" and mooted.moot_with == "F1" and mooted.answer == ""
+    assert not port.checkpoints, "a settled item's deferred ask never reached the human"
+
+
+def test_an_ask_the_seats_settled_on_cannot_be_raised_against_the_item_that_settled_it():
+    """The closure is the answer about that item: what a seat still wants is a question of its own."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent1":
+                return payload(findings=[{"claim": "the login form re-hashes on every keystroke", "where": "src/a.py:1"}])
+            if ask.who == "Agent2":
+                return payload(findings=[{"claim": "the export loops over every row", "where": "src/b.py:2"}])
+            return payload(findings=[])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        if ask.round == 1:
+            if ask.who == "Agent3":
+                return payload(
+                    positions=[{"item": "F1", "stance": "agree"}, {"item": "F2", "stance": "needs_human"}],
+                    backing="no_preference",
+                    signoff=False,
+                )
+            return stance_all(ask, "agree", signoff=False)
+        return payload(
+            positions=[{"item": "F2", "stance": "needs_human"}],
+            human_input=[{"question": "and does the retry budget change too?", "item": "F1"}],
+            backing="no_preference",
+            signoff=False,
+        )
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2, grace_rounds=0)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert built.docket.items["F1"].closed and not built.docket.items["F2"].closed
+    refused = [r for r in records if r["event"] == "verdict_ask_refused" and r["field"] == "human_input"]
+    assert refused and refused[0]["reason"].startswith("F1 is settled as agreed")
+    late = next(q for q in built.docket.questions.values() if q.text.startswith("and does the retry"))
+    assert late.item_id is None, "the ask survived as a question of its own, not about a settled item"
+    assert "moot" not in late.markers
+
+
+def test_a_declared_stop_outranks_the_closure_that_would_moot_its_ask():
+    """A majority saying the run cannot go on without you outranks the seats settling the item."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the login form re-hashes on every keystroke")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        wording = "who owns the tenant key once the form is fixed?"
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", human_input=[{"question": wording, "item": "F1", "blocking": True}], blocking_for=["H1"])
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", human_input=[{"question": wording, "item": "F1"}], blocking_for=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, answers={"H1": "platform keys, per the vault"})
+        return await built.run(), built, port
+
+    outcome, built, port = asyncio.run(main())
+    assert built.docket.items["F1"].closed, "the seats did settle the item"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "the stop held the run anyway"
+    assert outcome == "consensus"
+
+
+def test_a_moot_ask_carries_the_item_that_answered_it():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the login form re-hashes on every keystroke")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "seconding":
+            return payload()
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", human_input=[{"question": "which brand palette?", "item": "F1"}])
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus", "a backed ask the closure answered is not a question left waiting"
+    mooted = [r for r in records if r["event"] == "question_mooted"]
+    assert [(r["id"], r["item"], r["disposition"]) for r in mooted] == [("H1", "F1", "agreed")]
+    assert built.docket.questions["H1"].markers == ["moot"]
 
 
 def test_an_answer_at_the_terminal_checkpoint_buys_a_full_round():
@@ -761,6 +1544,37 @@ def test_a_challenge_with_evidence_costs_exactly_one_defense_ask():
 
     port, _records = asyncio.run(main())
     assert port.count(who="Agent1", phase="defense") == 1
+
+
+def test_a_defense_that_lets_go_of_the_item_does_not_adopt_the_ask_it_raises():
+    """A withdrawn hold must not own the ask its own release left standing: that reports a free question as escalated."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "defense":
+            return payload(
+                positions=[{"item": "F1", "stance": "agree", "note": "the config settles it"}],
+                human_input=[{"question": "does the vault rotate that key?", "item": "F1"}],
+            )
+        if ask.who == "Agent1":
+            return payload(positions=[{"item": "F1", "stance": "needs_human", "note": "which tenant?"}], signoff=True)
+        if ask.who == "Agent2":
+            return payload(positions=[{"item": "F1", "stance": "disagree", "evidence": "docs/policy.md:4"}], signoff=True)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return built
+
+    built = asyncio.run(main())
+    late = next(q for q in built.docket.questions.values() if q.text.startswith("does the vault"))
+    assert late.state == "asked", "the ask the defense raised over the item it released still stands"
+    assert all(esc.question_id != late.id for esc in built.docket.escalations.values()), "and no hold, standing or withdrawn, owns it"
 
 
 # ------------------------------------------------ Restart-and-re-ask through the port
@@ -1050,6 +1864,51 @@ def test_an_answer_at_the_round_limit_buys_the_round_it_promised():
     assert [r["round"] for r in records if r["event"] == "round_summary"] == [1, 2, 3], "round 3 is the one the answer paid for"
 
 
+def test_an_answer_at_the_ceiling_is_asked_on_the_grace_budget():
+    """`round_limit_reached` used to be the one way a question ended unasked; the grace round is what makes an answer useful."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [], open_questions=["what is the retention policy?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1, answers={"H1": "30 days"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert any(c["waiting"] and c["ask_set"] == ["H1"] for c in port.checkpoints), "the round limit asks rather than silencing"
+    assert next(r for r in records if r["event"] == "grace_round_bought")["grace_left"] == 0
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1, 2], "round 2 is the one the answer paid for"
+    assert built.docket.questions["H1"].answer == "30 days"
+
+
+def test_grace_rounds_zero_ends_the_run_on_the_limit_with_the_question_unasked():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [], open_questions=["what is the retention policy?"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1, grace_rounds=0, answers={"H1": "30 days"})
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert not any(c["waiting"] for c in port.checkpoints), "no budget, no wait"
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1]
+    question = built.docket.questions["H1"]
+    assert question.answer == "" and "unasked" in question.markers, "the ledger says nobody was asked"
+
+
 def test_an_answer_to_the_split_ask_buys_the_round_that_converges_on_it():
     import asyncio
 
@@ -1096,8 +1955,8 @@ def test_a_chair_that_cannot_word_the_split_costs_the_run_neither_the_ask_nor_th
     assert outcome == "needs_human" and port.checkpoints[-1]["ask_set"] == [ask.id]
 
 
-def test_a_second_needs_human_says_so_on_the_event_feed():
-    """A stance is what usually moves an escalation's effective class, and the seat that moved it never re-asks."""
+def test_a_declared_stop_moves_the_effective_class_and_never_needs_a_reask():
+    """The class flips on another seat's verdict, not on a fresh restatement of the question."""
     import asyncio
 
     decision = "is the tenant fixed by contract?"
@@ -1120,6 +1979,7 @@ def test_a_second_needs_human_says_so_on_the_event_feed():
                 if ask.who == "Agent1"
                 else {"item": "F2", "stance": "agree"},
             ],
+            blocking_for=["H1"] if escalating and ask.round > 1 else [],
             backing="no_preference",
             signoff=True,
         )
@@ -1130,6 +1990,7 @@ def test_a_second_needs_human_says_so_on_the_event_feed():
 
     _outcome, built, records = asyncio.run(main())
     assert built.docket.question_order == ["H1"], "one question, held by two seats"
+    assert built.docket.questions["H1"].blocked_by == ["Agent2", "Agent3"]
     flips = [r for r in records if r["event"] == "question_effective_class"]
     assert [(r["prior"], r["effective"], r["round"]) for r in flips] == [("deferred", "blocking", 2)], flips
     assert any(r["event"] == "human_checkpoint" and r["waited"] for r in records), "the wait follows the class the run derived"

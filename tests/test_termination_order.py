@@ -17,10 +17,12 @@ def _docket(mode: str, items: list[str], *, signed: list[str] | None = None) -> 
 
 
 def _two_seats_need_a_human(board: Docket, item: str) -> None:
-    """Two of three seats escalate the item, which is at the bar, and the third agrees with it."""
+    """Two of three seats escalate the item and both declare the stop: at the bar. The third agrees with it."""
     escalations.record_stance(board, item_id=item, agent="Agent1", stance=NEEDS_HUMAN, note="the premise is a product decision", round_=1)
     escalations.record_stance(board, item_id=item, agent="Agent2", stance=NEEDS_HUMAN, note="the ordering is not ours to pick", round_=1)
     escalations.record_stance(board, item_id=item, agent="Agent3", stance=AGREE, round_=1)
+    for agent in ("Agent1", "Agent2"):
+        escalations.stop_for(board, qid="H1", agent=agent, round_=1)
 
 
 def test_a_decision_one_seat_never_signed_cannot_be_reported() -> None:

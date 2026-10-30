@@ -127,6 +127,19 @@ def test_the_listing_prints_even_when_nothing_waits():
     assert "retention policy" in text
 
 
+def test_the_listing_tells_the_human_what_a_seat_answered_and_who_wants_the_wait():
+    """A peer's answer and the asker's insistence are why the ask reached the checkpoint: shown blind, the human re-answers it."""
+    docket = build()
+    escalations.raise_question(docket, text="which tenant owns the key?", asker="Agent1", item_id=None, round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="the config names tenant_id")
+    escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=1)
+    escalations.stop_for(docket, qid="H1", agent="Agent1", round_=2)
+    text = render_ask_set(docket, [docket.questions["H1"]], names=NAMES, waiting=True)
+    assert "Senior: the config names tenant_id" in text, "the answer the asker said was not enough"
+    assert "was not enough" in text and "asked that the run wait for this: Metic" in text
+    assert "Agent2" not in text, "the checkpoint speaks in names"
+
+
 def test_the_split_ask_prints_as_a_choice_of_directions():
     """The human answers a split by typing a number, so it has to read as a choice and not as another seat's question."""
     docket = state.Docket(mode="plan", goal="g", roster=["Agent1", "Agent2", "Agent3"])

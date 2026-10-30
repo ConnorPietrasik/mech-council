@@ -24,6 +24,9 @@ class Chair:
         message = self.brief.merge(mode=self.council.mode, listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="merge", phase="merge", round_=round_)
 
+    async def merge_questions(self, listing: str, *, round_: int) -> dict:
+        return await self._publication(self.brief.ask_merge(listing), kind="asks", phase="asks", round_=round_)
+
     async def compare(self, listing: str, *, round_: int) -> dict:
         message = self.brief.comparison(listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="compare", phase="compare", round_=round_)

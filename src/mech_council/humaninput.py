@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .deliberation.engine import CheckpointOutcome
-from .deliberation.escalations import effective_class
+from .deliberation.escalations import effective_class, stop_holders
 from .deliberation.state import Docket, Question
 
 #: The id and the separator are both tolerant.
@@ -84,6 +84,19 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
         lines.append(f"    {text}")
         if context:
             lines.append(f"    context: {context}")
+        for seat, said in question.also_asked.items():
+            lines.append(f"    asked as well by {name_of(seat, names)}: {said}")
+        for seat, answered in question.peer_answers.items():
+            who = name_of(seat, names)
+            if seat in question.askers:
+                lines.append(f"    {who} answered it and asks it anyway, which is why it still comes to you: {answered}")
+            else:
+                lines.append(f"    a seat answered it instead of asking you — {who}: {answered}")
+        if question.insisted:
+            lines.append("    the asker says that answer was not enough, which is why it comes to you")
+        if holders := stop_holders(docket, question):
+            backers = ", ".join(name_of(one, names) for one in holders)
+            lines.append(f"    asked that the run wait for this: {backers} ({len(holders)}/{docket.bar()} at the bar)")
         for number, option in enumerate(question.options, start=1):
             shown = _direction_line(option, docket, names) if question.direction_ask else option
             lines.append(f"      {number}) {shown}")

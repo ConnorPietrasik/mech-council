@@ -8,6 +8,7 @@ from mech_council.extraction import (
     map_backing,
     map_severity,
     map_stance,
+    parse_ask_merge,
     parse_comparison,
     parse_direction,
     parse_merge_plan,
@@ -187,6 +188,49 @@ def test_a_question_to_a_seat_carries_its_text():
     assert out.data["questions"] == [{"to": "Agent3", "text": "which gate?"}]
 
 
+def test_the_verdict_names_who_backs_an_ask_who_drops_it_and_who_answers_it():
+    """The ask fields are ids a seat reads off the docket, so the reader normalizes what it types."""
+    out = parse(
+        verdict(
+            **positions(("F1", "agree")),
+            second="h1",
+            Retract=["#H2", "H2", "  "],
+            answer_question=[{"id": "H3", "answer": "config names it"}],
+            insisted=["h4"],
+        )
+    )
+    assert out.data["second"] == ["H1"]
+    assert out.data["retract"] == ["H2"]
+    assert out.data["answer_question"] == [{"id": "H3", "text": "config names it"}]
+    assert out.data["insist"] == ["H4"]
+
+
+def test_the_verdict_names_the_asks_it_wants_the_run_to_wait_for():
+    """The stop is declared per seat, so the ids it names are normalized like every other ask field."""
+    out = parse(verdict(**positions(("F1", "agree")), blocking_for=["h1", "#H2", "H2", "  "]))
+    assert out.data["blocking_for"] == ["H1", "H2"]
+    spelled = parse(verdict(**positions(("F1", "agree")), blocking=["H3"]))
+    assert spelled.data["blocking_for"] == ["H3"], "`blocking` at the top level is the stop, not the entry's flag"
+
+
+def test_an_ask_answer_written_as_a_bare_object_still_names_its_ask():
+    out = parse(verdict(**positions(("F1", "agree")), answer_question={"question_id": "H1", "text": "the tokens file"}))
+    assert out.data["answer_question"] == [{"id": "H1", "text": "the tokens file"}]
+
+
+def test_an_ask_answer_can_name_its_ask_where_its_siblings_put_their_prose():
+    """`question` is the prose key everywhere else, so a seat reaches for it even when the answer went to `answer`."""
+    named = parse(verdict(**positions(("F1", "agree")), answer_question=[{"question": "h2", "answer": "the tokens file"}]))
+    assert named.data["answer_question"] == [{"id": "H2", "text": "the tokens file"}]
+    prose = parse(verdict(**positions(("F1", "agree")), answer_question=[{"question": "which palette?", "answer": "the tokens file"}]))
+    assert prose.data["answer_question"] == [], "a sentence is not an ask id, and inventing one would answer the wrong ask"
+
+
+def test_open_questions_read_whether_written_as_lines_or_as_objects():
+    out = parse(verdict(**positions(("F1", "agree")), open_questions=[{"question": "which palette?"}, "who owns the key?"]))
+    assert out.data["open_questions"] == ["which palette?", "who owns the key?"]
+
+
 # --------------------------------------------------------------------------- phase 0
 
 
@@ -248,6 +292,13 @@ def test_a_merge_plan_is_read_through_the_synonym_table():
     groups, errors = parse_merge_plan(text)
     assert groups is not None and not errors, "the synonym table is what makes this parse"
     assert groups["groups"] == [{"canonical": "F1", "duplicates": ["F2", "F3"]}]
+
+
+def test_the_ask_fold_reads_the_chair_s_ids_however_it_typed_them():
+    groups, errors = parse_ask_merge('{"groups": [{"canonical": "h1", "duplicates": "H2 #h2 h3"}]}')
+    assert not errors and groups == {"groups": [{"canonical": "H1", "duplicates": ["H2", "H3"]}]}
+    empty, _ = parse_ask_merge(json.dumps({"groups": [{"canonical": "F1", "duplicates": ["H2"]}]}))
+    assert empty == {"groups": []}, "an item id names no ask, so the group is dropped"
 
 
 def test_no_publication_pass_carries_a_question_from_the_chair():

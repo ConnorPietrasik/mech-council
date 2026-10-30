@@ -1,5 +1,6 @@
-Should be able to answer the deferred questions during the round, so that they don't stop the round but I can still answer
+A "human_note" field: notes to the human that need no answer, in their own ledger (N1 ids)
+Answer deferred questions mid-round too
 An aborted run should make a report based on the current state
 Set a different report location
-Blocking questions as intentional stance or option, and revocation of questions
 A way to message agents?
+EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever

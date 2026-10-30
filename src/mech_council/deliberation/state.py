@@ -86,19 +86,36 @@ class Question:
     menu: dict[str, tuple[str, str]] = field(default_factory=dict)
     item_id: str | None = None
     askers: list[str] = field(default_factory=list)
-    blocking_requested: bool = False
+    #: seats that asked for this themselves, rather than seconded it: the only ones who can call a peer's answer not enough
+    raised_by: list[str] = field(default_factory=list)
+    #: seat → the words they asked with when another seat's ask already stood for the decision
+    also_asked: dict[str, str] = field(default_factory=dict)
+    #: seats that asked the council to wait on this ask
+    blocked_by: list[str] = field(default_factory=list)
     #: the council's own split: the one ask that blocks with nobody holding it
     direction_ask: bool = False
     raised_round: int = 0
     updated_round: int = 0
-    state: str = ASKED  # asked / answered / skipped
+    state: str = ASKED  # asked / answered / skipped / withdrawn
     answer: str = ""
     answer_round: int = 0
     answer_option: int = 0  # the number the human typed to take an offered option; 0 means their own words
     answer_option_text: str = ""  # that option verbatim
     recommendation: str = ""  # an `explain` reply
     recommendation_round: int = 0
-    markers: list[str] = field(default_factory=list)  # undefended / skipped / unasked …
+    #: seat id → what that seat answered in place of the human
+    peer_answers: dict[str, str] = field(default_factory=dict)
+    #: the round the latest peer answer landed: an insistence rebuts only answers from a round the seat has read
+    peer_answer_round: int = 0
+    #: a seat that raised it said a peer's answer was not enough (`insist`): that answer no longer holds the ask back
+    insisted: bool = False
+    retracted_round: int = 0
+    retracted_by: str = ""
+    #: the ask the chair folded this one into
+    merged_into: str = ""
+    #: the item whose closure mooted this ask
+    moot_with: str = ""
+    markers: list[str] = field(default_factory=list)  # undefended / skipped / unasked / unanswered / unseconded / moot / merged …
 
     @property
     def key(self) -> str:
@@ -159,6 +176,8 @@ class Docket:
     approaches: dict[str, Approach] = field(default_factory=dict)  # plan
     agreed_points: list[dict] = field(default_factory=list)  # plan: compare
     backing: dict[str, str] = field(default_factory=dict)  # plan
+    #: an ask reaches the human only once a second seat backs it
+    seconding: bool = True
     round: int = 0
     rounds: list[RoundRecord] = field(default_factory=list)
     phase0_counts: dict[str, int] = field(default_factory=dict)

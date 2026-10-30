@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import effective_class
+from ..deliberation.escalations import SETTLED, UNBACKED, effective_class, held_back, stop_holders
 from ..deliberation.state import (
     ABSTAIN,
     AGREE,
@@ -89,11 +89,15 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
         if abstainers:
             out.append(f"- not vetted by: {_names(abstainers, context)}")
         out.append(f"- closed: {item.disposition} in round {item.closed_round}")
-        for question in _questions_on(docket, item, (SKIPPED, "unasked")):
-            out.append(
-                f"- caveat — {question.id} was "
-                f"{'**skipped** by the human' if question.state == SKIPPED else 'left **unasked**'}: {question.text}"
+        for question in _questions_on(docket, item, (SKIPPED, "unasked", "unanswered")):
+            said = (
+                "**skipped** by the human"
+                if question.state == SKIPPED
+                else "asked and left **unanswered**"
+                if "unanswered" in question.markers
+                else "left **unasked**"
             )
+            out.append(f"- caveat — {question.id} was {said}: {question.text}")
         for note in item.history:
             out.append(f"- history: {note}")
         for marker in item.markers:
@@ -254,15 +258,30 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
         else:
             out.append("- stands on its own: no item")
         out.append(f"- asked by: {_names(question.askers, context)}")
+        if question.blocked_by:
+            out.append(
+                f"- asked to stop the run for it: {_names(question.blocked_by, context)}"
+                f" ({len(stop_holders(docket, question))}/{docket.bar()} at the bar)"
+            )
+        if question.retracted_by:
+            out.append(f"- retracted by {_names([question.retracted_by], context)} in round {question.retracted_round}")
+        if question.merged_into:
+            out.append(f"- folded into {question.merged_into}: one ask now asked by the seats behind both")
+        if question.moot_with:
+            settled = docket.items.get(question.moot_with)
+            said = f"{question.moot_with} as {settled.disposition}" if settled is not None and settled.closed else question.moot_with
+            out.append(f"- moot: the council settled {said}, so this was never put to you")
+        for seat, answer in question.peer_answers.items():
+            said = "answered it and asks it still" if seat in question.askers else "answered instead of asking"
+            out.append(f"- {said}: {_names([seat], context)}: {answer}")
         out.append(
             f"- raised: round {question.raised_round}"
             + (f", latest text update: round {question.updated_round}" if question.updated_round != question.raised_round else "")
         )
-        out.append(
-            f"- effective class: **{effective_class(docket, question)}**"
-            + (" (the asker asked for the bar)" if question.blocking_requested else "")
-        )
+        out.append(f"- effective class: **{effective_class(docket, question)}**")
         out.append(f"- question as asked: {question.text}")
+        for seat, said in question.also_asked.items():
+            out.append(f"- asked as well by {caption(seat, context.captions)}: {said}")
         for escalation in _escalations_for(docket, question):
             for challenge in escalation.challenges:
                 out.append(
@@ -283,6 +302,10 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
             f"- end state: **{question.state if question.state != ASKED else 'standing'}**"
             + (f" ({', '.join(markers)})" if markers else "")
         )
+        if UNBACKED in markers:
+            out.append("- **no second seat**: the council never put this to you — it is a result, not a question you owe")
+        elif SETTLED in markers:
+            out.append("- **a seat answered it**: the council took that answer as settlement, so this was never put to you")
         out.append("")
     return out
 
@@ -318,6 +341,8 @@ def _markers(docket: Docket, question: Question) -> list[str]:
                 out.append(esc.state)
             if esc.undefended and "undefended" not in out:
                 out.append("undefended")
+    if question.state == ASKED and (held := held_back(docket, question)) and held not in out:
+        out.append(held)
     if question.state == ASKED and effective_class(docket, question) == "deferred":
         if "deferred" not in out:
             out.append("deferred")

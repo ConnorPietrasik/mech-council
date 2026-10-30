@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from mech_council.deliberation import dispositions, escalations, state
 from mech_council.render import docket as docket_render
 from mech_council.render import preview, report_plan, report_review
@@ -47,6 +49,22 @@ def context(**kw):
     )
     kw.setdefault("captions", {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"})
     return ReportContext(**kw)
+
+
+def section(text: str, heading: str) -> str:
+    """What one `## ` heading holds, or nothing when the renderer left it out."""
+    head = f"## {heading}"
+    return "" if head not in text else text[text.index(head) :].split("\n## ")[0]
+
+
+def listed(text: str, heading: str) -> list[str]:
+    """The ask ids a docket section puts in front of the seat."""
+    return re.findall(r"^- (H\d+)", section(text, heading), flags=re.MULTILINE)
+
+
+def ledger(text: str, qid: str) -> str:
+    """The report's header line for one ask: its id and every marker it carries."""
+    return next(line for line in text.splitlines() if line.startswith(f"### {qid}"))
 
 
 # ------------------------------------------------------ The single renderer's docket
@@ -152,6 +170,54 @@ def test_an_item_every_seat_declined_is_reported_as_a_decline_not_a_miss():
     assert "Every item reached every seat" in text, "nothing was unseen"
 
 
+def test_the_docket_keeps_an_unbacked_ask_where_a_seat_can_back_it():
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    before = docket_render.render(docket, "Agent2")
+    assert listed(before, "Asks not put to the human") == ["H1"] and listed(before, "Questions for the human") == []
+    assert "until you `second` it" in before, "a peer is the seat that can back it"
+    assert "only a peer can `second` it" in docket_render.render(docket, "Agent1"), "the seat that asks it has nothing to second"
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    after = docket_render.render(docket, "Agent2")
+    assert listed(after, "Questions for the human") == ["H1"] and listed(after, "Asks not put to the human") == []
+
+
+def test_the_docket_tells_an_asker_which_peer_answered_it():
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent3", text="the tokens file names it")
+    assert "Agent3: the tokens file names it" in docket_render.render(docket, "Agent1")
+    assert "only you can call that answer not enough" in docket_render.render(docket, "Agent1"), "only the raiser reopens it"
+    assert "only Agent1 can call it not enough" in docket_render.render(docket, "Agent2"), "and this seat cannot"
+
+
+def test_the_docket_shows_an_answer_the_fold_stopped_counting():
+    """The seat that answered a peer's ask from the workspace now asks it too: the ask comes to the human with the
+    answer it was built on still printed, not quietly dropped.
+    """
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.raise_question(docket, text="which colour file?", asker="Agent2", item_id=None, round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="the tokens file names it", round_=1)
+    escalations.merge_asks(docket, groups=[{"canonical": "H1", "duplicates": ["H2"]}], round_=2)
+    text = docket_render.render(docket, "Agent1")
+    assert listed(text, "Questions for the human") == ["H1"]
+    assert "the tokens file names it" in text and "answered it and asks it still" in text
+
+
+def test_the_docket_never_asks_a_seat_to_second_one_the_human_answered():
+    """The second-seat advice is for an open ask; this one is settled and only its asker walked off."""
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    docket.questions["H1"].state, docket.questions["H1"].answer = state.ANSWERED, "brand-primary"
+    escalations.retract(docket, qid="H1", agent="Agent1", round_=2)
+    text = docket_render.render(docket, "Agent2")
+    assert "ANSWER (authoritative): brand-primary" in text
+    assert "no second seat" not in text
+
+
 def test_open_questions_print_with_answer_or_skip_and_their_effective_class():
     docket = build()
     item(docket, "F1", "a call")
@@ -172,6 +238,33 @@ def test_an_item_less_question_prints_without_an_item_line():
     section = text[text.index("## Open questions") : text.index("## Round-by-round")]
     assert "what is the retention policy?" in section
     assert "item:" not in section, "no item line for an item-less question"
+
+
+def test_the_report_tells_the_human_which_ask_no_seat_backed():
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    text = report_review.render(docket, context(outcome="consensus"))
+    assert "unseconded" in ledger(text, "H1")
+    assert "no second seat" in section(text, "Open questions")
+
+
+def test_an_ask_a_seat_answered_is_not_reported_as_short_a_second_seat():
+    """Two seats asked and a third settled it: telling the human nobody backed it is a lie about the council."""
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent3", text="the tokens file names it")
+    text = report_review.render(docket, context(outcome="consensus"))
+    assert "settled" in ledger(text, "H1") and "unseconded" not in ledger(text, "H1")
+    assert "the tokens file names it" in section(text, "Open questions")
+
+
+def test_a_retracted_ask_is_reported_as_dropped_by_named_seat():
+    docket = build()
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.retract(docket, qid="H1", agent="Agent1", round_=2)
+    text = report_review.render(docket, context(outcome="consensus"))
+    assert "withdrawn" in ledger(text, "H1") and "Metic" in section(text, "Open questions")
 
 
 def test_a_human_answer_is_attributed_to_the_human_never_to_a_seat():

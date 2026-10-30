@@ -67,15 +67,41 @@ printed last after a blank line.
    to be `agreed`; an objection with cited evidence reopens a settled one. A seat that leaves an item
    unanswered is re-asked — up to four times in the round when its reply was unusable or incomplete,
    once when it simply skipped the item — and its silence is then recorded as a *declined* abstention.
-4. **You.** When a seat says `needs_human`, or a planning council will not converge on one
-   direction, you see it at a checkpoint. Only a question that's effectively *blocking* — an
-   escalation a majority holds, or a direction split that will not resolve — makes the run wait;
-   deferred ones print and get asked when the run would otherwise end.
-5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached`.
+4. **You.** A seat raises an ask, and an ask is a proposal to the *council*, not a message to you:
+   it reaches you only once a **second seat backs it** (`second`), because most of what a seat wants
+   a peer can answer from the workspace (`answer_question`) or the asker drops again (`retract`).
+   Two seats wanting one decision word it differently. Two seats holding **one item** raise one ask
+   together, and the chair **folds asks that want the same answer** into the ask raised first — the
+   askers, their declared stops and any peer answers go with it, and the wordings that did not
+   survive are recorded beside it — so the fold is a second seat without anyone claiming it. A peer's
+   answer holds an ask back from you, and only the seat that **raised** it can call that answer not
+   enough — with `insist: ["H1"]`, in a round *after* the answer lands, since a seat cannot refuse an
+   answer it was never shown. A second seat backing it cannot. And an answer holds an ask back
+   only while the seat that wrote it is not asking: a seat that backs an ask it answered, or that
+   answered one of two asks folded together, wants your word after all — what it wrote stays printed
+   beside the ask, it just stops keeping the ask from you. Nothing stops the run but a
+   **declared stop** — `blocking: true` on an ask, or `blocking_for: ["H1"]` on a peer's — and a
+   majority has to declare the same stop on the same ask for it to bite; a planning council that will
+   not converge on one direction stops the run by itself. A seat stancing `needs_human` holds its
+   *item* — reported as not fully vetted, and open to a peer's challenge — but it no longer holds the
+   run. Asks that are backed but not waited on are put to you when the run would otherwise end;
+   unbacked ones are never put to you at all, only reported. Before that report the seats get one
+   last look at those: a seat may answer one, back one, drop one, call a peer's answer to one it
+   raised not enough, or stance away from an item a peer's answer settled — and nothing else. Only a
+   stance releases an item; dropping the ask raised about it never does. An ask goes the other way
+   too: letting go of an item drops the ask your `needs_human` raised on it, and so does the council
+   **settling that item** — the closure *is* the answer to a question about it — unless a majority
+   declared a stop on it, which is the one claim that outranks a closure. So a settled item reaches
+   you only as something more than one seat needed the run to wait for.
+5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached` — but a run
+   that would end with a question standing spends a **grace round** first: it asks you, and any
+   answer buys the seats one more round to plan against it (`grace_rounds`). A question it did show
+   you and you passed over is reported `unanswered`; only one it never showed you is `unasked`.
 
 The chair never takes a stance and never gets a roster ID, so it can't move the majority bar. It
-merges, compares, words the council's split for you, and judges the watchdog digest — and it asks
-you nothing of its own: every question comes from a seat.
+merges findings, folds asks that want the same answer, compares, words the council's split for you,
+and judges the watchdog digest — and it asks you nothing of its own: every question comes from a
+seat.
 
 ### At the checkpoint
 
@@ -95,6 +121,11 @@ seat is shown prints your answer as authoritative — but nothing settles the ru
 own stances, so a council that keeps planning against your answer ends `stalemate` or out of rounds,
 and the report says so.
 
+Only backed questions appear here. The ones no second seat wanted are in the report and in
+`human_input.json`, marked `unseconded`; an ask a seat answered in your place is marked `settled`,
+with that answer beside it; and an ask about an item the council settled is reported `moot` — it was
+never going to be put to you.
+
 ## What you get
 
 | File | What's in it |
@@ -102,7 +133,7 @@ and the report says so.
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
 | `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question and whatever became of it: who asked, whether the run waited on it, and the answer or skip. |
+| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else
@@ -139,6 +170,8 @@ either, so a project's file can inherit the roster your own home file keeps
 | `mode` | `review` | `review`, or `plan` for a task plan instead of a findings report. |
 | `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` council needs one. |
 | `max_rounds` | `10` | Round limit. |
+| `grace_rounds` | `1` | How many rounds past the limit an answer may buy. `0` ends the run on the limit with its questions unasked. |
+| `seconding` | `true` | A question reaches you only once a second seat backs it. `false` puts every question the council left open in front of you. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
 | `chair_timeout_sec` | `300` | Bound on a chair publication pass. |
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |

@@ -15,7 +15,7 @@ from .chairwork import Chair, ChairUnusable
 from .config import Council
 from .console import Console, Transcripts
 from .deliberation.engine import Abort, Engine
-from .deliberation.escalations import effective_class
+from .deliberation.escalations import MOOT, SETTLED, effective_class, showable
 from .deliberation.state import ABORTED, CONSENSUS, NEEDS_OUTCOME, NO_PREFERENCE, RETIRED, ROUND_LIMIT, STALEMATE, Docket
 from .deliberation.termination import direction_rule
 from .humaninput import Checkpoint
@@ -167,7 +167,7 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
 
     roster = council.seat_ids
     names = council.roster_names
-    docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name)
+    docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name, seconding=council.seconding)
     brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place)
     chair = Chair(council, lanes, console, brief)
     reader = LineReader()
@@ -184,6 +184,7 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
         project=council.project,
         brief=brief,
         max_rounds=council.max_rounds,
+        grace_rounds=council.grace_rounds,
         names=names,
         emit=_emitter(console, names),
     )
@@ -262,6 +263,10 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"the seats will not converge ({held}) — asking the human to choose"
     if name == "chair_direction_unreadable":
         return "the chair could not word the split — the run asks in its own words"
+    if name == "chair_ask_merge_refused":
+        return f"the chair's ask fold was refused: {fields['reason']}"
+    if name == "chair_ask_merge_unreadable":
+        return "the chair could not read the ask fold — every ask keeps its own wording"
     if name == "round_summary":
         states = ", ".join(f"{count} {state}" for state, count in sorted((fields.get("states") or {}).items()))
         return f"round {fields['round']}: {fields['signed_off']} signed off · {states or 'nothing open'}"
@@ -273,11 +278,55 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"merge plan refused ({fields['reason']}) — the docket is printed as raised"
     if name == "answer_buys_a_round":
         return f"{fields['answered']} answer(s) settled: round {fields['round']} is a full one"
+    if name == "grace_round_bought":
+        return f"{fields['answered']} answer(s) at the round limit: one more round, {fields['grace_left']} to spare"
+    if name == "peer_pass_start":
+        return f"the seats get one last look at {', '.join(fields['asks'])} before the council asks you"
+    if name == "question_seconded":
+        return f"{name_of(fields['seat'], names)} backed {fields['id']} — the human is asked ({_seats(fields['askers'], names)})"
+    if name == "question_seconded_but_held_back":
+        backed = f"{name_of(fields['seat'], names)} backed {fields['id']}"
+        if fields["held"] == SETTLED:
+            return f"{backed}, but {_seats(fields['answered_by'], names)} answered it: only a seat that raised it can call that not enough"
+        if fields["held"] == MOOT:
+            return f"{backed}, but its item is settled: only a majority declaring the stop for it puts it to the human"
+        return f"{backed}, and the human is not asked ({fields['held']})"
+    if name == "question_stop_requested":
+        return f"{name_of(fields['seat'], names)} wants the run to wait on {fields['id']} ({_seats(fields['holders'], names)})"
+    if name == "question_insisted":
+        return f"{name_of(fields['seat'], names)} says the answer to {fields['id']} was not enough"
+    if name == "question_merged":
+        dropped = f"{fields['id']} wanted what {fields['into']} wants — now asked by {_seats(fields['askers'], names)}"
+        if (named := fields.get("chair_named")) and named != fields["into"]:
+            return f"{dropped}; {fields['into']} keeps its words, though the chair named {named}"
+        return dropped
+    if name == "question_retracted":
+        still_asking = fields["still_asking"]
+        dropped = f"{name_of(fields['seat'], names)} dropped {fields['id']}"
+        return dropped + (f" — still asked by {_seats(still_asking, names)}" if still_asking else " — nobody asks it")
+    if name == "question_mooted":
+        return f"{fields['id']} asked about {fields['item']}, which the council settled ({fields['disposition']}) — the human is not asked"
+    if name == "hold_released":
+        who = name_of(fields["seat"], names)
+        return f"{who} let go of {fields['item']} ({fields['stance']}): the council settles it, the human is not asked"
+    if name == "question_answered_by_seat":
+        return f"{name_of(fields['seat'], names)} answered {fields['id']} in the human's place"
+    if name == "question_unseconded":
+        return f"{fields['id']} has no second seat: it is reported, never asked"
+    if name == "verdict_ask_refused":
+        named = "item" if fields["field"] == "positions" else "ask"
+        return f"{name_of(fields['member'], names)} named {named} {fields['id']} in `{fields['field']}`: {fields['reason']}"
     if name == "answer_option_rejected":
         return f"the checkpoint reported option {fields['option']} for {fields['id']}: {fields['reason']}"
     if name == "gap_declined":
         return f"{name_of(fields.get('member', ''), names)} declined {len(fields.get('items') or [])} item(s) after its ladder"
     return ""
+
+
+def _seats(ids: list[str], names: dict[str, str]) -> str:
+    from .render.text import name_of
+
+    return ", ".join(name_of(one, names) for one in ids) or "nobody"
 
 
 async def _teardown(members: Members | None, console: Console, *, in_place: bool = False):
@@ -418,19 +467,27 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
             {
                 "id": q.id,
                 "askers": list(q.askers),
+                "blocked_by": list(q.blocked_by),
                 "item": q.item_id,
                 "raised_round": q.raised_round,
                 "question": q.text,
                 "context": q.context,
                 "options": list(q.options),
                 "effective": effective_class(docket, q),
+                "showable": showable(docket, q),
+                "peer_answers": dict(q.peer_answers),
+                "insisted": q.insisted,
+                "retracted_by": q.retracted_by,
+                "retracted_round": q.retracted_round,
+                "moot_with": q.moot_with,
                 "state": q.state,
                 "answer": q.answer,
                 "answer_round": q.answer_round,
                 "answer_option": q.answer_option,
                 "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
-                "markers": list(q.markers),  # unasked / skipped / deferred: the report's words
+                "markers": list(q.markers),  # unasked / unanswered / settled / unseconded / moot / merged / skipped: the report's words
+                "merged_into": q.merged_into,
                 "direction_ask": q.direction_ask,
                 "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == RETIRED],
             }
