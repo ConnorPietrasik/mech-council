@@ -20,8 +20,6 @@ class Chair:
         self.console = console
         self.brief = brief
 
-    # -- publication passes ------------------------------------------------------
-
     async def merge(self, listing: str, *, round_: int) -> dict:
         message = self.brief.merge(mode=self.council.mode, listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="merge", phase="merge", round_=round_)
@@ -55,8 +53,6 @@ class Chair:
                 await self.lanes.restart_member(CHAIR_ID, why=f"unreadable {phase} pass")
         raise ChairUnusable(phase, round_, f"{refusal} — unreadable after repair re-asks, a digest, a restart and one re-run")
 
-    # -- the digest ---------------------------------------------------------
-
     async def digest(self, rows: list[dict]) -> dict | None:
         if not rows:
             return None
@@ -72,7 +68,6 @@ class Chair:
         try:
             outcome = await self.lanes.ask_chair(message, round_=None, phase="digest", kind="watchdog", timeout=WATCHDOG_PASS_TIMEOUT_S)
         except Exception as failure:
-            # The pass itself failed.  That says nothing about any member.
             self.console.event("watchdog_pass_failed", error=str(failure))
             return None
         if outcome.rejected or outcome.data is None:

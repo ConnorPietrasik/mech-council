@@ -214,7 +214,6 @@ def _sandbox_limits(docket: Docket, context: ReportContext) -> list[str]:
 
 def _sandbox_writes(context: ReportContext) -> list[str]:
     if context.in_place:
-        # No upper layer exists, so there is nothing to list: the project is what the members changed.
         return [
             "## Project writes",
             "",

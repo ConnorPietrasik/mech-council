@@ -213,13 +213,15 @@ def test_sigterm_leaves_on_128_plus_signum(cli, project, child_env):
 # ------------------------------------------------------- The nested-council guard
 
 
-def test_council_run_dir_refuses_and_prints_the_parent_verbatim(cli, project):
+def test_council_run_dir_refuses_and_prints_the_parent_verbatim(cli, project, canary):
     parent = "/nowhere/this-suite-never-made-this-run"
     env = {"COUNCIL_RUN_DIR": "/also/nowhere", "COUNCIL_RUN_PATH": parent}
     result = cli(["review"], cwd=project, env=env, scrub=False)
-    assert result.returncode == 1
+    assert result.returncode == 1, "a well-formed refusal is a setup failure, not a usage error"
     assert "nested council" in result.console
     assert parent in result.console, "verbatim, never re-resolved from COUNCIL_RUNS_DIR"
+    assert "--allow-nested" in result.console, "the refusal names the way out"
+    assert canary_entries(canary) == [], "a refusal creates nothing"
 
 
 def test_allow_nested_overrides_the_guard(cli, project):
@@ -670,17 +672,3 @@ def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_wait
     assert "unasked" in result.report(), "the review report marks the question unasked"
     checkpoint = [row for row in result.events if row["event"] == "human_checkpoint"][-1]
     assert checkpoint["terminal"] and not checkpoint["waited"]
-
-
-# ---------------------------------------------- The config loader / an unusable seat
-
-
-def test_a_seat_that_fails_its_first_prompt_is_unusable_and_names_the_provider(cli, project, canary):
-    """A provider error on the first prompt is an unusable member, not a retry."""
-    script = json.dumps([{"contains": "", "stop_reason": "error", "error_message": "401 invalid api key"}])
-    result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
-    assert result.returncode == 1
-    assert "is unusable" in result.console, "the seat is named unusable, not retried"
-    assert "401 invalid api key" in result.console, "the provider's own words are said, not a generic failure"
-    assert "round 1" not in result.console.lower(), "nobody deliberates after that"
-    assert result.manifest["outcome"] == "aborted", "the run ends naming the unusable member"

@@ -11,8 +11,6 @@ class Brief:
         self.max_items = max_items
         self.in_place = in_place
 
-    # -- member asks -----------------------------------------------------------
-
     def phase0(self, *, mode: str, goal: str | None, project: str) -> str:
         return common.phase0_briefing(mode=mode or self.mode, goal=goal, project=project or self.project, in_place=self.in_place)
 
@@ -36,8 +34,6 @@ class Brief:
 
     def defense(self, item_id: str, challenge: dict, question: str) -> str:
         return common.defense_ask(item_id, challenge, question)
-
-    # -- chair asks ------------------------------------------------------------
 
     def merge(self, *, mode: str, listing: str, goal: str | None = None) -> str:
         return common.merge_task(mode or self.mode, listing, goal)

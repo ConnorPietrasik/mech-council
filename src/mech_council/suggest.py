@@ -18,11 +18,11 @@ def distance(a: str, b: str) -> int:
         for j, cb in enumerate(b, 1):
             current.append(
                 min(
-                    previous[j] + 1,  # deletion
-                    current[j - 1] + 1,  # insertion
+                    previous[j] + 1,
+                    current[j - 1] + 1,
                     previous[j - 1] + (ca != cb),
                 )
-            )  # substitution
+            )
         previous = current
     return previous[-1]
 
@@ -60,8 +60,6 @@ def suggest(refused: str, known: list[str] | tuple[str, ...]) -> str | None:
     if hits:
         near = [form for form in by_form if distance(probe, form) <= threshold(probe)]
         pick = _closest(hits, probe)
-        # A prefix is a weak signal when the refused name is a *near-miss* of something longer: `review-stagwd` is a prefix of
-        # nothing but one edit from `review-staged`, and a hint that sends someone to the wrong council is worse than no hint.
         if near:
             best = _closest(near, probe)
             if distance(probe, best) < distance(probe, pick):

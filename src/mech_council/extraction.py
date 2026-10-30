@@ -60,7 +60,6 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "approach": ("approach", "plan", "proposal"),
 }
 
-#: keys are folded at import, so `ask_human` and `ASK-HUMAN` reach the same row.
 STANCE_WORDS: dict[str, str] = {
     "agree": AGREE,
     "agreed": AGREE,
@@ -106,7 +105,7 @@ STANCE_WORDS: dict[str, str] = {
 }
 STANCE_WORDS = {fold(word): value for word, value in STANCE_WORDS.items()}
 
-#: Lenient extraction's backing paraphrase table: the one place a paraphrase becomes a canonical backing token.
+#: a paraphrase → the canonical backing token
 BACKING_WORDS: dict[str, str] = {
     "defer": NO_PREFERENCE,
     "either": NO_PREFERENCE,
@@ -130,7 +129,7 @@ class Extraction:
     data: dict = field(default_factory=dict)
     repaired: bool = False
     errors: list[str] = field(default_factory=list)  # repairable problems
-    invalid: bool = False  # no JSON at all / not an object
+    invalid: bool = False  # no JSON object at all
     summary: str = ""
 
 
@@ -143,11 +142,9 @@ def find_json(text: str) -> tuple[dict | None, str | None]:
     while start >= 0:
         end = _balanced_end(cleaned, start)
         if end is None:
-            # A brace that opens an object and never closes is a reply cut off mid-answer, and the object nested inside
-            # it is a fragment: reading that as the reply replaces the member's verdict with "nothing to say".
+            # an unclosed object is a reply cut off mid-answer; its contents are a fragment
             if _opens_an_object(cleaned, start):
                 return None, "unbalanced JSON object in the answer: the reply was cut off, so send the object whole"
-            # Any other brace that never closes is prose, so keep looking for one that does.
         else:
             try:
                 value = json.loads(cleaned[start : end + 1])
@@ -162,7 +159,6 @@ def find_json(text: str) -> tuple[dict | None, str | None]:
 
 
 def _opens_an_object(text: str, start: int) -> bool:
-    """`{` with a quote next opens an object; `{` followed by anything else is a brace in the answer's prose."""
     pos = start + 1
     while pos < len(text) and text[pos].isspace():
         pos += 1
@@ -291,13 +287,13 @@ def parse_verdict(
         raw_id = text_of(pick(entry, "id")).strip()
         stance = map_stance(pick(entry, "stance"))
         if stance is None:
-            dropped += 1  # an unknown stance invalidates the entry
+            dropped += 1
             continue
         if not raw_id:
             dropped += 1
             continue
         if raw_id not in known:
-            unknown.append(raw_id)  # a stance for an unknown item must not vanish
+            unknown.append(raw_id)
             continue
         item: dict[str, object] = {
             "item": raw_id,
@@ -355,7 +351,7 @@ def parse_verdict(
                 out.errors.append(f"`backing` {text_of(raw_backing)!r} is not one of AgentN / merged: <label> / no_preference")
             out.data["backing"] = token
     if out.errors and not clean_positions:
-        out.repaired = True  # the caller owes the repair re-ask for this message
+        out.repaired = True
     return out
 
 
@@ -501,8 +497,6 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
             out.repaired = True
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _strings(pick(data, "open_questions"))
-    # The phase-0 schema advertises `human_input` with `context` and `options`, so extraction reads them here too:
-    # what the phase-0 brief asks for and the run then discards is a prompt that lies.
     out.data["human_input"] = _human_input(data)
     return out
 
@@ -528,7 +522,6 @@ def parse_merge_plan(payload: str) -> tuple[dict | None, list[str]]:
 
 
 def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
-    """The chair's wording of the split.  The menu is the run's, so the reply carries no options of its own."""
     data, error = find_json(payload)
     if data is None:
         return None, [error or "no JSON object found"]
@@ -581,7 +574,6 @@ def _conflicts(value: object) -> list[dict]:
         if isinstance(positions, list):
             for row in positions:
                 if isinstance(row, dict):
-                    # The plan phase machine's schema is `{"agent", "claim"}`; `position`/`note` are synonyms.
                     rows.append({"agent": text_of(pick(row, "agent")), "claim": text_of(pick(row, "claim")) or text_of(pick(row, "note"))})
         out.append({"claim": text_of(pick(entry, "claim")) or text_of(pick(entry, "question")), "positions": rows})
     return out

@@ -163,8 +163,7 @@ def _agreed_points(docket: Docket, context: ReportContext) -> list[str]:
         return out + ["The chair's comparison recorded none.", ""]
     for point in docket.agreed_points:
         who = _names(point.get("agents") or [], context)
-        # The chair's schema asks for the sharing seats; when it named none, saying
-        # "(nobody)" would read as a finding about the council rather than a missing field.
+        # an empty field reads as a missing field, not as a finding about the council
         tail = f" — {who}" if who != "(nobody)" else " — the chair named no seats"
         out.append(f"- {point.get('point')}{tail}")
     out.append("")

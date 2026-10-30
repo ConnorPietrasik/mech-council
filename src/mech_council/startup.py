@@ -25,9 +25,8 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     environ = dict(os.environ if environ is None else environ)
     args = cli.parse_args(argv)
     if refusal := cli.no_fork_refusal():
-        raise ConfigError(refusal)  # before anything is read: a stranger's first impression is this line
+        raise ConfigError(refusal)
     plat = sys.platform
-    # A host with no namespaces runs in place rather than refusing; the operator only has to say so on Linux.
     namespaces_available = cli.sandbox_supported()
     if message := cli.check_nested_guard(args.allow_nested, environ):
         raise ConfigError(message)
@@ -85,9 +84,7 @@ def _trust_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
 
 
 def _in_place_notes(loaded: config_mod.ConfigFile, council: config_mod.Council, args: cli.Args, *, plat: str) -> list[str]:
-    """Who asked to run unsandboxed, in the order the operator should read it: their own flag, then the
-    file that asked, then the host.  The sandbox keeps seats off each other, so what each note owes the
-    operator is the shared tree and the missing journal."""
+    """Who asked to run unsandboxed, in the order the operator should read it."""
     if not council.in_place:
         return []
     costs = "members share one project and nothing they write is journaled or discarded"
@@ -116,7 +113,7 @@ def prepare_runs_root(runs_dir: str) -> str:
 def create_run_dir(launch: Launch) -> str:
     try:
         os.makedirs(launch.run_dir, mode=0o700, exist_ok=False)
-    except FileExistsError:  # the same second, twice: never reuse a run dir
+    except FileExistsError:  # a second run in the same second
         launch.run_name += f"-{os.getpid()}"
         launch.run_dir = os.path.join(launch.runs_dir, launch.run_name)
         os.makedirs(launch.run_dir, mode=0o700, exist_ok=False)

@@ -31,8 +31,6 @@ class MemberRecord:
             "model_warning": self.model_warning,
             "namespace": self.namespaces[-1] if self.namespaces else None,
             "namespaces": list(self.namespaces),
-            # "exactly one prompt each" is the operational meaning of "spends
-            # no tokens", so the count belongs in the machine-readable record.
             "prompts": self.prompts,
         }
 
@@ -70,7 +68,7 @@ class RunManifest:
 def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str, orchestrator_pid: int) -> RunManifest:
     members: dict[str, MemberRecord] = {}
     roster = []
-    for slot, spec in enumerate(council.agents, 1):  # the slot is the seat's position, and nothing else records it
+    for slot, spec in enumerate(council.agents, 1):
         members[spec.file_base] = MemberRecord(
             file_base=spec.file_base, id=spec.id, name=spec.name, kind="seat", provider=spec.provider, model=spec.model
         )
@@ -140,7 +138,6 @@ def finalize(
             "rounds": rounds,
             "report": report,
             "write_journal": journal,
-            # In place the members share this namespace, so the scope the sweep could have read is nothing.
             "namespace_sweep": namespace_sweep,
             "survivor_pids": list(survivor_pids),
             "survivor_ns": list(survivor_ns),

@@ -23,7 +23,7 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "in_place": False,
 }
 
-#: The knob table: name → (type, `[defaults]`-allowed).  A new knob is one row here plus one consumer.
+#: name → (type, `[defaults]`-allowed)
 SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "max_rounds": ("int>=1", True),
     "watchdog_sec": ("int>=0", True),
@@ -36,7 +36,7 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "mode": ("mode", False),
     "goal": ("str", False),
 }
-#: What a seat table states.  `drop` is a patch verb rather than a seat field, so it is `PATCH_KEYS` only.
+#: What a seat table states; `drop` is a patch verb, so it is `PATCH_KEYS` only.
 AGENT_KEYS = {"name": "str", "provider": "str", "model": "str", "persona": "str"}
 PATCH_KEYS = AGENT_KEYS | {"drop": "bool"}
 
@@ -79,7 +79,7 @@ class Council:
     #: Every file the config was read from, lowest precedence first.
     config_layers: list[str] = field(default_factory=list)
     untrusted: bool = False
-    #: Members run in the real project: no namespaces, no overlays, no masks, no write journal.
+    #: Members work in the real project: no namespaces, no overlays, no masks, no write journal.
     in_place: bool = False
     project: str = ""
 
@@ -139,7 +139,7 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
     return value
 
 
-#: The mode names config validation accepts; `modes.REGISTRY` is what the machinery dispatches on.
+#: The mode names config validation accepts.
 MODES: tuple[str, ...] = ("review", "plan")
 
 
@@ -152,8 +152,6 @@ def _reject_unknown(table: dict, allowed: set[str] | dict, where: str) -> None:
 
 
 def _members(raw: object, key: str, *, chair: bool) -> list[MemberSpec]:
-    """The merged roster or chair, read into specs.  Rules about a *written* table are `_check_written`'s,
-    so an inherited typo names the council that wrote it; rules about the *merged* seat are `convene`'s."""
     if chair:
         seats = [(_chair_table(raw, key), f"[{key}]")]
     else:
@@ -171,8 +169,6 @@ def _seat_list(value: object) -> TypeIs[list[dict]]:
 
 
 def _seat_roster(raw: object, key: str) -> list[dict]:
-    """The seat tables of `councils.<name>.agents`.  Shape is settled once, so a roster that cannot be
-    read is not patched over in silence by the council doing the patching."""
     table = f"[{key}]"
     if not _seat_list(raw):
         shape = "a single table" if isinstance(raw, dict) else "not a list of seat tables"
@@ -181,7 +177,6 @@ def _seat_roster(raw: object, key: str) -> list[dict]:
 
 
 def _chair_table(raw: object, key: str) -> dict:
-    """`councils.<name>.chair` read as the one table the chair is, never the list `[[...]]` writes."""
     table = f"[{key}]"
     if isinstance(raw, list):
         raise ConfigError(f"{table} is written [[...]]; the chair is the single table, never a list")
@@ -191,8 +186,6 @@ def _chair_table(raw: object, key: str) -> dict:
 
 
 def _seat_keys(entry: dict, where: str, *, patch: bool) -> None:
-    """Keys and types of one seat table.  `patch` allows `drop`; a merged seat never carries it, so a
-    `drop` the merge failed to strip is named here rather than reaching a member."""
     _reject_unknown(entry, PATCH_KEYS if patch else set(AGENT_KEYS), where)
     for key, kind in AGENT_KEYS.items():
         if key in entry:
@@ -202,8 +195,6 @@ def _seat_keys(entry: dict, where: str, *, patch: bool) -> None:
 
 
 def _seat_name(entry: dict, where: str) -> str:
-    """A seat's name.  Patches match seats by name, so every seat needs one — including the merged
-    chair, whose patch states only the keys it changes."""
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ConfigError(f"{where} needs a non-empty 'name'")
@@ -211,8 +202,6 @@ def _seat_name(entry: dict, where: str) -> str:
 
 
 def _check_written(table: dict, name: str) -> None:
-    """What one written table states, checked in that table: a typo inside a council another one extends
-    names the council that wrote it, not the one that inherited it."""
     where = f"[councils.{name}]"
     _reject_unknown(table, COUNCIL_KEYS, where)
     if "extends" in table:
@@ -223,7 +212,6 @@ def _check_written(table: dict, name: str) -> None:
             seat = f"[{agents_key}][{index}]"
             _seat_keys(entry, seat, patch=True)
             _seat_name(entry, seat)
-            # Only an `extends` can hand this table a seat to retire.
             if entry.get("drop") and "extends" not in table:
                 raise ConfigError(f"{seat} drops a seat, but {where} extends no council to inherit one from")
     chair_key = f"councils.{name}.chair"
@@ -236,8 +224,7 @@ def _check_written(table: dict, name: str) -> None:
 
 def _patch_seats(parent: list[dict] | None, child: list[dict], roster: str) -> list[dict]:
     """Patch `child`'s seats onto `parent`'s by name: a stated key replaces that key, a name the parent
-    lacks joins the end, `drop = true` retires a seat, and order stays parent-first.  `drop` is
-    stripped here, so it never reaches a `MemberSpec`.  Both lists are validated seat tables."""
+    lacks joins the end, `drop = true` retires a seat, and order stays parent-first."""
     out: list[dict] = [] if parent is None else [dict(seat) for seat in parent]
     by_name: dict[str, int] = {}
     for written, seat in enumerate(out):
@@ -252,7 +239,6 @@ def _patch_seats(parent: list[dict] | None, child: list[dict], roster: str) -> l
         name = seat.get("name")
         named = name if isinstance(name, str) else None
         if named is not None and named in patched and not drop:
-            # The second would quietly take the keys the first stated; to rebuild a seat, drop it first.
             raise ConfigError(f"{roster} patches {named!r} twice: state a seat once, or drop it and state it again")
         slot = by_name.get(named) if named is not None else None
         if slot is None or slot in dropped:
@@ -275,17 +261,12 @@ def _patch_seats(parent: list[dict] | None, child: list[dict], roster: str) -> l
 
 
 def _resolve(config: ConfigFile, name: str, trail: tuple[str, ...] = ()) -> tuple[dict, list[str]]:
-    """The table a council convenes with — its own over the one it `extends` — and the chain, nearest
-    first.  Raw tables merge rather than resolved values, so a key neither council states still falls
-    through to `[defaults]`.  Only this chain is validated."""
     table = config.councils[name]
     _check_written(table, name)
     roster = f"[councils.{name}.agents]"
     if "extends" not in table:
         own = dict(table)
         seats = own.get("agents")
-        # `_check_written` keeps `drop = true` out of a table with nothing to patch, so only the verb
-        # is stripped here; duplicate names and the rest are for `convene`, which reads the roster.
         if _seat_list(seats):
             own["agents"] = [{key: value for key, value in seat.items() if key != "drop"} for seat in seats]
         return own, []
@@ -304,21 +285,16 @@ def _resolve(config: ConfigFile, name: str, trail: tuple[str, ...] = ()) -> tupl
         merged["chair"] = {**inherited["chair"], **merged["chair"]}
     seats = inherited.get("agents")
     child = table.get("agents")
-    # No child roster of its own means `{**inherited, **table}` already left the inherited one in place.
     if _seat_list(child):
         merged["agents"] = _patch_seats(seats if _seat_list(seats) else None, child, roster)
     return merged, [parent, *chain]
 
 
 def _flatten(source: dict, defaults: dict, where: str) -> dict:
-    # The merged table, so this is where an `extends` `_resolve` forgot to pop would surface: a
-    # council's own keys are `_check_written`'s.
     _reject_unknown(source, set(SCALAR_KEYS) | {"agents", "chair"}, where)
     out: dict[str, object] = {}
     for key, (kind, _in_defaults) in SCALAR_KEYS.items():
         if key == "mode":
-            # The mode is validated against the registry below, never as a type, and a
-            # council that states none is `review` — the built-in default, not `[defaults]`.
             out[key] = BUILTIN_DEFAULTS[key]
             continue
         if key in source:
@@ -342,15 +318,13 @@ class ConfigFile:
     path: str
     defaults: dict = field(default_factory=dict)
     councils: dict[str, dict] = field(default_factory=dict)
-    #: Every file read, lowest precedence first, with the raw table of each: a merged council's own keys
-    #: come from one of them, and the messages and `run.json` have to be able to say which.
+    #: Every file read, lowest precedence first.
     paths: list[str] = field(default_factory=list)
     project_layer: str | None = None
     raw: dict[str, dict] = field(default_factory=dict)
 
     def names(self) -> list[str]:
-        """The convenable councils: a `_` name is a template, which `extends` reaches and selection
-        never does, and which may state less than a whole council."""
+        """The convenable councils: a `_` name is a template."""
         return [name for name in self.councils if not str(name).startswith(TEMPLATE_PREFIX)]
 
     @property
@@ -367,13 +341,12 @@ class ConfigFile:
 
 
 def load_config(path: str) -> ConfigFile:
-    """One file, whole: it must state councils and nothing shadows it."""
+    """One file, whole: it must state councils."""
     return _read(path, require_councils=True)
 
 
 def load_layers(paths: list[str], *, project_layer: str | None = None) -> ConfigFile:
-    """The files merged, lowest precedence first.  A later file replaces a same-named council outright and
-    patches `[defaults]` key by key, so `extends` reaches a parent stated in any one of them."""
+    """The files merged, lowest precedence first: a later file replaces a same-named council outright."""
     read = [path for path in paths if os.path.isfile(path)]
     if not read:
         if len(paths) == 1:
@@ -439,8 +412,7 @@ def select_council(config: ConfigFile, name: str | None) -> str:
 
 
 def stated_by(config: ConfigFile, name: str, chain: list[str], key: str) -> str | None:
-    """The highest-precedence council file that states `key` for this council — in its `[defaults]`, in the
-    council's own table, or in a table it extends — or None when no file states it."""
+    """The highest-precedence council file that states `key` for this council, or None."""
     for path in reversed(config.paths or [config.path]):
         raw = config.raw.get(path, {})
         if key in (raw.get("defaults") or {}):
@@ -452,8 +424,7 @@ def stated_by(config: ConfigFile, name: str, chain: list[str], key: str) -> str 
 
 
 def _pi_cli_stated_by_project(config: ConfigFile, chain: list[str]) -> bool:
-    """Whether the auto-discovered project file is what asked for this `pi_cli`, in its own table, in a
-    template it extends, or in `[defaults]`."""
+    """Whether the project file is what asked for this `pi_cli`."""
     return stated_by(config, chain[0], chain[1:], "pi_cli") == config.project_layer
 
 
@@ -465,7 +436,6 @@ def resolve_pi(explicit: str | None, project: str, *, from_project: bool = False
                 raise ConfigError(f"pi_cli {explicit!r} is not an executable file")
             resolved = os.path.realpath(candidate)
             if from_project and is_within(resolved, project):
-                # A council.toml that arrives with a clone must not hand over an executable that arrived with it.
                 raise ConfigError(
                     f"pi_cli {explicit!r} is inside the project that stated it, which cannot name the executable every "
                     "member runs: put it in the user council.toml, or convene your own file with --config"
@@ -498,7 +468,6 @@ def convene(
     namespaces_available: bool = True,
 ) -> Council:
     table, chain = _resolve(config, name)
-    # A merged seat may be stated in any council of the chain, so roster errors say which ones.
     via = f" [the roster merges {' → '.join([*reversed(chain), name])}: it can be stated in any of them]" if chain else ""
     flat = _flatten(table, config.defaults, f"[councils.{name}]")
     agents_raw = table.get("agents")
@@ -517,7 +486,6 @@ def convene(
     chair = _members(table["chair"], f"councils.{name}.chair", chair=True)[0]
     if chair.name in seen:
         raise ConfigError(f"[councils.{name}] lists the name {chair.name!r} for both a seat and the chair")
-    # A patch may complete an inherited seat, so this is only knowable about the merged seat.
     incomplete = "states 'provider' without 'model' — pi refuses to start a seat configured that way" + via
     for index, agent in enumerate(agents, 1):
         if agent.provider and not agent.model:
@@ -556,7 +524,6 @@ def convene(
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),
         untrusted=untrusted,
-        # A flag, a config layer, or a host with nothing to build the sandbox from: any one of them runs in place.
         in_place=bool(args.in_place or not namespaces_available or flat["in_place"]),
         project=project,
     )

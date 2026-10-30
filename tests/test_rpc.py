@@ -74,7 +74,7 @@ def test_get_state_comes_first_and_the_answer_is_correlated_by_id():
     )
 
 
-def test_an_error_stop_reason_and_its_message_survive_to_the_unusable_test():
+def test_an_error_stop_reason_reaches_the_caller_as_an_error():
     script = [{"contains": "", "stop_reason": "error", "error_message": "429 rate limited"}]
 
     async def main():

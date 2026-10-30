@@ -42,11 +42,11 @@ def member_env(
 ) -> dict[str, str]:
     env = dict(base)
     for name in INTERNAL_ENV:
-        env.pop(name, None)  # a member inherits no launcher's paths, only the ones set for it here
+        env.pop(name, None)
     env["COUNCIL_RUN_DIR"] = os.path.basename(run_path.rstrip("/"))
     env["COUNCIL_RUN_PATH"] = run_path
     env["TMPDIR"] = tmpdir or f"{project}/{SCRATCH_NAME}"
-    if not in_place:  # the launcher reads these three and wipes them before it execs
+    if not in_place:
         env["COUNCIL_LAUNCH_PROJECT"] = project
         env["COUNCIL_LAUNCH_RUNS_ROOT"] = runs_root
         env["COUNCIL_LAUNCH_SLOT_DIR"] = slot_dir
@@ -59,7 +59,7 @@ class Member:
     id: str | None
     pid: int
     pgid: int
-    namespace: int | None  # None in place: the member never left the orchestrator's namespace
+    namespace: int | None  # None in place
     ns_fd: int
     proc: asyncio.subprocess.Process
     rpc: PiRpc
@@ -90,7 +90,6 @@ async def spawn(
     env: dict[str, str] | None = None,
 ) -> Member:
     pi = pi_argv(spec, pi_cli, file_base=file_base, untrusted=untrusted)
-    # In place, pi is the child itself: the launcher exists to mount a seat's view and has nothing left to do.
     argv = pi if in_place else [*launcher_argv(), "--setup-seat", "--slot", file_base, "--", *pi]
     child_env = member_env(
         base=env if env is not None else dict(os.environ),
@@ -120,12 +119,10 @@ async def spawn(
         )
     finally:
         if write_fd >= 0:
-            os.close(write_fd)  # our copy: or the report would never EOF
-    child_env.clear()  # the launcher's paths die with the spawn
+            os.close(write_fd)  # our copy, or the report never EOFs
+    child_env.clear()
     namespace, ns_fd = await _namespace_of(read_fd, proc, file_base=file_base, in_place=in_place)
     if proc.stdout is None or proc.stdin is None:
-        # Both are PIPEd, so this only fires if the spawn's shape changed; it is checked here because the new fd
-        # and the child both have to be released.
         if ns_fd >= 0:
             os.close(ns_fd)
         await _reap(proc)
@@ -148,26 +145,22 @@ async def spawn(
 
 
 async def _namespace_of(read_fd: int, proc: asyncio.subprocess.Process, *, file_base: str, in_place: bool) -> tuple[int | None, int]:
-    """The member's namespace and an fd held open on it for the sweep, or `(None, -1)`: in place the member
-    never left this namespace, and there is nothing to hold."""
+    """The member's namespace and an fd held open on it for the sweep, or `(None, -1)` in place."""
     if in_place:
         return None, -1
     try:
         report = await _read_report(read_fd, proc)
     finally:
-        os.close(read_fd)  # the cancel path owes this too
+        os.close(read_fd)
     if report[0] == NS_REPORT_FAIL:
         await _reap(proc)
         raise LauncherSetupError(f"member namespace failed for {file_base}: {report[1]}")
     namespace = report[1]
     if not isinstance(namespace, int):
-        # An OK tag carrying no id is a launcher speaking some other protocol: the run ends as a
-        # setup failure rather than keying the sweep on a value that is not a namespace.
         await _reap(proc)
         raise LauncherSetupError(f"{file_base}: the namespace report carried no id: {namespace!r}")
     if namespace == mount.namespace_id():
-        # Reading /proc/<child>/ns/mnt in that window answers with *our* namespace. An id equal to ours means the
-        # member's mounts never finished, which is why the launcher reports its own id rather than us reading it back.
+        # the launcher reports its own id, so an id equal to ours means its mounts never finished
         await _reap(proc)
         raise LauncherSetupError(
             f"{file_base}: reported the orchestrator's own mount namespace — its own namespace was never set up before the report"
@@ -195,8 +188,7 @@ async def _read_report(read_fd: int, proc: asyncio.subprocess.Process) -> tuple[
         except TimeoutError:
             return (NS_REPORT_FAIL, "the launcher never reported (ns report timeout)")
     finally:
-        # The timeout and the cancel paths never reach `_ready`, and the caller closes the fd on the
-        # way out: a watcher left on a closed fd number answers the next file that inherits the number.
+        # the caller closes the fd: a watcher left on a reused fd number answers the next file that inherits it
         loop.remove_reader(read_fd)
     text = (data or b"").decode("utf-8", "replace").strip()
     if text.startswith(NS_REPORT_OK):

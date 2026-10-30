@@ -39,8 +39,6 @@ async def orchestrate(launch, sandbox) -> int:
     console.say(f"roster {_roster(council)}")
     console.say(f"config {council.config_path}")
     console.say(f"run directory {run_dir}")
-    # The sandbox, the transcript level and the trust decision are each a line, so an
-    # operator reading the console knows what a member could touch before it runs.
     if council.in_place:
         console.say(f"in place · members share {council.project} · scratch {sandbox.sandbox_dir}/<seat> · no write journal")
     else:
@@ -69,7 +67,6 @@ async def orchestrate(launch, sandbox) -> int:
     stop = asyncio.Event()
 
     def on_signal(sig: int) -> None:
-        # The run disposes everything it created and leaves on 128+signum, not by dying.
         if not signalled:
             signalled.append(sig)
             console.say(f"signal {sig}: disposing every child, finalizing run.json")
@@ -79,8 +76,6 @@ async def orchestrate(launch, sandbox) -> int:
         with contextlib.suppress(NotImplementedError, ValueError, RuntimeError):
             asyncio.get_running_loop().add_signal_handler(sig, on_signal, sig)
 
-    # Every name the exit path touches exists before the `try`, or a failure
-    # in setup would trade the run's honest finalization for a NameError.
     members: Members | None = None
     lanes: Lanes | None = None
     docket: Docket | None = None
@@ -97,15 +92,13 @@ async def orchestrate(launch, sandbox) -> int:
             transcripts=transcripts,
         )
         await members.start_all()
-        # Built here, not inside the loop: the prompt count is read on the way out, and
-        # a lane created in a frame that already returned would be unreadable there.
         lanes = Lanes(council, members, console)
         outcome, rounds, docket = await _deliberate(council, members, console, stop, lanes)
     except (Abort, AskUnusable, ChairUnusable, MemberGone) as failure:
         aborted, outcome = str(failure), ABORTED
         console.say(aborted)
         console.event("run_aborted", reason=aborted)
-    except Exception as failure:  # a bug ends the run too
+    except Exception as failure:
         aborted = f"internal error: {type(failure).__name__}: {failure}"
         outcome = ABORTED
         console.say(aborted)
@@ -113,9 +106,7 @@ async def orchestrate(launch, sandbox) -> int:
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
     finally:
-        # Each owed step is independent, because one failing must not cancel the others — a renderer that raises may not also cost
-        # the operator the finalized `run.json` or the sweep result.  Each reports itself when it fails.  `_teardown` is awaited
-        # directly (and already reports its own failure): the sweep result has to exist before the manifest can be finalized.
+        # Each step is independent: one failing must not cancel the others.
         survivors = await _teardown(members, console, in_place=council.in_place)
         journal = _owed(console, "the write journal", _journal, council, sandbox, baselines, console) or []
         report_path = (
@@ -150,10 +141,10 @@ async def orchestrate(launch, sandbox) -> int:
 
 
 def _owed(console: Console, what: str, call, *args, **kw):
-    """One owed exit-path step, whose failure is a console line and an event rather than a gap: the caller falls back on None."""
+    """One owed exit-path step: its failure is a console line and an event, and the caller falls back on None."""
     try:
         return call(*args, **kw)
-    except Exception as failure:  # nothing may swallow this
+    except Exception as failure:
         frames = traceback.format_exc(limit=4).strip().splitlines()[-3:]
         console.say(f"{what} failed on the way out ({type(failure).__name__}: {failure})")
         console.event("exit_step_failed", step=what, kind=type(failure).__name__, reason=str(failure), frames=frames)
@@ -165,7 +156,6 @@ def _file_bases(council: Council) -> list[str]:
 
 
 def _roster(council: Council) -> str:
-    """The run's one name-to-id key: every other console line speaks names alone, and ids live in the records."""
     shown = [f"{name} ({agent_id})" for agent_id, name in council.seat_names.items()]
     chair, key = council.chair.name, council.chair.file_base
     shown.append(chair if chair.casefold() == key else f"{chair} ({key})")
@@ -223,7 +213,6 @@ async def _race(run, stop: asyncio.Event):
     except asyncio.CancelledError:
         pass
     except Exception as failure:
-        # The signal is why the task stopped; it is not an excuse for losing a bug the task raised on the way out.
         raise Abort(f"the run was signalled, and the loop also raised {type(failure).__name__}: {failure}") from failure
     raise Abort("the run was signalled")
 
@@ -306,7 +295,7 @@ async def _teardown(members: Members | None, console: Console, *, in_place: bool
 
 
 def _journal(council: Council, sandbox, baselines: dict, console: Console) -> list[dict]:
-    if not baselines:  # in place there is no upper layer to read: members wrote in the project itself
+    if not baselines:
         return []
     from .render.text import name_of
 
@@ -339,7 +328,6 @@ def _report(
 
     try:
         if docket is not None:
-            # The review report's sandbox markers are earned from the write journal: see `journal.mark_sandbox_items`.
             from .sandbox.journal import mark_sandbox_items
 
             mark_sandbox_items(docket, journal, project=council.project)
@@ -435,19 +423,14 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
                 "question": q.text,
                 "context": q.context,
                 "options": list(q.options),
-                # An escalation's effective class is derived, not stored:
-                # the same question is blocking for one docket shape and deferred for another.
                 "effective": effective_class(docket, q),
                 "state": q.state,
                 "answer": q.answer,
                 "answer_round": q.answer_round,
-                # A terse `2` at the checkpoint is expanded into the option's own words; the pair below is the proof
-                # of which offered line that answer came from, and it is empty when the human wrote their own.
                 "answer_option": q.answer_option,
                 "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
                 "markers": list(q.markers),  # unasked / skipped / deferred: the report's words
-                # The split ask blocks with no holders behind it, so the record has to say which ask it was.
                 "direction_ask": q.direction_ask,
                 "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == RETIRED],
             }

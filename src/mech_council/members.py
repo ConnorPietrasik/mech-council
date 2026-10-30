@@ -28,8 +28,6 @@ class Members:
     stopping: bool = False
     survivors: lifecycle.SweepResult = field(default_factory=lifecycle.SweepResult)
 
-    # -- spawn ---------------------------------------------------------------
-
     def file_base_for(self, agent_id: str) -> str:
         for spec in self.council.agents:
             if spec.id == agent_id:
@@ -45,7 +43,7 @@ class Members:
         return file_base
 
     def display_for(self, file_base: str) -> str:
-        """The name for a human to read; the protocol, the events and `agents/` all keep speaking ids and file bases."""
+        """The name for a human to read."""
         from .render.text import name_of
 
         return name_of(file_base, self.council.display_names)
@@ -111,7 +109,7 @@ class Members:
             self.console.event("member_spawn_failed", member=label, file_base=spec.file_base, error=str(failure))
             raise MemberGone(f"{who} could not be spawned: {failure}") from failure
         try:
-            await member.rpc.get_state()  # the probe: it answers, or it is not there
+            await member.rpc.get_state()
         except (ProtocolError, ChildGone, TimeoutError, OSError) as failure:
             await self.dispose_one(member)
             self.console.event("member_spawn_failed", member=label, file_base=spec.file_base, error=str(failure))
@@ -131,15 +129,15 @@ class Members:
             raise MemberGone(f"{who}: restart dropped, the run is stopping")
         old = self.members.get(file_base)
         if old is not None:
-            # The dead spawn's ns fd stays open until after the sweep: restart does not close it, so its inode remains in the sweep set.
+            # the dead spawn's ns fd stays open until after the sweep
             await lifecycle.dispose(old)
-            self.members[file_base] = old  # keep the record; fds still held
+            self.members[file_base] = old
         self.console.event("member_restart", member=file_base, reason=why)
         self.console.say(f"restarting {who} ({why})")
         spec = self.spec_for(file_base)
         member = await self.spawn_one(spec)
         if old is not None:
-            member.ns_records = [*old.ns_records, *member.ns_records]  # in place, both are empty
+            member.ns_records = [*old.ns_records, *member.ns_records]
         if member.namespace is not None:
             self.manifest.record_namespace(file_base, member.namespace)
         try:
@@ -148,13 +146,9 @@ class Members:
             raise MemberGone(f"{who} restarted but did not answer get_state: {failure}") from failure
         return member
 
-    # -- dispose -------------------------------------------------------------
-
     async def dispose_all(self) -> lifecycle.SweepResult:
         self.stopping = True
         held = list(self.members.values())
-        # A restarted member leaves two records: the old spawn's ns fd is in
-        # `held` because `restart` keeps it addressable until the sweep has run.
         self.console.say(f"disposing {len(self.council.agents) + 1} member(s)")
         self.survivors = await lifecycle.dispose_all(held, own_namespace=self.own_namespace(), on_line=self.console.say)
         self.transcripts.close()
@@ -162,7 +156,7 @@ class Members:
 
     def own_namespace(self) -> int | None:
         if self.council.in_place:
-            return None  # the members share this namespace: it is the one scope no sweep may key on
+            return None
         from .sandbox.mount import namespace_id
 
         return namespace_id()

@@ -41,7 +41,7 @@ class RawAsk:
 @dataclass
 class CheckpointOutcome:
     answers: dict[str, str] = field(default_factory=dict)
-    # `H1: 2` selects an offered option: the answer is that option's own words, and the number records the selection.
+    # the option number the human typed, when the answer was one of the offered lines
     answer_options: dict[str, int] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
     waited: bool = False
@@ -79,7 +79,6 @@ class Engine:
         self.project = project
         self.emit = emit or (lambda name, **fields: None)
         self.brief = brief
-        # Protocol id → the name to print for it: the split ask is the one string the engine writes for the human to read.
         self.names = names or {}
         self.previous_signature: tuple | None = None
         self.checkpoint_moved = False
@@ -94,11 +93,9 @@ class Engine:
         self._class_of: dict[str, str] = {}
         self._camps_seen: tuple[tuple[str, ...], ...] | None = None
         self._camps_held = 0
-        self._ceiling = max_rounds  # an answer given at the ceiling buys one more round, so it can outgrow the configured limit
+        self._ceiling = max_rounds  # an answer given at the ceiling buys one more round
         self._demoted_this_round: set[tuple[str, str]] = set()
         self._stale = False
-
-    # -- ids and items --------------------------------------------------------
 
     def new_id(self) -> str:
         while f"{self.adapter.id_prefix}{self._next_item}" in self.docket.items:
@@ -118,8 +115,6 @@ class Engine:
             opened_round=round_,
         )
         return self.docket.add_item(item)
-
-    # -- phase 0 --------------------------------------------------------------
 
     async def phase0(self) -> list[str]:
         assert self.brief is not None
@@ -156,13 +151,8 @@ class Engine:
                 for entry in findings:
                     self.add_item(entry, agent, 0)
             for question in parsed.data.get("open_questions") or []:
-                # An `open_questions` entry is an item-less request raised at round 0.
                 raise_question(self.docket, text=question, asker=agent, item_id=None, blocking=False, round_=0)
             for entry in parsed.data.get("human_input") or []:
-                # Phase 0 raises requests, never escalations: an entry naming an item names one whose finding may not
-                # exist yet, so the item is dropped and the request is raised item-less — with the context and the options
-                # the brief asked for.  It is item-less only until the same words come back naming an item, which is when
-                # it becomes the escalation.
                 if entry.get("question"):
                     raise_question(
                         self.docket,
@@ -181,8 +171,6 @@ class Engine:
             )
         self.emit("phase0_done", valid=len(valid), items=len(self.docket.order))
         return valid
-
-    # -- publication ----------------------------------------------------------
 
     async def publish_review(self) -> None:
         if not self.docket.order:
@@ -223,25 +211,16 @@ class Engine:
             blocks.append(f"### {agent}\n\n{approach.original}" + (f"\n\nStages: {stages}" if stages else ""))
         return "\n\n".join(blocks)
 
-    # -- the council's split ------------------------------------------------------
-
     async def _direction_ask(self, round_: int) -> None:
-        """Camps that will not move are the council failing to converge, not deliberation still working, so the split goes to the
-        human rather than costing another round: on the first round that moved nothing, at the latest after `_SPLIT_ROUNDS` of
-        the same camps or on the run's last one.  Once per run: the answer is authoritative, a council that ignores it runs out.
-        """
         from ..render.text import direction_label
 
         if self.docket.mode != "plan" or self.docket.direction_ask() is not None:
             return
         camps = self.docket.camps()
         if len(camps) < 2 or camps != self._camps_seen:
-            # A camp is held from the round it is first seen in.
             self._camps_seen, self._camps_held = camps, 1 if camps else 0
             return
         self._camps_held += 1
-        # Whether to wait is the stalemate rule's own answer: the docket's signature unchanged, a freshly drawn plan included.
-        # And at the ceiling there is no round left to wait for — a split that ends unasked is the one thing this ask must never be.
         if not self._stale and self._camps_held < _SPLIT_ROUNDS and round_ < self._ceiling:
             return
         split = self.docket.directions()
@@ -265,7 +244,6 @@ class Engine:
         )
 
     async def _direction_wording(self, split: tuple[str, ...], round_: int) -> dict:
-        """The chair words the ask; the menu stays the run's, so no number the human types names a direction nobody held."""
         try:
             wording = await self.port.chair_direction(self._split_listing(split), round_=round_)
         except Abort as failure:
@@ -288,7 +266,6 @@ class Engine:
         return "\n\n".join(blocks)
 
     def _direction_plan(self, token: str) -> dict:
-        """The plan a direction stands on: the named seat's, or what the seats behind a `merged:` label actually wrote down."""
         if not token.startswith(MERGED):
             approach = self.docket.approaches.get(token)
             return approach.artifact() if approach else {}
@@ -305,9 +282,6 @@ class Engine:
         return fallback
 
     def _direction_option(self, token: str) -> str:
-        """One line per direction, led by the token itself: a taken option is recorded verbatim as the authoritative answer, and
-        the seats that plan against it read `AgentN`, never a name.  The console prints the seat's name over that token.
-        """
         plan = self._direction_plan(token)
         states = [_one_line(state) for state in _stage_states(plan)]
         tail = " → ".join(states[:_MENU_STAGES]) + (" → …" if len(states) > _MENU_STAGES else "")
@@ -315,8 +289,6 @@ class Engine:
         if claim:
             return f"{token}: {claim}" + (f" → {tail}" if tail else "")
         return f"{token}: {tail}" if tail else token
-
-    # -- rounds ---------------------------------------------------------------
 
     async def run_round(self, round_: int) -> None:
         self.docket.round = round_
@@ -349,7 +321,7 @@ class Engine:
                 continue
             self._apply_verdict(agent, result.text or "", round_)
         await self._merge_new_items(round_)
-        await self._gap_ladder(round_, rejected, mechanical=all(rejected))
+        await self._gap_ladder(round_, rejected)
         await self._challenge_pass(round_)
         for event, fields in closure_pass(self.docket, round_):
             self.emit(event, **fields)
@@ -364,7 +336,6 @@ class Engine:
         parsed = parse_verdict(text, mode=self.docket.mode, me=agent, known_items=known, closed_items=closed)
         data = parsed.data
         for raw_id in data.get("unknown_items") or []:
-            # A stance that cannot be placed must not vanish.
             self.emit("verdict_unknown_findings", member=agent, id=raw_id, round=round_)
         for position in data.get("positions") or []:
             item = self.docket.items.get(position["item"])
@@ -457,7 +428,6 @@ class Engine:
             if updated:
                 self.emit("question_updated", id=question.id, asker=asker, round=round_)
             if item_id:
-                # The escalation and its question are one act: stance the item `needs_human`.
                 if self.docket.stated_stance(item_id, asker) != NEEDS_HUMAN:
                     self._stance(item_id=item_id, agent=asker, stance=NEEDS_HUMAN, note=entry["question"], round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
@@ -489,7 +459,6 @@ class Engine:
         return question
 
     def _stance(self, *, item_id: str, agent: str, stance: str, note: str = "", evidence: str = "", round_: int) -> None:
-        """A stance moves an escalation's effective class with no `human_input` entry to hang the recheck on."""
         for event, fields in record_stance(
             self.docket, item_id=item_id, agent=agent, stance=stance, note=note, evidence=evidence, round_=round_
         ):
@@ -504,33 +473,22 @@ class Engine:
         if before and before != now:
             self.emit("question_effective_class", id=question.id, prior=before, effective=now, round=round_)
 
-    # -- gap ladder -----------------------------------------------------
-
-    async def _gap_ladder(self, round_: int, rejected: list[str], *, mechanical: bool) -> None:
-        pending = {}
+    async def _gap_ladder(self, round_: int, rejected: list[str]) -> None:
+        """Ask each seat for what it owes until its cause's budget runs out, then record the rest as declined."""
+        pending: dict[str, tuple[list[str], str]] = {}
         for agent in self.docket.roster:
-            missing = gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
-            if gap_rules.missing_backing(self.docket, agent):
-                missing = missing + ["backing"]
+            missing = self._still_missing(agent)
             if missing:
-                cause = (
-                    gap_rules.MECHANICAL
-                    if (agent in rejected or mechanical or _partial(self.docket, agent, round_))
-                    else gap_rules.DELIBERATE
-                )
+                cause = gap_rules.MECHANICAL if agent in rejected or _partial(self.docket, agent, round_) else gap_rules.DELIBERATE
                 pending[agent] = (missing, cause)
-        for _ in range(gap_rules.LADDER_CEILING):
+        for _ in range(max(gap_rules.CEILING.values())):
             if not pending:
                 return
             batch, plan = [], {}
-            for agent, (missing, cause) in list(pending.items()):
-                groups = gap_rules.ladder_plan(
-                    missing=missing, missing_backing="backing" in missing, cause=cause, asks_used=self.asks_used.get(agent, 0)
-                )
+            for agent, (missing, cause) in pending.items():
+                groups = gap_rules.ladder_plan(missing=missing, cause=cause, asks_used=self.asks_used.get(agent, 0))
                 if not groups:
-                    self._decline(agent, missing, round_)
-                    del pending[agent]
-                    continue
+                    continue  # out of budget: declined with the rest below
                 chunk = groups[0]
                 plan[agent] = chunk
                 batch.append(
@@ -542,24 +500,35 @@ class Engine:
                     )
                 )
             if not batch:
-                return
+                break
             results = await self.port.ask_seats(batch, round_=round_, phase="gap")
-            for agent, (missing, cause) in list(pending.items()):
-                chunk = plan.get(agent) or []
+            for agent in plan:
+                cause = pending[agent][1]
                 result = results.get(agent) or RawAsk(failure="no answer")
                 if result.failure:
                     raise Abort(result.failure, member=agent, round_=round_)
                 self.asks_used[agent] = self.asks_used.get(agent, 0) + 1
-                still = self._apply_gap(agent, chunk, result, round_)
-                if still:
-                    # A deliberate refusal is answered with one ask, not four.
-                    pending[agent] = (still, gap_rules.DELIBERATE)
-                else:
+                landed = self._apply_gap(agent, plan[agent], result, round_)
+                still = self._still_missing(agent)
+                if not still:
                     del pending[agent]
+                else:
+                    # an answer that landed, or one that never parsed, is a seat still trying: its cause holds
+                    pending[agent] = (still, cause if landed or result.rejected else gap_rules.DELIBERATE)
+        for agent, (missing, _cause) in pending.items():
+            self._decline(agent, missing, round_)
 
-    def _apply_gap(self, agent: str, chunk: list[str], result: RawAsk, round_: int) -> list[str]:
+    def _still_missing(self, agent: str) -> list[str]:
+        """What this seat owes: no stance on an item it was shown, and in plan mode no backing."""
+        missing = gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
+        if gap_rules.missing_backing(self.docket, agent):
+            missing.append("backing")
+        return missing
+
+    def _apply_gap(self, agent: str, chunk: list[str], result: RawAsk, round_: int) -> int:
+        """Record what the gap answer said, and return how much of it landed."""
         if result.rejected:
-            return list(chunk)
+            return 0
         data = parse_verdict(
             result.text or "",
             mode=self.docket.mode,
@@ -568,6 +537,7 @@ class Engine:
             closed_items={i for i in self.docket.items if self.docket.items[i].closed},
         ).data
         asked_items = [c for c in chunk if c != "backing"]
+        landed = 0
         for position in data.get("positions") or []:
             if position["item"] not in asked_items:
                 continue
@@ -579,6 +549,7 @@ class Engine:
                 evidence=position.get("evidence", ""),
                 round_=round_,
             )
+            landed += 1
             # A gap answer may withdraw a sign-off, never re-grant it.
             if self.docket.signoffs.get(agent) == round_ and position["item"] in self.shown.get(agent, []):
                 del self.docket.signoffs[agent]
@@ -587,12 +558,8 @@ class Engine:
             token = data.get("backing")
             if token:
                 self.docket.backing[agent] = token
-        still = [
-            entry
-            for entry in chunk
-            if entry == "backing" and not self.docket.backing.get(agent) or entry != "backing" and self.docket.stance(entry, agent) is None
-        ]
-        return still
+                landed += 1
+        return landed
 
     def _decline(self, agent: str, missing: list[str], round_: int) -> None:
         items = [entry for entry in missing if entry != "backing"]
@@ -601,8 +568,6 @@ class Engine:
         if "backing" in missing:
             self.docket.backing[agent] = DECLINED
         self.emit("gap_declined", member=agent, round=round_, items=missing)
-
-    # -- challenge / defense ------------------------------------------
 
     async def _challenge_pass(self, round_: int) -> None:
         for (item_id, asker), escalation in list(self.docket.escalations.items()):
@@ -622,9 +587,7 @@ class Engine:
             if defended is None:
                 continue
             if escalation.state != STANDING:
-                # The defense *restanced* the item, so the escalation was already withdrawn.  Nothing is
-                # left to defend or demote: overwriting `withdrawn` with `demoted` would report a seat
-                # that changed its mind as one that failed to answer, and would bar it from re-escalating.
+                # the defense restanced the item: the escalation is withdrawn, not demoted
                 continue
             escalation.defense, escalation.defended_round = defended, round_
             question = self.docket.questions.get(escalation.question_id)
@@ -662,9 +625,6 @@ class Engine:
             )
         for entry in data.get("human_input") or []:
             if entry.get("item") == item_id and entry.get("question"):
-                # A defense is a verdict like any other, so the menu the seat offered rides with it — the schema asks for one, and this is
-                # the ask where a seat most wants to offer it.  It is also the ask that *invites* refreshed question text, so it is where
-                # forking bites: the refreshed wording updates the escalation's own question instead of opening a second, bare one.
                 question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
                 if escalation is not None:
@@ -677,12 +637,10 @@ class Engine:
             return ""
         return (note + (" | " + evidence if evidence else "")).strip()
 
-    # -- merge passes ---------------------------------------------------------
-
     async def _merge_new_items(self, round_: int) -> None:
         fresh = [i for i in self.docket.order if not self.docket.items[i].closed and self.docket.items[i].opened_round == round_]
         if not fresh:
-            return  # the pass runs only in rounds where new items arrived
+            return
         await self._merge_pass(round_=round_, ids=fresh)
 
     async def _merge_pass(self, round_: int, ids: list[str]) -> None:
@@ -736,8 +694,6 @@ class Engine:
                     del self.docket.escalations[escalation_key]
         return len(usable), ""
 
-    # -- summary and termination ----------------------------------------------
-
     def _summarize(self, round_: int) -> None:
         states = {i: derive(self.docket, i) for i in self.docket.order if not self.docket.items[i].closed}
         counts: dict[str, int] = {}
@@ -760,8 +716,6 @@ class Engine:
 
     def emit_note(self, text: str) -> None:
         self.emit("console_note", text=text)
-
-    # -- the whole run ---------------------------------------------------------
 
     async def run(self) -> str:
         await self.phase0()
@@ -789,8 +743,6 @@ class Engine:
         if outcome is not None:
             return outcome
         if self.checkpoint_moved:
-            # an answer buys a round — unconditionally, ahead of the round limit, and as a full round.  Re-evaluating
-            # here would let the answer itself settle the run and throw away the round it paid for.
             self._ceiling = max(self._ceiling, round_ + 1)
             self.previous_signature = signature(self.docket)
             self.checkpoint_moved = False
@@ -804,9 +756,6 @@ class Engine:
             self.emit("termination", outcome=STALEMATE, reason="two consecutive rounds with no movement", round=round_)
             return STALEMATE
         if round_ >= self._ceiling:
-            # This is the only exit that ends a run with a question unasked, and the report has to say so rather than
-            # print a question that reads as merely deferred.  Marked here, at the exit, and nowhere earlier: a
-            # mid-run checkpoint that does not wait for a deferred question may still be followed by one that does.
             unasked = self._mark_unasked()
             self.emit("termination", outcome=ROUND_LIMIT, reason=f"round limit ({self._ceiling}) reached", round=round_, unasked=unasked)
             return ROUND_LIMIT
@@ -827,15 +776,11 @@ class Engine:
         from .escalations import effective_class
         from .termination import unsettled_questions
 
-        # The human checkpoint's ask set is the whole unsettled set — a deferred question is still *in* the ask set and is
-        # waited for at the terminal checkpoint.  What decides a wait is each question's effective class, not membership.
         ask = unsettled_questions(self.docket)
         listing = ask
         if not listing and not ask:
             self.emit("human_checkpoint", round=round_, ask_set=[], waited=False, answered=0, skipped=0, terminal=terminal)
             return None
-        # Only an outcome the human can still change makes the run wait.  The
-        # round-limit exit is the one exempt — there the questions print `unasked`.
         at_round_limit = round_ >= self._ceiling and provisional == GO and not stale
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
         waiting = bool(ask) and (terminal or blocking) and not at_round_limit
@@ -849,11 +794,6 @@ class Engine:
             skipped=len(outcome.skipped),
             terminal=terminal,
         )
-        # Every selection is resolved against the menu it was chosen from, before any answer lands on the docket.  A number the menu never
-        # held was never shown, so it names nothing: that is a bug in the port and the run says which, but it does not end the run — the
-        # answer arrived as the human's own line and keeps its authority, and only the provenance is dropped (`answer_option` 0 says so).
-        # The last check is what makes the record more than plausible: the numbered line has to *be* the answer, so a menu that moved
-        # between the console line and here cannot silently credit the human with choosing a line they never read.
         selections: dict[str, int] = {}
         for qid, number in outcome.answer_options.items():
             question = self.docket.questions.get(qid)
@@ -895,9 +835,6 @@ class Engine:
             question.answer, question.answer_round = answer, round_
             number = selections.get(qid) or 0
             if number:
-                # The Checkpoint resolved this index against this menu, the run is parked while the human answers so
-                # nothing files a question in between, and the check above proved line `number` is this answer — so this
-                # names the very line the human was shown.
                 question.answer_option = number
                 question.answer_option_text = question.options[number - 1]
             self._retire_covered(question, round_, answered=True)
@@ -916,9 +853,6 @@ class Engine:
             self.emit("answer_buys_a_round", round=round_ + 1, answered=len(outcome.answers))
             return None
         if terminal and provisional != GO:
-            # The outcome is an event wherever it is decided.  A checkpoint that ends the run (every
-            # question declined, an outcome already waiting) is the common way `needs_human` happens,
-            # and a run whose events stop at `human_checkpoint` reads as though it never terminated.
             self.emit("termination", outcome=provisional, reason="the checkpoint closed the run", round=round_)
             return provisional
         return None
@@ -933,21 +867,19 @@ class Engine:
             self.emit("escalation_retired", item=item_id, asker=asker, question=question.id, round=round_, answered=answered)
 
 
-#: How many rounds the same camps may stand before the split goes to the human whatever else the council is doing.
+#: rounds the same camps may stand before the split goes to the human
 _SPLIT_ROUNDS = 3
 
-#: How many of a plan's stages reach the human's menu, where the choice is made.
+#: of a plan's stages, how many reach the human's menu
 _MENU_STAGES = 3
 
 
 def _one_line(text: str, width: int = 90) -> str:
-    """The first line of a plan, short enough for a menu the human reads top to bottom."""
     line = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
     return line if len(line) <= width else line[: width - 1] + "…"
 
 
 def _plan_text(artifact: dict) -> str:
-    """What the plan says, then the stages it is made of — the chair words the split from both."""
     text = (artifact.get("text") or "").strip()
     stages = [f"- stage: {state}" for state in _stage_states(artifact)]
     return "\n".join(([text] if text else []) + stages)

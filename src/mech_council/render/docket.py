@@ -117,9 +117,7 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
 
 
 def _ask_sections(docket: Docket) -> tuple[list[Question], list[Question]]:
-    """The open asks and the human's answered ones, kept apart: an answered ask is no longer a question, and an answer the seats
-    never read is a decision they did not get.
-    """
+    """The open asks and the human's answered ones, kept apart."""
     from ..deliberation.termination import unsettled_questions
 
     answered = [q for q in (docket.questions[i] for i in docket.question_order) if q.state == ANSWERED and q.answer]

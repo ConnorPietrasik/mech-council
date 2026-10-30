@@ -62,14 +62,3 @@ def test_a_real_council_reviews_the_toy_project_and_exits_zero(tmp_path):
         assert record["namespaces"], f"{base} recorded no namespace"
         assert record["prompts"] >= 1, f"{base} spent no prompts"
     assert manifest["survivor_pids"] == [], "a real run left a survivor behind"
-
-
-def test_the_smoke_needs_the_nested_flag_when_it_runs_inside_an_agent():
-    """The smoke test's own method claim: without `--allow-nested` the nested guard refuses, and says so."""
-    marker = {"COUNCIL_RUN_DIR": "/tmp/not-a-real-run-dir", "COUNCIL_RUN_PATH": "/tmp/not-a-real-run-dir"}
-    env = no_user_config(**marker, COUNCIL_RUNS_DIR="/tmp/council-smoke-guard")
-    result = _run(["review", "--project", TOY], cwd=TOY, env=env, timeout=120)
-    # Well-formed flags refused at startup: a setup failure (1), not a usage error (2).
-    assert result.returncode == 1, result.stderr[-400:]
-    assert "--allow-nested" in result.stderr, "the refusal must name the way out"
-    assert not os.path.exists("/tmp/council-smoke-guard"), "a refusal creates nothing"

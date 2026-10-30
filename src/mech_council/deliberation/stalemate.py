@@ -32,11 +32,10 @@ def signature(docket: Docket) -> tuple:
     )
     answered_qa = sum(1 for qid in docket.qa_order if docket.qa[qid].answer)
     answered_human = sum(1 for qid in docket.question_order if docket.questions[qid].state == ANSWERED)
-    # Who signed, not when: a seat restates its sign-off every round, so a round number would hide every stale round.
+    # Who signed, not when: a seat restates its sign-off every round.
     parts = [tuple(items), tuple(sorted(docket.signoffs)), escalations, answered_qa, answered_human]
     if docket.mode == "plan":
         parts.append(tuple(sorted(docket.backing.items())))
-        # A plan redrawn is the council still working, and the split ask reads this same answer to call a round idle.
         parts.append(sum(len(approach.revisions) for approach in docket.approaches.values()))
     return tuple(parts)
 

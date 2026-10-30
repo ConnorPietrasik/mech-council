@@ -13,7 +13,7 @@ def objections(docket: Docket, item_id: str) -> list[Stance]:
 
 def derive(docket: Docket, item_id: str) -> str:
     item = docket.items[item_id]
-    if item.closed:  # closure is stored, never re-derived
+    if item.closed:
         return item.disposition
     if docket.standing_escalations(item_id):
         return HUMAN

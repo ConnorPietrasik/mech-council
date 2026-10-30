@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-# Prose every mode's chair shares: the merge discipline and the watchdog's brief.  What differs by
-# mode lives with the mode, in `review.py` and `plan.py`.
-
 MERGE = """\
 # Deduplicate, do not investigate
 
@@ -29,8 +26,6 @@ only a seat that is clearly stuck. **If unsure, keep.**
 Echo each seat's ID exactly as given (`AgentN`) and answer with one decision per seat.
 """
 
-#: Both modes deduplicate by the rules above, so one schema serves both; `merge_schema` stamps `{id}`
-#: with the ID prefix that mode's docket hands out.
 MERGE_SCHEMA = """\
 ```json
 {"groups": [{"canonical": "{id}1", "duplicates": ["{id}4", "{id}7"]}]}

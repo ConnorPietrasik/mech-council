@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from .state import Docket
 
-LADDER_CEILING = 4  # a ceiling for the seat-round, never per cause
+LADDER_CEILING = 4
 MECHANICAL = "mechanical"
 DELIBERATE = "deliberate"
 
-#: The gap ladder's cause table: the cause sets the length.
+#: asks a seat gets in one seat-round: the cause sets the length
 CEILING = {MECHANICAL: LADDER_CEILING, DELIBERATE: 1}
 
 
@@ -29,11 +29,11 @@ def route(cause: str) -> str:
     return MECHANICAL if cause == MECHANICAL else DELIBERATE
 
 
-def ladder_plan(*, missing: list[str], missing_backing: bool, cause: str, asks_used: int, chunk: int = 12) -> list[list[str]]:
-    pending = list(missing) + (["backing"] if missing_backing else [])
+def ladder_plan(*, missing: list[str], cause: str, asks_used: int, chunk: int = 12) -> list[list[str]]:
+    """The chunks the asks this seat has left cover, `chunk` items each. `missing` carries the `backing` pseudo-item."""
     budget = max(0, CEILING[route(cause)] - asks_used)
-    if not pending or budget <= 0:
+    if not missing or budget <= 0:
         return []
     chunk = max(1, chunk)
-    groups = [pending[i : i + chunk] for i in range(0, len(pending), chunk)]
+    groups = [missing[i : i + chunk] for i in range(0, len(missing), chunk)]
     return groups[:budget]

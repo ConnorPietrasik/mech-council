@@ -78,12 +78,8 @@ def errored(**extra) -> str:
 
 
 def test_an_unusable_seat_leaves_only_the_minimal_report_and_a_finalized_manifest(cli, project):
-    """The minimal-artifacts rule, in the direction that catches an over-eager exit path.
-
-    One `errored()` run carries the whole unusable-member contract, so it asserts all of it: it
-    exits one naming the member and pi's own message, it spends exactly one prompt and never
-    reaches the repair path or a deliberation round, and it leaves three files and a finalized
-    manifest behind. Three separate runs of this same scenario killed the same mutants.
+    """An `errored()` run: exits one naming the member, exactly one prompt spent, no repair and no
+    round, and three files plus a finalized manifest.
     """
     result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
     assert result.returncode == 1

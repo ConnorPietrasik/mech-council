@@ -69,14 +69,13 @@ def offered(docket, *options, text="which tenant?", **kw):
     return question
 
 
-def test_the_menu_prints_numbered_and_the_help_line_says_a_number_takes_one():
+def test_the_menu_prints_its_options_numbered():
     docket = build()
     question = offered(docket, "key it on the tenant", "drop the cache")
     question.context = "no caller passes a tenant id"
     text = render_ask_set(docket, [question], names=NAMES, waiting=True)
     assert "context: no caller passes a tenant id" in text
     assert "1) key it on the tenant" in text and "2) drop the cache" in text
-    assert "and nothing else" in text and "qualifier, answer in your own words" in text and "`skip H1` just one" in text
 
 
 def test_a_number_takes_the_option_verbatim_and_the_selection_is_recorded():

@@ -15,13 +15,13 @@ CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs
 
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
-#: A `backing` naming a merge one seat wrote down, by the label it spelled out: `merged: <label>`.
+#: a `backing` naming a merge one seat wrote down: `merged: <label>`
 MERGED = "merged:"
 
-#: The termination order's "keep going" is not an outcome, so it needs its own literal.
+#: the termination order's "keep going", which is not an outcome
 GO = "go"
 
-#: The chair has a protocol presence but no roster ID: this is the only label it is ever addressed by, and it is never one of `AgentN`.
+#: the chair's protocol label; never one of `AgentN`
 CHAIR_ID = "chair"
 
 
@@ -35,7 +35,7 @@ class Stance:
     note: str = ""
     evidence: str = ""
     round: int = 0
-    declined: bool = False  # the record the *run* wrote for a survived gap
+    declined: bool = False  # written by the run for a survived gap
 
     @property
     def reasoned(self) -> bool:
@@ -82,9 +82,7 @@ class Question:
     id: str
     text: str
     context: str = ""
-    # The menu, with provenance: option key (the question's own dedup key) → (wording, the asker that offered it).
-    # An option is one seat's candidate, so provenance is what lets *that seat* retire it when it revises its own
-    # answer — a flat list cannot tell "nobody offers this any more" from "somebody else still does".
+    # option key (the question's dedup key) → (wording, the asker that offered it)
     menu: dict[str, tuple[str, str]] = field(default_factory=dict)
     item_id: str | None = None
     askers: list[str] = field(default_factory=list)
@@ -97,8 +95,8 @@ class Question:
     answer: str = ""
     answer_round: int = 0
     answer_option: int = 0  # the number the human typed to take an offered option; 0 means their own words
-    answer_option_text: str = ""  # that option verbatim, so a terse `2` in the transcript proves what it meant
-    recommendation: str = ""  # an `explain` reply: advice, never authority
+    answer_option_text: str = ""  # that option verbatim
+    recommendation: str = ""  # an `explain` reply
     recommendation_round: int = 0
     markers: list[str] = field(default_factory=list)  # undefended / skipped / unasked …
 
@@ -140,7 +138,7 @@ class Approach:
 class RoundRecord:
     round: int
     summary: str = ""
-    #: (protocol id, what that seat did); the renderers print the name.
+    #: (protocol id, what that seat did)
     lines: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -163,7 +161,7 @@ class Docket:
     backing: dict[str, str] = field(default_factory=dict)  # plan
     round: int = 0
     rounds: list[RoundRecord] = field(default_factory=list)
-    phase0_counts: dict[str, int] = field(default_factory=dict)  # the report's roster column
+    phase0_counts: dict[str, int] = field(default_factory=dict)
     chair_name: str = "Chair"
     outcome: str | None = None
     next_question: int = 1
@@ -200,9 +198,7 @@ class Docket:
         return record.stance
 
     def effective_stance(self, item_id: str, agent: str) -> str | None:
-        """A `declined` record and a retired or demoted asker are abstain-equivalent, not absent: the seat spoke, and it has no
-        backing to give.  `unseen` is for a seat with no record at all.
-        """
+        """A declined record and a retired or demoted asker count as abstain, not absent."""
         record = self.stance(item_id, agent)
         if record is None:
             return None
@@ -225,9 +221,7 @@ class Docket:
         return tuple(sorted(named))
 
     def camps(self) -> tuple[tuple[str, ...], ...]:
-        """The seats grouped by the direction they name, whatever that direction is called: re-stamping a merge under a new
-        label moves no seat.
-        """
+        """The seats grouped by the direction they name."""
         groups: dict[str, list[str]] = {}
         for agent in self.roster:
             token = self.backing.get(agent)

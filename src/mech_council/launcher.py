@@ -30,7 +30,6 @@ def setup_seat_main(argv: list[str]) -> int:
     try:
         namespace = memberns.setup_member_namespace(project=project, runs_dir=runs_root, slot_dir=slot_dir)
     except memberns.SetupFailure as failure:
-        # The ns report: the failing syscall and its errno, and this member never execs.
         _report(f"{NS_REPORT_FAIL} {failure.syscall} {failure.err}")
         if os.environ.get("COUNCIL_LAUNCH_DEBUG"):
             import traceback
@@ -46,7 +45,7 @@ def setup_seat_main(argv: list[str]) -> int:
     except OSError as exc:
         sys.stderr.write(f"council launcher: execvp({program!r}): {exc}\n")
         return 1
-    return 1  # unreachable
+    return 1
 
 
 def _parse(argv: list[str]) -> tuple[str, list[str]]:

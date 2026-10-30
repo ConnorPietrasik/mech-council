@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-ABORT_TIMEOUT_S: float = 30  # the abort response's own bound, never a knob
+ABORT_TIMEOUT_S: float = 30
 
 
 class ProtocolError(Exception):
@@ -48,7 +48,7 @@ class Answer:
 
 
 class PiRpc:
-    """One long-lived `pi --mode rpc` child, read continuously: a pipe nobody drains fills, and pi stops mid-message."""
+    """One long-lived `pi --mode rpc` child, read continuously."""
 
     def __init__(
         self,
@@ -75,8 +75,6 @@ class PiRpc:
         self.alive = True
         self.unknown_command: str | None = None
         self._last_assistant: dict | None = None
-
-    # -- plumbing ------------------------------------------------------------
 
     def start(self) -> None:
         self._reader_task = asyncio.create_task(self._pump(), name=f"rpc-{self.label}")
@@ -105,7 +103,7 @@ class PiRpc:
                     self._dispatch(line)
         except asyncio.CancelledError, ChildGone:
             raise
-        except Exception:  # a broken pipe is a dead child, not a crash
+        except Exception:
             pass
         finally:
             self.alive = False
@@ -118,7 +116,7 @@ class PiRpc:
         try:
             record = json.loads(line.decode("utf-8", "replace"))
         except json.JSONDecodeError:
-            return  # stderr-shaped noise never reaches us anyway
+            return
         if not isinstance(record, dict):
             return
         self._note_activity(record)
@@ -201,20 +199,17 @@ class PiRpc:
         for future in list(self._pending.values()):
             if not future.done():
                 future.set_exception(error)
-                # A caller that already timed out or was aborted has no awaiter left; an unretrieved exception on
-                # such a future is printed by asyncio when the loop closes, which is noise that reads like a
-                # hidden bug.  Marking it seen changes nothing for a future someone *is* awaiting: it still raises.
+                # mark it seen: an awaiter may already be gone, and asyncio reports unretrieved exceptions on close
                 future.exception()
         self._pending.clear()
         if self._ask is not None and not self._ask.done():
             self._ask.set_exception(error)
-            # The waiting `ask()` learns of the death from its own command future, so this one is unawaited by design —
-            # mark it seen for the same reason as above.
+            # unawaited by design: mark it seen for the same reason
             self._ask.exception()
         self._ask = None
 
     def _cancel_dialog(self, record: dict) -> None:
-        """A project extension's dialog must not wedge the run: cancel it and move on."""
+        """Cancel an extension's UI request rather than wedging the run."""
         method = record.get("method")
         if method in ("notify", "setStatus", "setWidget", "setTitle", "set_editor_text"):
             return
@@ -223,7 +218,7 @@ class PiRpc:
     def _send(self, payload: dict) -> None:
         try:
             self._in.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
-        except Exception as exc:  # a dead child, said plainly
+        except Exception as exc:
             raise ChildGone(f"{self.label}: {exc}") from exc
 
     async def _request(self, command: dict, timeout: float | None = None) -> dict:
@@ -247,8 +242,6 @@ class PiRpc:
         finally:
             self._pending.pop(request_id, None)
 
-    # -- the commands -----------------------------------------------------
-
     async def get_state(self) -> dict:
         return await self._request({"type": "get_state"}, timeout=60)
 
@@ -265,7 +258,6 @@ class PiRpc:
         disposition = str(data.get("disposition") or "")
         answer.disposition = disposition
         if disposition == "handled":
-            # An extension consumed the prompt: no run starts, so nothing to wait for.
             self._release(answer, settled)
             raise ProtocolError(f"{self.label}: pi handled the prompt itself (disposition: handled) — no run started")
         if disposition == "queued":
@@ -309,7 +301,6 @@ class PiRpc:
 
 
 def _text_of(message: dict) -> str:
-    """The member's visible reply only: a thinking trace that drafts `{...}` would be parsed as its verdict."""
     content = message.get("content")
     if isinstance(content, str):
         return content

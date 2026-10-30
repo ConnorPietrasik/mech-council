@@ -21,7 +21,7 @@ class Flag:
     short: str | None = None
     takes_value: bool = True
     choices: tuple[str, ...] | None = None
-    note: str = ""  # the override note shown when a repeat changes a value
+    note: str = ""
 
 
 FLAGS: tuple[Flag, ...] = (
@@ -168,11 +168,9 @@ def resolve_project(raw: str | None) -> str:
 def _runs_root_from_env(environ: dict[str, str]) -> str:
     raw = environ.get("COUNCIL_RUNS_DIR") or ""
     if raw:
-        # Rule 1: a relative COUNCIL_RUNS_DIR is made absolute against the invoking cwd.
         return os.path.realpath(raw if os.path.isabs(raw) else os.path.join(environ.get("CWD", os.getcwd()), raw))
     cache = environ.get("XDG_CACHE_HOME") or ""
     if cache:
-        # Rule 2: a relative XDG_CACHE_HOME is invalid and ignored — XDG's own rule.
         if os.path.isabs(cache):
             return os.path.realpath(os.path.join(cache, "council", "runs"))
     home = environ.get("HOME") or ""
@@ -182,14 +180,10 @@ def _runs_root_from_env(environ: dict[str, str]) -> str:
 
 
 def _user_config_path(environ: dict[str, str]) -> str | None:
-    """The council.toml of the invoking user, or None when there is no home that could hold one.  The XDG
-    rules are the runs root's: a relative $COUNCIL_CONFIG counts from the invoking cwd, a relative
-    $XDG_CONFIG_HOME is invalid and ignored."""
     raw = environ.get("COUNCIL_CONFIG") or ""
     if raw:
         return os.path.realpath(raw if os.path.isabs(raw) else os.path.join(environ.get("CWD", os.getcwd()), raw))
     config_home = environ.get("XDG_CONFIG_HOME") or ""
-    # Ignored means ignored: an invalid $XDG_CONFIG_HOME leaves the default below in force, as it does for the runs root.
     if config_home and os.path.isabs(config_home):
         return os.path.realpath(os.path.join(config_home, "council", "council.toml"))
     home = environ.get("HOME") or ""
@@ -197,8 +191,6 @@ def _user_config_path(environ: dict[str, str]) -> str | None:
 
 
 def config_candidates(explicit: str | None, project: str, environ: dict[str, str]) -> tuple[list[str], str | None]:
-    """The files to read, lowest precedence first, and which of them is a project's own.  `--config` is the
-    whole config and nothing layers under it, so it is never the project's layer."""
     if explicit:
         return [os.path.realpath(explicit)], None
     paths = list(dict.fromkeys([path for path in (_user_config_path(environ), os.path.join(project, "council.toml")) if path]))
@@ -210,15 +202,12 @@ def is_within(path: str, parent: str) -> bool:
 
 
 def sandbox_supported() -> bool:
-    """Can members be sandboxed here at all?  Read live, so a patched platform is honored however late it is set."""
     from .sandbox import mount
 
     return mount.supported()
 
 
 def no_fork_refusal(plat: str | None = None) -> str | None:
-    """The refusal for a host that cannot fork: the orchestrator and every member are forked children, and
-    no flag replaces `os.fork` the way `--in-place` replaces namespaces."""
     if hasattr(os, "fork"):
         return None
     plat = sys.platform if plat is None else plat
@@ -226,7 +215,6 @@ def no_fork_refusal(plat: str | None = None) -> str | None:
 
 
 def downgrade_hint() -> str:
-    """Appended to a startup failure the council could have survived without its sandbox."""
     return " Pass --in-place to run the members in the project itself instead."
 
 
@@ -240,11 +228,6 @@ def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | Non
         f"refusing to start a nested council: COUNCIL_RUN_DIR={marker} is set{where}. "
         "Pass --allow-nested to convene inside a running council."
     )
-
-
-# --------------------------------------------------------------------------- CLI contract, exit codes `main()`, and the only place
-# exit codes are chosen.  `python -m mech_council` reaches it the same way the console script does, so there is one entry and one
-# contract. The internal `--setup-seat` dispatch comes first: the launcher form is this same entry point.
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -267,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as failure:
         sys.stderr.write(f"{failure}\n")
         return 1
-    for note in launch.notes:  # the override notes, each saying what it costs
+    for note in launch.notes:
         print(f"note: {note}")
     from . import supervisor
 

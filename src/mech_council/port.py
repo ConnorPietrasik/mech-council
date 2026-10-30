@@ -23,8 +23,6 @@ class Port:
     docket: Docket
     names: dict[str, str] = field(default_factory=dict)
 
-    # -- member asks -------------------------------------------------------------
-
     async def ask_seats(self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False) -> dict[str, RawAsk]:
         known = set(self.docket.items)
         closed = {i for i in known if self.docket.items[i].closed}
@@ -53,8 +51,6 @@ class Port:
             return RawAsk(text=str(failure), failure=str(failure))
         return _raw(outcome)
 
-    # -- chair asks (chairwork owns the lane rules) ---------------------------------
-
     async def chair_merge(self, listing: str, *, round_: int) -> dict:
         try:
             return await self.chair.merge(listing, round_=round_)
@@ -72,8 +68,6 @@ class Port:
             return await self.chair.direction(listing, round_=round_)
         except ChairUnusable as failure:
             raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
-
-    # -- the human ------------------------------------------------------------
 
     async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool):
         return await self.checkpoint_run.run(listing, ask_set=ask_set, round_=round_, terminal=terminal, waiting=waiting)

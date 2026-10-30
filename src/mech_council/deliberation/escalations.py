@@ -4,7 +4,7 @@ from .state import ASKED, CHAIR_ID, DISAGREE, NEEDS_HUMAN, RETIRED, STANDING, WI
 
 
 def effective_class(docket: Docket, question: Question) -> str:
-    # Nothing anybody *marks* stops the run: an escalation stops it when enough seats hold it, the split ask while the split stands.
+    # Nothing a seat marks stops the run: an escalation does it only when enough seats hold it.
     if question.direction_ask:
         return "blocking" if len(docket.directions()) > 1 else "deferred"
     if question.item_id is None:
@@ -27,28 +27,20 @@ def raise_question(
     for qid in docket.question_order:
         existing = docket.questions[qid]
         if existing.state != ASKED:
-            # Only an open question is the same question.  Filing a fresh ask onto an answered entry would take it out of
-            # the human's sight for good — `unsettled_questions` reads `ASKED` and nothing else, and `effective_class`
-            # judges a question by the item it carries, which is the *old* ask's item — so the run would close `consensus`
-            # over an escalation it never put to anybody.  The cost is a redundant question, and that is the cheaper error:
-            # the human skips one in a keystroke, and no keystroke recovers a decision never put to them.
+            # Only an open question is the same question: filing onto an answered entry would hide the new ask.
             continue
         if existing.key == normalize_text(text):
             offer_options(existing, asker, options, replace=asker in existing.askers)
             if item_id is not None and existing.item_id is None:
-                # Naming an item is the stronger act over the same words, and adoption is one-way: a seat re-sends the brief's one-line
-                # decision when it escalates, so a deduped entry left item-less would strand a unanimous escalation in `deferred`.
                 existing.item_id = item_id
                 if blocking:
                     existing.blocking_requested = True
             if asker in existing.askers:
-                # Any seat already on the entry may restate the text — a co-asker too, once it has joined.  Dedup keys on the normalized
-                # text, so a re-send differing only in case or spacing lands here and restates it: latest asker round wins, `H` id stable.
                 if existing.text != text:
                     existing.text, existing.updated_round = text, round_
                     return existing, True
                 return existing, False
-            existing.askers.append(asker)  # a co-asker never rewrites it
+            existing.askers.append(asker)
             if blocking:
                 existing.blocking_requested = True
             return existing, False
@@ -70,7 +62,7 @@ def raise_question(
 
 
 def raise_direction_ask(docket: Docket, *, text: str, context: str, options: list[str], round_: int) -> Question:
-    """The council's split, put to the human: raised once, never deduped onto a seat's ask, worded but not raised by the chair."""
+    """The council's split, put to the human once."""
     question = Question(
         id=f"H{docket.next_question}",
         text=text,
@@ -111,7 +103,7 @@ def refresh_question(
     if blocking and not question.blocking_requested:
         question.blocking_requested = True
         changed = True
-    menu_moved = offer_options(question, asker, options, replace=True)  # never short-circuited: a rephrasing still carries a menu
+    menu_moved = offer_options(question, asker, options, replace=True)
     return changed or menu_moved
 
 
@@ -121,7 +113,7 @@ def offer_options(question: Question, asker: str, options: list[str] | None, *, 
     if replace and offered:
         question.menu = {key: entry for key, entry in question.menu.items() if entry[1] != asker or key in offered}
     for key, entry in offered.items():
-        question.menu.setdefault(key, entry)  # first wording wins, whoever offered it
+        question.menu.setdefault(key, entry)
     return question.menu != before
 
 
@@ -150,8 +142,7 @@ def record_stance(
     if stance == NEEDS_HUMAN and (escalation is None or escalation.state != STANDING):
         new = Escalation(item_id=item_id, asker=agent, raised_round=round_)
         docket.escalations[(item_id, agent)] = new
-        # An escalation *is* a checkpoint question, phrased by the asker, so it reaches the checkpoint and the effective-blocking
-        # test.  Without this link a `needs_human` would stand forever unseen and consensus would be declared over it.
+        # An escalation raises its own question, so it reaches the checkpoint and the effective-blocking test.
         item = docket.items.get(item_id)
         text = (note or "").strip() or (f"{item.claim} — is a human decision needed here?" if item else ").")
         question, _ = raise_question(

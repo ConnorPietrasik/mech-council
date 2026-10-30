@@ -1,19 +1,15 @@
-"""`unshare(CLONE_NEWNS)` moves only the caller's own namespace, so the member's view is mounted by the launcher process, in
-itself, immediately before it execs — a helper could only ever mount a world pi does not enter.
-"""
-
 from __future__ import annotations
 
 import os
 
 from . import mount as m
 
-#: The scratch mount point inside the view, skipped by the journal pass too.
+#: the scratch mount point inside the view
 SCRATCH_NAME = ".council-scratch"
 
 
 class SetupFailure(Exception):
-    """A mount failed: the launcher reports the syscall + errno and never execs."""
+    """A mount failed: reported as syscall + errno."""
 
     def __init__(self, syscall: str, err: int) -> None:
         super().__init__(f"{syscall}: {os.strerror(err)}")
@@ -27,16 +23,16 @@ def setup_member_namespace(*, project: str, runs_dir: str, slot_dir: str, mask_t
     scratch = f"{slot_dir}/scratch"
     step = "unshare(CLONE_NEWNS)"
     try:
-        m.unshare(m.CLONE_NEWNS)  # the mount namespace
+        m.unshare(m.CLONE_NEWNS)
         step = f"mkdir {view}/{SCRATCH_NAME}"
-        os.makedirs(f"{view}/{SCRATCH_NAME}", exist_ok=True)  # on the VIEW path
+        os.makedirs(f"{view}/{SCRATCH_NAME}", exist_ok=True)
         step = f"mount --bind {scratch}"
-        m.rbind(scratch, f"{view}/{SCRATCH_NAME}")  # the member's TMPDIR
+        m.rbind(scratch, f"{view}/{SCRATCH_NAME}")
         step = f"mount --bind {view} {project}"
-        m.rbind(view, project)  # the view IS the path
+        m.rbind(view, project)  # the view is mounted at the project path
         step = f"mask {runs_dir}"
         for path, read_only in ((f"{runs_dir}/sandbox", True), (runs_dir, True)):
-            m.tmpfs(path, size_mib=m.MASK_MIB, read_only=read_only)  # the run's caps
+            m.tmpfs(path, size_mib=m.MASK_MIB, read_only=read_only)
         if mask_tmp is None:
             mask_tmp = not (_under(project, "/tmp") or _under(runs_dir, "/tmp"))
         step = "mask /tmp"

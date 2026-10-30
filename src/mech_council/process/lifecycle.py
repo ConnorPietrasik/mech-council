@@ -1,8 +1,3 @@
-"""Two classes of descendant escape every group kill — a tool shell pi never cleaned up, and any descendant that called
-setsid() and moved to a new pgid.  That is what the namespace-scoped sweep at the end of teardown is for; in place there is no
-namespace to sweep, so those two classes are the one thing this cannot promise to clean up.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,8 +34,8 @@ def send(pgid: int, sig: int, *, own_pgid: int) -> bool:
 
 
 async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
-    """Close stdin → group SIGTERM → group SIGKILL.  Closing stdin is what starts pi's own shutdown, the only thing that
-    reaches a tool shell pi detached into its own process group; SIGKILL-first is the bug that leaves them running.
+    """Close stdin, then group SIGTERM, then group SIGKILL.  Closing stdin is what reaches a tool shell pi
+    detached into its own process group, so it comes first.
     """
     own_pgid = own_pgid if own_pgid is not None else os.getpgid(0)
     with contextlib.suppress(Exception):
@@ -66,8 +61,6 @@ async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
 
 
 def namespace_set(members: list[Member], *, own_namespace: int | None) -> set[int]:
-    """`own_namespace` is None in place, where the members share this namespace and it is therefore the one
-    scope the sweep must never be keyed on."""
     out: set[int] = set() if own_namespace is None else {own_namespace}
     for member in members:
         out.update(member.ns_records)
@@ -75,9 +68,8 @@ def namespace_set(members: list[Member], *, own_namespace: int | None) -> set[in
 
 
 def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None = None) -> SweepResult:
-    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created; where `/proc` is absent, nobody.  The comparison is
-    against `keep_fds`, never numbers read back from `/proc`: from outside a namespace the readback can print the right
-    inode for a namespace that is not the run's.
+    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created; where `/proc` is absent, nobody.
+    The comparison is against `keep_fds`, never an inode read back from `/proc`.
     """
     result = SweepResult()
     exclude = (exclude or set()) | {os.getpid()}
@@ -126,10 +118,9 @@ NO_SWEEP_LINE = "no namespace sweep: in place the members share this namespace, 
 
 
 def close_ns_fds(members: list[Member]) -> None:
-    """After the sweep: the held fd is the last handle on the run's namespaces once every member is gone."""
     for member in members:
         if member.ns_fd < 0:
-            continue  # in place, there was never an fd to hold
+            continue
         with contextlib.suppress(OSError):
             os.close(member.ns_fd)
 
@@ -149,8 +140,7 @@ async def dispose_all(
             send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
     await asyncio.sleep(0)
     namespaces = namespace_set(members, own_namespace=own_namespace)
-    # No namespace of its own means no sweep at all: the group kills above are the whole cleanup, and a
-    # sweep keyed on the namespace we share with the operator would reach far past this run.
+    # in place the members share this namespace, so there is nothing to sweep without reaching past the run
     result = sweep(namespaces, keep_fds=[member.ns_fd for member in members]) if namespaces else SweepResult()
     close_ns_fds(members)
     if on_line:

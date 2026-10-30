@@ -10,15 +10,13 @@ from .deliberation.state import Docket, Question
 _ANSWER = re.compile(r"^\s*(h\d+)\s*[:=]\s*(.*)$", re.DOTALL | re.IGNORECASE)
 _EXPLAIN = re.compile(r"^\s*(?:explain|ask)\s+(h\d+)\s*(?:[:=]\s*(.*))?$", re.DOTALL | re.IGNORECASE)
 _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
-#: `skip H1`, `skip h1 h2` — the whole line has to be ids, so `skip the cache one` cannot pass for a command.
+#: `skip H1`, `skip h1 h2`: the whole line has to be ids
 _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
-#: A line that opens like a command is a command that failed to parse, and gets the grammar said back to it.
+#: a line that opens like a command gets the grammar said back to it
 _COMMAND_HEAD = re.compile(r"^\s*(?:(?:skip|none)\b|(?:explain|ask)\s+h\d+)", re.IGNORECASE)
-#: `2` takes option 2, and nothing else does: a number with any word after it is the human's own answer.  A number is a selection only
-#: when the question offered that many — otherwise `H1: 30` is an answer of "30".
+#: a bare number takes that option, and only when the question offered that many
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
 
-#: What a line that opened like a command and did not parse is told instead of being taken for an answer.
 _GRAMMAR = (
     "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), and "
     "`explain H1: <question>` asks the seat that raised H1 — to answer in your own words, write `H1: <text>`"
@@ -35,9 +33,7 @@ class Line:
 def parse_line(text: str) -> Line:
     """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
 
-    A bare line answers the first still-unanswered question: a human mid-typing should not have to remember IDs, and a guessed
-    ID beats a dropped answer.  A line that opens like a command and does not parse gets the grammar said back instead, because
-    an answer the human never typed settles a question they were never asked.
+    A bare line answers the first still-unanswered question.
     """
     if not (text or "").strip():
         return Line("end")
@@ -56,9 +52,7 @@ def parse_line(text: str) -> Line:
 
 
 def _direction_line(option: str, docket: Docket, names: dict[str, str]) -> str:
-    """A direction menu line in the names the human knows.  It is stored led by the token the seats answer with, because taking
-    the line records those words verbatim as what the council plans against.
-    """
+    """A direction menu line in the names the human knows."""
     from .render.text import direction_label
 
     token = next((t for t in docket.directions() if option.startswith(f"{t}: ")), "")
@@ -68,9 +62,7 @@ def _direction_line(option: str, docket: Docket, names: dict[str, str]) -> str:
 
 
 def _spoken(question: Question, names: dict[str, str]) -> tuple[str, str]:
-    """The chair words the split from a listing headed by `AgentN`, so its sentence carries those ids; the ask set is the
-    human's screen, and a seat's docket keeps the ids it answers with.
-    """
+    """Protocol ids in model-written text → the names the human knows."""
     from .render.text import spoken
 
     if not question.direction_ask:
@@ -92,7 +84,6 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
         lines.append(f"    {text}")
         if context:
             lines.append(f"    context: {context}")
-        # Numbered because the cheap reply is typing a number; `1)` is the whole of it.
         for number, option in enumerate(question.options, start=1):
             shown = _direction_line(option, docket, names) if question.direction_ask else option
             lines.append(f"      {number}) {shown}")
@@ -132,9 +123,7 @@ class Checkpoint:
         if not listing and not ask_set:
             return result
         if not waiting:
-            # Print and keep going.  A checkpoint that does not wait has put nothing to the human, so it has
-            # nothing to decline: marking these skipped would turn the human checkpoint's `unasked` — the
-            # one way a question ends a run unanswered and unasked — into an answer the human never gave.
+            # print and keep going: nothing was put to the human here, so nothing is declined
             return result
         if not self.reader.interactive:
             self.console.say("stdin is not interactive: every question is declined for this run, and the report lists them")
@@ -165,8 +154,6 @@ class Checkpoint:
                     if one not in pending and one not in result.answers:
                         self.console.say(f"no open question {one}; the open ones are {', '.join(sorted(pending)) or '(none)'}")
                         continue
-                    # Last line wins, the rule the `answer` branch states with its consequence: a decline takes back an
-                    # answer given earlier at this checkpoint.
                     took_back = result.answers.pop(one, None) is not None
                     result.answer_options.pop(one, None)
                     skipped.add(one)
@@ -183,8 +170,6 @@ class Checkpoint:
                 if qid not in self.docket.questions:
                     self.console.say(f"no question {qid}; the open ones are {open_ids}")
                     continue
-                # The last line the human types about a question is their word on it: an answer takes back an earlier decline, exactly as a
-                # decline takes back an answer.
                 if qid not in pending and qid not in skipped and qid not in result.answers:
                     self.console.say(f"no open question {qid}; the open ones are {open_ids}")
                     continue
@@ -196,8 +181,6 @@ class Checkpoint:
                 if number:
                     result.answer_options[qid] = number
                 else:
-                    # A corrected answer drops the selection the first one took: `answer_option` names the line this
-                    # answer came from, and an answer in the human's own words came from none of them.
                     result.answer_options.pop(qid, None)
                 pending.discard(qid)
                 echoed = _direction_line(answer, self.docket, self.names) if number and target.direction_ask else answer

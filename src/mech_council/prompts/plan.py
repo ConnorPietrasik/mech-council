@@ -89,8 +89,6 @@ matches, not the sentence stating it.
   the other does not.
 """
 
-# The comparison pass is plan's own, so none of it is shared with `chair.py` the way the merge rules are.
-
 COMPARE = """\
 # Compare the plans, do not write one
 

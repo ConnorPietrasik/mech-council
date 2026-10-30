@@ -212,19 +212,16 @@ def schema_hint(mode: str, *, phase: str) -> str:
     if phase == "merge":
         return merge_schema(mode)
     if phase == "compare":
-        # Plan mode's pass: review has no plans to map.
         from . import plan as plan_text
 
         return plan_text.COMPARISON_SCHEMA
     if phase == "direction":
-        # Plan mode again: a split review council has no direction to choose.
         from . import plan as plan_text
 
         return plan_text.DIRECTION_SCHEMA
     from . import chair
 
-    # `digest` is what the watchdog calls its own phase; the shape it must repair to is the pass
-    # schema.  An unknown phase is a bug here, not a reason to crash a member's ask.
+    # an unknown phase is a bug here, not a reason to crash a member's ask
     return chair.WATCHDOG_SCHEMA
 
 

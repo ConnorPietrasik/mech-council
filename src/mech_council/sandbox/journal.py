@@ -125,9 +125,8 @@ def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
 
 
 def exists_only_in_uppers(relative: str, uppers: list[str], lower_fd: int) -> str | None:
-    """No other member can create a file in your view, so this is that member's own artifact, never independent confirmation."""
     if _exists_in_lower(lower_fd, relative):
         return None
     held = [upper for upper in uppers if upper and os.path.lexists(os.path.join(upper, relative))]
-    # Attribution needs uniqueness: with two uppers holding it, naming either is a guess, so the report marks the artifact without an owner.
+    # with two uppers holding it, naming either is a guess
     return held[0] if len(held) == 1 else None

@@ -56,12 +56,10 @@ def _try(func, *args) -> None:
 
 
 def no_user_config(**extra: str) -> dict[str, str]:
-    """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run.  A test that
-    wants a user layer writes one into `$XDG_CONFIG_HOME` it was given; a test that does not must not find
-    the one whoever runs the suite keeps in their home."""
+    """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run."""
     out = dict(os.environ, **extra)
     out.pop("COUNCIL_CONFIG", None)
-    out["XDG_CONFIG_HOME"] = os.path.join(FIXTURE_ROOT, "no-user-config")  # a directory nothing ever creates
+    out["XDG_CONFIG_HOME"] = os.path.join(FIXTURE_ROOT, "no-user-config")
     return out
 
 

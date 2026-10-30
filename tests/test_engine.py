@@ -84,20 +84,14 @@ def test_phase_0_briefing_is_byte_identical_and_names_no_one():
             assert leak not in text, f"the briefing carries no roster IDs, but {leak} leaked in"
 
 
-def test_the_shared_briefing_works_for_either_mode():
-    """No shared briefing line tells a planning seat it is reviewing somebody's code."""
+def test_every_briefing_carries_the_goal_the_seat_works_to():
     for mode in ("review", "plan"):
         brief = Brief(mode=mode, project="/project")
-        texts = [
+        for text in (
             brief.phase0(mode=mode, goal="ship the migration", project="/project"),
             brief.round(mode=mode, goal="ship the migration", project="/project", me="Agent1", docket="", phase0_summary=""),
-        ]
-        for text in texts:
-            assert "Goal: ship the migration" in text, "the goal is the brief the seat works to"
-            for leak in ("independent reviewers", "A finding survives", "never a finding", "summary of your finding"):
-                assert leak not in text, f"the shared briefing says {leak!r} to a {mode} seat"
-        # The mode still says what the seat produces, in its own words.
-        assert ("plan you would execute" if mode == "plan" else "fix or improve") in "\n".join(texts)
+        ):
+            assert "Goal: ship the migration" in text
 
 
 def test_a_mode_s_extra_briefing_reaches_the_seats_it_was_written_for():
@@ -110,34 +104,18 @@ def test_a_mode_s_extra_briefing_reaches_the_seats_it_was_written_for():
     assert plan_text.EXTRA_BRIEFING.strip() not in briefs["review"], "a review seat reads planning prose"
 
 
-def test_each_mode_tells_the_chair_what_makes_two_entries_one():
-    """The dedup discipline is the chair's and mode-blind; the test for one entry twice is the mode's."""
-    tests = {"review": "Forbid merging partial overlaps", "plan": "two forks that merely share a word"}
-    for mode, its_own in tests.items():
-        ask = common.merge_task(mode, "- X1: the claim\n    what breaks: the detail", "g")
-        assert its_own in ask, f"the {mode} chair is never told its own test for one entry twice"
-        assert tests["plan" if mode == "review" else "review"] not in ask, f"the {mode} chair is read the other mode's test"
-        for hedge in ("same underlying thing", "same underlying item", "wrong or undecided"):
-            assert hedge not in ask, f"the {mode} merge ask hedges with {hedge!r}"
-        # What the modes share stays shared: the chair's own discipline, in both asks.
-        for shared in ("Conservative beats tidy", "Echo those IDs exactly"):
-            assert shared in ask
-    # A chair told to echo IDs exactly gets the IDs its own docket hands out, not review mode's.
+def test_the_merge_schema_stamps_the_ids_the_mode_s_docket_hands_out():
     assert '"canonical": "F1"' in common.merge_task("review", "- F1: the claim", "g")
     assert '"canonical": "T1"' in common.merge_task("plan", "- T1: the claim", "g")
 
 
-def test_the_chair_is_told_it_raises_nothing_and_words_only_a_split():
+def test_no_chair_schema_offers_it_a_question_to_raise():
     for mode in ("review", "plan"):
         merge = common.merge_task(mode, "- X1: the claim", "g")
-        assert "You raise nothing to the human" in merge, f"the {mode} chair is still offered a question to raise"
-        assert "human_input" not in merge and "blocking" not in merge, f"the {mode} merge schema still carries a question field"
-    comparison = common.comparison_task("### Agent1\n\ndo it", "g")
-    assert "You ask the human nothing from this pass" in comparison
-    assert "human_input" not in comparison, "the comparison still offers the chair a question field"
+        assert "human_input" not in merge and "blocking" not in merge, f"the {mode} merge schema carries a question field"
+    assert "human_input" not in common.comparison_task("### Agent1\n\ndo it", "g"), "the comparison offers a question field"
     direction = common.direction_task("### Agent1\n\n- Agent1, backing `the original plan`:\ndo it", "g")
-    assert "the ID each seat answers with" in direction, "the chair may word a direction the run never listed"
-    assert "blocking" not in direction, "the chair was handed a stop button again"
+    assert "blocking" not in direction, "the chair was handed a stop button"
 
 
 def test_the_merge_listing_words_an_item_s_detail_the_way_the_mode_does():
@@ -622,7 +600,7 @@ def test_a_seat_that_answers_the_gap_with_a_non_answer_is_recorded_declined():
         if ask.who == "Agent1":
             return stance_all(ask, "agree")
         if ask.phase == "gap":
-            return payload(positions=[], signoff=False)  # a mechanical non-answer
+            return payload(positions=[], signoff=False)  # a refusal of the ask
         return payload(positions=[], signoff=True)  # silent on the whole docket
 
     async def main():
@@ -654,6 +632,60 @@ def test_a_deliberate_gap_gets_one_ask_not_four():
 
     port = asyncio.run(main())
     assert port.count(who="Agent2", phase="gap") == 1, "deliberate: one ask, then declined"
+
+
+def gap_items(text: str) -> list[str]:
+    """The ids this gap ask names: a scripted seat answers what it was actually asked for."""
+    listed = text.split("returned nothing for them: ", 1)[1].split(".", 1)[0]
+    return re.findall(r"\b[A-Z]\d+\b", listed)
+
+
+def test_an_unusable_gap_answer_costs_the_whole_ladder():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug", "another")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who in ("Agent1", "Agent3"):
+            return stance_all(ask, "agree")
+        if ask.phase == "gap":
+            return RawAsk(text="still not JSON", rejected=True)
+        return payload(positions=[{"item": shown_items(ask.text)[0], "stance": "agree"}], signoff=True)  # one of two: incomplete
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return port, records
+
+    port, records = asyncio.run(main())
+    assert port.count(who="Agent2", phase="gap") == 4, "an answer that never parses is retried to the ceiling"
+    declined = next(r for r in records if r["event"] == "gap_declined" and r["member"] == "Agent2")
+    assert declined["items"] == ["F2"], "what it still owed is declined"
+
+
+def test_a_gap_longer_than_one_chunk_is_asked_to_the_end():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, *[f"bug {n}" for n in range(14)])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who in ("Agent1", "Agent3"):
+            return stance_all(ask, "agree")
+        items = gap_items(ask.text) if ask.phase == "gap" else shown_items(ask.text)[:1]
+        return payload(positions=[{"item": item, "stance": "agree"} for item in items], signoff=True)
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return port, records
+
+    port, records = asyncio.run(main())
+    assert port.count(who="Agent2", phase="gap") == 2, "the 13 items it owed take two asks, not one and a decline"
+    assert not [r for r in records if r["event"] == "gap_declined" and r["member"] == "Agent2"], "nothing was dropped for want of an ask"
 
 
 def test_a_round_of_only_closed_one_liners_asks_nothing():

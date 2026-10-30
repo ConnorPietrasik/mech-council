@@ -12,11 +12,10 @@ from .members import Members
 from .pi_rpc import ABORT_TIMEOUT_S, Answer, ChildGone, ProtocolError
 from .prompts import common
 
-REPAIR_ASKS = 2  # the only repair count there is
+REPAIR_ASKS = 2
 
 
 def round_note(round_: int | None) -> str:
-    """A digest pass answers beside the deliberation, not inside a round, so it must not claim one."""
     return "" if round_ is None else f" (round {round_})"
 
 
@@ -43,10 +42,10 @@ class AskLost(Exception):
 @dataclass
 class Outcome:
     text: str = ""
-    failure: str | None = None  # this seat's ask failed terminally: a batch sets it, a single ask raises it instead
+    failure: str | None = None  # a batch sets it; a single ask raises instead
     data: object = None
     errors: list[str] = field(default_factory=list)
-    rejected: bool = False  # a message arrived and extraction refused it → a gap
+    rejected: bool = False  # extraction refused the message
     repairs: int = 0
     prompts: int = 0
     seconds: float = 0.0
@@ -63,13 +62,10 @@ class Lanes:
         self.console = console
         self.pool = asyncio.Semaphore(max(1, council.max_concurrency))
         self.chair_slot = asyncio.Semaphore(1)
-        #: label → file_base while an ask is in flight; the *activity* itself belongs to
-        #: the PiRpc that is reading the child, which is the only thing that sees events.
+        #: label → file_base while an ask is in flight
         self.in_flight: dict[str, str] = {}
         self.chair_busy = False
-        self.prompts: dict[str, int] = {}  # prompts spent per member, for run.json
-
-    # -- the two lanes ------------------------------------------------------------
+        self.prompts: dict[str, int] = {}  # prompts spent per member
 
     async def ask_agent(
         self, agent_id: str, message: str, *, round_: int, kind: str, parse_kw: dict, phase: str = "round", classify_unusable: bool = False
@@ -132,8 +128,6 @@ class Lanes:
     async def restart_member(self, file_base: str, *, why: str) -> None:
         await self.members.restart(file_base, why=why)
 
-    # -- the digest's rows --------------------------------------------------------
-
     def digest(self) -> list[dict]:
         from .render import preview
 
@@ -160,8 +154,6 @@ class Lanes:
     def has_in_flight(self) -> bool:
         return bool(self.in_flight)
 
-    # -- one mediated ask ---------------------------------------------------------
-
     async def _mediated(
         self,
         agent_id: str,
@@ -182,7 +174,6 @@ class Lanes:
         text = await self._prompt_with_restart(
             file_base, message, label=label, round_=round_, timeout=timeout, outcome=outcome, classify_unusable=classify_unusable
         )
-        # Every completed ask prints with its duration, so a slow seat is visible while the run is live rather than only in a post-mortem.
         self.console.say(f"{who}: {kind} answered in {time.monotonic() - started:.1f}s{round_note(round_)}")
         parsed = extract(kind, text, **parse_kw)
         while needs_repair(parsed) and outcome.repairs < REPAIR_ASKS:
@@ -203,7 +194,6 @@ class Lanes:
             parsed = extract(kind, text, **parse_kw)
         outcome.text = text
         if needs_repair(parsed):
-            # A message that still will not parse after the repairs is rejected, not retried, and the gap ladder gaps on it.
             outcome.errors = list(getattr(parsed, "errors", []) or []) or ["no JSON object in the answer"]
             outcome.rejected = True
             self.console.event(
@@ -238,7 +228,7 @@ class Lanes:
         for attempt in (0, 1):
             first_prompt = self.prompts.get(file_base, 0) == 0
             answer = None
-            outcome.prompts += 1  # a prompt that came back with nothing was spent
+            outcome.prompts += 1
             try:
                 answer = await self._prompt(file_base, message, timeout=timeout, label=label)
                 if answer.errored:
@@ -260,7 +250,7 @@ class Lanes:
                 raise AskLost(
                     who, spec.provider, spec.model, round_, f"{detail}; the restart failed too: {restart_error}"
                 ) from restart_error
-        raise AskLost(who, spec.provider, spec.model, round_, detail)  # unreachable
+        raise AskLost(who, spec.provider, spec.model, round_, detail)
 
     async def _prompt(self, file_base: str, message: str, *, timeout: float | None, label: str) -> Answer:
         member = self.members.members.get(file_base)
@@ -272,8 +262,6 @@ class Lanes:
         finally:
             self.in_flight.pop(label, None)
             self.prompts[file_base] = self.prompts.get(file_base, 0) + 1
-
-    # -- no un-awaited aborts -----------------------------------------------------
 
     async def abort_all(self) -> None:
         for member in list(self.members.members.values()):

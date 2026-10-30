@@ -541,8 +541,7 @@ def _alive(pid: int) -> bool:
 
 
 def test_a_second_overlay_on_one_slot_is_busy_and_the_idempotence_guard_sees_it(tree):
-    """One mount per slot, and `overlay()` is what holds that line: the kernel's exclusive-upperdir lock only bites when it
-    mounts with index=on, and Ubuntu ships index=off.  A restarted member keeps using the same upper."""
+    """A second overlay on one slot is refused, so a restarted member keeps using the same upper."""
 
     def plan(box, tell):
         slot = box.slot_dir("seat1-a")

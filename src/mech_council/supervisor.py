@@ -8,12 +8,8 @@ from .sandbox import mount
 
 
 def _write_map(pid: int) -> None:
-    """The row is `0 <uid> 1`, not `<uid> <uid> 1`, and that difference is not cosmetic: `<uid> <uid> 1` maps the caller's own
-    uid, so the child's numeric root owns nothing in the tree, and its *first* `mount(2)` — the private remount of `/` — is
-    `EPERM`.
-
-    The parent can still write it after the child unshared: `setgroups`/`uid_map`/`gid_map` are CAP_SETUID-gated writability
-    plus a capability check on the *writer*, and the parent never dropped anything.
+    """The row is `0 <uid> 1`, not `<uid> <uid> 1`: the latter maps the caller's own uid, so the child's
+    numeric root owns nothing in the tree and its first `mount(2)` is `EPERM`.
     """
     uid, gid = os.getuid(), os.getgid()
     with open(f"/proc/{pid}/setgroups", "w", encoding="utf-8") as handle:
@@ -45,7 +41,7 @@ def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
             os.close(ack_write)
             os.close(go_read)
             return 1
-    os.write(ack_write, b"r")  # "inside, waiting to be mapped" — in place, "running beside you"
+    os.write(ack_write, b"r")
     os.close(ack_write)
     released = os.read(go_read, 1)
     os.close(go_read)
@@ -59,8 +55,7 @@ def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
 
 
 def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: bool = False) -> int:
-    # A signal aimed at *this* pid would otherwise die right here, orphaning the
-    # orchestrator with its mounts.  The supervisor forwards and keeps waiting.
+    # forward signals rather than dying here and orphaning the orchestrator with its mounts
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda number, _frame: _relay(pid, number))
     if os.read(ack_read, 1) != b"r":
@@ -90,7 +85,7 @@ def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: 
             return 1
         break
     if os.WIFSIGNALED(status):
-        return 128 + os.WTERMSIG(status)  # 130 / 143 reach the shell unchanged
+        return 128 + os.WTERMSIG(status)
     return os.WEXITSTATUS(status)
 
 

@@ -1,9 +1,12 @@
 # mech-council
 
 ## Style
-- Docstrings and comments must be concise and only contain information that isn't easily found in the code.
-- Do not write defensive comments unless it is really needed.
-- Do not write regression tests for things that aren't very likely to be accidentally re-added
+- Docstrings and comments must be concise and actually helpful. No paraphrasing adjacent code, no rationale, no history.
+- Remove any prose you make redundant.
+
+## Tests
+- Only write regression tests for bugs a future edit is extremely likely to reintroduce. 
+- Tests assert behavior, not wording.
 
 ## Definition of Done
 - ruff, mypy, and pytest must pass.

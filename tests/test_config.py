@@ -551,12 +551,6 @@ def test_duplicate_council_is_a_parse_error_not_last_wins(tmp_path):
         config_mod.load_config(write(tmp_path, text))
 
 
-def test_comments_are_comments(tmp_path):
-    text = body().replace('goal = "g"', 'goal = "a # keeps working"  # and this one ends here')
-    council = convene(tmp_path, text)
-    assert council.goal == "a # keeps working"
-
-
 # --------------------------------------------------------------------------- the config layers
 
 

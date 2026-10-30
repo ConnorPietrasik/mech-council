@@ -56,7 +56,6 @@ class BaseAdapter:
     report_sections: tuple[str, ...] = ()
     synonyms: dict = field(default_factory=dict)
 
-    # Hooks are injected by the engine, never imported by the adapter: `modes/` stays data.
     def seed_sections(self) -> tuple[str, ...]:
         return self.report_sections
 

@@ -25,9 +25,7 @@ _AGENT_ID = re.compile(r"Agent\d+")
 
 
 def spoken(text: str, names: dict[str, str]) -> str:
-    """A model's sentence with names in place of the ids it was handed.  Only the human's screen gets this: a seat's docket
-    keeps the ids, because an id is the token a seat answers with and a name is not.
-    """
+    """A model's sentence with names in place of the ids it was handed; only the human's screen gets this."""
     return _AGENT_ID.sub(lambda found: names.get(found.group(), found.group()), text or "")
 
 

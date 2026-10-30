@@ -1,5 +1,3 @@
-"""Python exposes no `mount(2)`/`unshare(2)` binding, so this is the design's only `ctypes` module."""
-
 from __future__ import annotations
 
 import ctypes
@@ -18,10 +16,9 @@ MS_BIND = 1 << 12
 
 PR_SET_DUMPABLE = 4
 
-#: The mask tmpfs size, for every mask the member's namespace gets: a constant, never a knob.
 MASK_MIB = 1
-TERM_GRACE_S: float = 10  # a constant, never a knob
-DISPOSE_SWEEP_AFTER_S = 15  # a constant, never a knob
+TERM_GRACE_S: float = 10
+DISPOSE_SWEEP_AFTER_S = 15
 WATCHDOG_PASS_TIMEOUT_S = 120
 
 
@@ -31,12 +28,10 @@ class MountError(OSError):
         self.syscall = syscall
         self.err = err
 
-    def __str__(self) -> str:  # "mount('/' …): Operation not permitted"
+    def __str__(self) -> str:
         return f"{self.syscall}: {os.strerror(self.err)}"
 
 
-#: Loaded on first call, never at import: this module also carries the run's timing constants, and a host
-#: without `libc.so.6` still has to be able to read them.
 _handle: ctypes.CDLL | None = None
 
 
@@ -53,7 +48,6 @@ def _libc() -> ctypes.CDLL:
 
 
 def supported() -> bool:
-    """The only platform with the user and mount namespaces the sandbox is built from."""
     return sys.platform == "linux"
 
 
@@ -83,9 +77,7 @@ def tmpfs(target: str, *, size_mib: int, read_only: bool = False) -> None:
 
 
 def is_mounted(path: str) -> bool:
-    """The mountinfo line is `id parent id major:minor root opts - fstype source superopts`: the mount point is field 5, on the
-    *left* of the `-`, and the field after the `-` is the *fstype*.
-    """
+    """The mount point is mountinfo field 5, left of the `-` separator."""
     wanted = _mountinfo_escape(path)
     try:
         with open("/proc/self/mountinfo", encoding="utf-8") as handle:
@@ -110,14 +102,13 @@ def overlay(lower: str, root: str, view: str) -> None:
     for name in ("up", "work", "view"):
         os.makedirs(os.path.join(root, name), exist_ok=True)
     if is_mounted(view):
-        # A second overlay would shadow the upper the restarted member's own earlier writes sit in, and the kernel refuses one
-        # only when it mounts with index=on — Ubuntu ships index=off — so this guard is what keeps one mount per slot.
+        # the kernel only refuses a second overlay when it is mounted with index=on, which Ubuntu does not ship
         raise MountError(f"overlay({view!r} is already a mount point)", _errno.EBUSY)
     mount("overlay", view, "overlay", 0, f"lowerdir={lower},upperdir={root}/up,workdir={root}/work")
 
 
 def private_recursive(target: str = "/") -> None:
-    """No mount of ours may propagate back to the host."""
+    """No mount of ours propagates back to the host."""
     mount(None, target, None, MS_REC | MS_PRIVATE)
 
 

@@ -8,16 +8,16 @@ read the code, argue about it, and have to sign off; the chair merges duplicates
 plans, and watches for a seat that has stopped making progress. When the council is done
 you get a report with the findings.
 
----
-
 ## Requirements
 
 - **Python 3.14+**
 - **`pi`** on your `PATH`, or a `pi_cli` path in `council.toml`. Members are driven through
-  pi's RPC mode over pipes — one long-lived child per seat, JSONL in both directions.
+  pi's RPC mode over pipes — one long-lived child per member, the chair included, JSONL in both
+  directions.
 - **Linux with unprivileged user and mount namespaces**, to sandbox the members. Each member runs in its
   own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
-  `--privileged` or a seccomp profile that allows `unshare(2)`. `--in-place` is the default otherwise.
+  `--privileged` or a seccomp profile that allows `unshare(2)`. `--in-place` is the default otherwise;
+  a host that cannot fork at all is refused.
 
 ## Install
 
@@ -64,51 +64,49 @@ printed last after a blank line.
    two reporters.
 3. **Rounds.** Every seat is shown every open item and must take a stance — `agree`,
    `disagree`, `needs_human`, `abstain` — with evidence or a note. An item needs a majority
-   to be `agreed`; an objection with cited evidence reopens a settled one. A seat that stops answering gets asked, once, and
-   then its silence is recorded as a *declined* abstention.
+   to be `agreed`; an objection with cited evidence reopens a settled one. A seat that leaves an item
+   unanswered is re-asked — up to four times in the round when its reply was unusable or incomplete,
+   once when it simply skipped the item — and its silence is then recorded as a *declined* abstention.
 4. **You.** When a seat says `needs_human`, or a planning council will not converge on one
    direction, you see it at a checkpoint. Only a question that's effectively *blocking* — an
-   escalation a majority holds, or a direction split that held through a round nothing else moved
-   in (three rounds of the same camps, or the run's last round, at the latest) — makes the run
-   wait; deferred ones print and get asked when the run would otherwise end.
+   escalation a majority holds, or a direction split that will not resolve — makes the run wait;
+   deferred ones print and get asked when the run would otherwise end.
 5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached`.
 
-The chair never has a stance and never gets a roster ID, so it can't move the majority bar. It
-merges, compares, words the council's split for you, and judges the watchdog digest — that's all,
-and it can ask you nothing of its own: a question reaches you from a seat or from the split the
-seats themselves are holding.
+The chair never takes a stance and never gets a roster ID, so it can't move the majority bar. It
+merges, compares, words the council's split for you, and judges the watchdog digest — and it asks
+you nothing of its own: every question comes from a seat.
 
 ### At the checkpoint
 
 ```
 H1: keep it 30 days          # an answer is authoritative, and buys a round
-H1: 2                        # an option's number and nothing else takes it verbatim, in the asker's
-                             # own words; to take one with a qualifier, answer in your own words
+H1: 2                        # a bare number takes that option verbatim; to take it with a
+                             # qualifier, answer in your own words
 explain H2: what breaks?     # routes your question to the seat that asked
 skip                         # decline everything on the table
 skip H1 H2                   # decline these two and answer the rest
                              # a blank line ends the checkpoint
 ```
 
-The last line you type about a question is your word on it — answering a question you
-declined takes it back, and declining one you answered withdraws the answer.  An answer is not
-yours alone to remember: from the next round on, the docket every seat is shown prints it as
-authoritative.  Nothing but the seats' own stances settles the run, though — a council that
-keeps planning against your answer ends `stalemate` or out of rounds, and the report says so
-rather than printing a direction you never chose.
+The last line you type about a question is your word on it: answering one you declined takes it
+back, and declining one you answered withdraws the answer. From the next round on, the docket every
+seat is shown prints your answer as authoritative — but nothing settles the run but the seats'
+own stances, so a council that keeps planning against your answer ends `stalemate` or out of rounds,
+and the report says so.
 
 ## What you get
 
 | File | What's in it |
 |---|---|
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
-| `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and the sweep's survivors. |
+| `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question and whatever became of it: asker, effective class, answer or skip, and the escalations each one retired. |
+| `human_input.json` | Every question and whatever became of it: who asked, whether the run waited on it, and the answer or skip. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else
-`~/.cache/council/runs`, timestamped by project name.
+`~/.cache/council/runs`; each run is a `<timestamp>-<project>` directory inside it.
 
 ## Exit codes
 
@@ -127,41 +125,35 @@ the flags.
 
 ### Which files are read
 
-Two: `$COUNCIL_CONFIG`, else `$XDG_CONFIG_HOME/council/council.toml`, else
-`~/.config/council/council.toml` — and then `<project>/council.toml`. The project's file replaces any
+Two files: the user's — `$COUNCIL_CONFIG`, else `$XDG_CONFIG_HOME/council/council.toml`, else
+`~/.config/council/council.toml` — and `<project>/council.toml`. The project's file replaces any
 council of the same name and patches `[defaults]` key by key, and `extends` reaches a parent stated in
-either, so a repo keeps only its own diff:
+either, so a project's file can inherit the roster your own home file keeps
+([`extends`](#extends-one-roster-several-councils)).
 
-```toml
-[councils.review-staged]
-extends = "review"                             # the roster lives in the user's file
-goal = "Another agent staged these; did they do a good job?"
-```
-
-`--config` names the only file read; nothing layers under it. And a project's own file may not state a
-`pi_cli` living inside that project — the config a clone brings cannot name the executable every member
-runs — so that knob belongs in the user's file.
+`--config` names the only file read; nothing layers under it. A project's own file may not state a
+`pi_cli` living inside that project — put that knob in the user's file.
 
 | Knob | Default | Meaning |
 |---|---|---|
 | `mode` | `review` | `review`, or `plan` for a task plan instead of a findings report. |
-| `goal` | — | What the seats are briefed with. `--goal` overrides. |
-| `max_rounds` | `10` | Round limit. No cap is imposed on it. |
+| `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` council needs one. |
+| `max_rounds` | `10` | Round limit. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
 | `chair_timeout_sec` | `300` | Bound on a chair publication pass. |
-| `max_concurrency` | `4` | Seats asked at once. The chair has its own slot, so a digest never queues behind seat work. |
+| `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
-| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; nothing forces the sandbox on where the host has no namespaces. |
+| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on. |
 | `transcripts` | `off` | `off` or `full`. Full writes the verbatim protocol stream per member. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
-Seats and the chair also take `provider`, `model`, `persona`, and an unknown model warns
-and falls back rather than failing the run.
+Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi
+will not start a seat configured that way), and `persona`. An unknown model warns and falls back
+rather than failing the run.
 
 ### `extends`: one roster, several councils
 
-A council that only wants a different goal still has to name its seats and its chair, so it says
-`extends` instead and inherits them:
+A council that only wants a different goal says `extends` and inherits another's seats and chair:
 
 ```toml
 [councils.review]                    # a goal, three seats and a chair, stated once
@@ -206,9 +198,7 @@ persona = "Be conservative: merge only the same defect."   # the chair merges ke
 
 `[[agents]]` entries match inherited seats **by name**: a stated key replaces that key, an
 unmatched name joins the end of the roster, and `drop = true` retires a seat (a council still
-needs at least two after the drops). `[chair]` merges key by key — restating it wholesale is
-never required. Only the chain you convene is read, so a table elsewhere in the file can be
-half-written without costing you anything.
+needs at least two after the drops). `[chair]` merges key by key.
 
 A council whose name starts with `_` is a **template**: `extends` reaches it, `mech-council <name>`
 does not, and it is free to be a partial council — a roster with no chair, or a few knobs to pull
@@ -223,61 +213,44 @@ information as unreadable, and its run directory is masked. When the run ends, e
 namespace it created is swept — including tool shells a member detached into its own process
 group — and the survivors are named in `run.json` if any remain.
 
-**This is only to minimize agents confusing each other.** It is not recommended to run this outside of a VM (or at least a docker container mounted to only the project directory).
+The sandbox keeps members from confusing each other; it is not a cage for a hostile agent. Run it
+in a VM, or in a container mounted to the project directory alone.
 
 ### In place
 
 `--in-place`, or `in_place = true`, convenes the same council with nothing between the
 seats and the project. What changes:
 
-- Every seat works in the **same real tree**. A peer's half-finished edit is not a defect and not yours to
-  finish, and the briefings say so.
-- The exit **namespace sweep cannot run** — in place the members share this namespace, so only their own
-  process groups are signalled. A tool shell that moved to a new process group of its own can outlive the
-  run. `run.json` records `"namespace_sweep": "none (in place)"` so you know which cleanup did not happen.
+- Every seat works in the **same real tree**, and the briefings say a peer's half-finished edit is
+  not a defect and not yours to finish.
+- The **namespace sweep cannot run**: members share this namespace, so only their own process groups
+  are signalled, and a tool shell that moved to a process group of its own can outlive the run.
+  `run.json` records `"namespace_sweep": "none (in place)"`.
 
-## Tests
-
-```sh
-pytest tests -q              # offline: fake pi, real namespaces, real mounts
-pytest tests/test_sandbox.py -q -rs
-pytest tests -m slow         # spends tokens: one real pi review of testdata/toy-project
-```
-
-The offline suite drives real orchestrator, sandbox, RPC and dispose paths against a
-scripted fake pi. The `sandbox` family is the only one
-with a platform requirement: its fixture lower must sit on a plain filesystem (ext4, or a
-tmpfs such as a member's `$TMPDIR`). Point `COUNCIL_TEST_FS` at a plain directory to
-choose it explicitly. Everything else — `test_in_place.py` included — runs on any POSIX host
-that can fork, sandbox or not.
-
-## Lint and types
+## Development
 
 ```sh
 pip install -e ".[test,dev]"
-python -m ruff check .             # the lint bar
-python -m ruff format --check .    # the width it formats to: a check never contradicts it
-python -m mypy                     # the type bar, over src and tests
-pytest                             # the suite one section up
+pytest tests -q              # offline: fake pi, real namespaces, real mounts
+pytest tests/test_sandbox.py -q -rs
+pytest tests -m slow         # spends tokens: one real pi review of testdata/toy-project
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy               # over src and tests
 ```
 
-The lint set is chosen rather than defaulted: real defects (pyflakes, syntax errors, import placement, the
-`except`/`None` smells, invalid escapes), the house shape at the formatter's 140 columns,
-and four habits — sorted imports, no dead `noqa`, stated `subprocess` intent, and a handle
-either closed in place or declared long-lived. `testdata/toy-project` is excluded from both
-tools on purpose.
+The offline suite drives real orchestrator, sandbox, RPC and dispose paths against a scripted fake
+pi. The `sandbox` family is the only one with a platform requirement: its fixture lower must sit on
+a plain filesystem (ext4, or a tmpfs such as a member's `$TMPDIR`); point `COUNCIL_TEST_FS` at a
+plain directory to choose it explicitly. Everything else, `test_in_place.py` included, runs on any
+POSIX host that can fork.
 
-## CI
-
-GitHub Actions runs that bar on every push to `master` and on every pull request
-([`.github/workflows/ci.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/ci.yml)):
-ruff, mypy, the offline suite, and then the same suite again from an unpacked sdist.
-
-`pytest -m slow`, the one family that spends tokens, stays out of CI: it wants a real `pi` and a real budget.
-
-Tagging a release publishes it ([`publish.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/publish.yml)):
-the suite on the tagged commit, a build whose version has to match the tag, then the upload through PyPI's
-trusted publishing, so no token lives in this repository.
+GitHub Actions runs ruff, mypy and the offline suite on every push to `master` and every pull
+request ([`ci.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/ci.yml)),
+then runs the suite again from an unpacked sdist; `pytest -m slow` stays out of it. Tagging a
+release publishes it ([`publish.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/publish.yml)):
+the suite on the tagged commit, a build whose version has to match the tag, then the upload through
+PyPI's trusted publishing.
 
 ## License
 

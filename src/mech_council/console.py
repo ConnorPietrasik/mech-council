@@ -47,9 +47,7 @@ class Console:
 
 
 class Transcripts:
-    """The two sinks per member, closed only once nothing can still write into them.  Append mode, so a restart continues the
-    file rather than truncating the run's own record of it.
-    """
+    """The two sinks per member, in append mode so a restart continues the file rather than truncating it."""
 
     def __init__(self, run_dir: str, level: str) -> None:
         self.run_dir = run_dir
