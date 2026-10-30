@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import SETTLED, UNBACKED, effective_class, held_back, stop_holders
+from ..deliberation.notes import report_notes
 from ..deliberation.state import (
     ABSTAIN,
     AGREE,
@@ -12,6 +13,7 @@ from ..deliberation.state import (
     HUMAN,
     NEEDS_HUMAN,
     REJECTED,
+    RETRACTED,
     SKIPPED,
     STANDING,
     UNHEARD,
@@ -36,6 +38,7 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
     lines += _never_vetted(docket, buckets["unseen"], context)
     lines += _sandbox_writes(context)
     lines += _sandbox_limits(docket, context)
+    lines += _notes(docket, context)
     lines += _open_questions(docket, context)
     lines += _rounds(docket, context)
     lines += context.artifacts(run_dir)
@@ -238,6 +241,30 @@ def _sandbox_writes(context: ReportContext) -> list[str]:
             if paths:
                 out.append(f"  - {kind} ({len(paths)}): " + ", ".join(f"`{p}`" for p in paths))
     out.append("")
+    return out
+
+
+def _notes(docket: Docket, context: ReportContext) -> list[str]:
+    """The whole ledger, including what no checkpoint showed."""
+    notes = report_notes(docket)
+    out = [f"## Notes for the human ({len(notes)})", ""]
+    if not notes:
+        return out + ["Nothing the council wanted you to know without asking.", ""]
+    for note in notes:
+        out.append(f"### {note.id} · {'retracted' if note.state == RETRACTED else 'standing'} · {note.text}")
+        out.append(f"- from: {_names([note.by], context)}")
+        if note.item_id:
+            item = docket.items.get(note.item_id)
+            out.append(f"- about: **{note.item_id}** {item.claim}" if item is not None else f"- about: {note.item_id}")
+        if note.shown_round is None:
+            out.append("- report only: the run ended before showing it")
+        else:
+            out.append(f"- shown to you: round {note.shown_round}")
+        if note.state == RETRACTED:
+            out.append(f"- retracted in round {note.retracted_round}" + (f": {note.retract_reason}" if note.retract_reason else ""))
+            if note.shown_round is not None:
+                out.append("- **you were shown this before it was retracted**")
+        out.append("")
     return out
 
 

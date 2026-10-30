@@ -112,7 +112,7 @@ class ScriptPort:
 
     # -- the human --------------------------------------------------------------
 
-    async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool):
+    async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool, notes=()):
         self.checkpoints.append(
             {
                 "round": round_,
@@ -120,6 +120,7 @@ class ScriptPort:
                 "waiting": waiting,
                 "ask_set": [q.id for q in ask_set],
                 "listing": [q.id for q in listing],
+                "notes": [f"{note.id}:{kind}" for note, kind in notes],
             }
         )
         ids = [q.id for q in ask_set]

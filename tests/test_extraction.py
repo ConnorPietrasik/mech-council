@@ -231,6 +231,64 @@ def test_open_questions_read_whether_written_as_lines_or_as_objects():
     assert out.data["open_questions"] == ["which palette?", "who owns the key?"]
 
 
+def test_notes_read_whether_written_as_lines_or_objects_in_both_modes():
+    text = verdict(**positions(("F1", "agree")), notes=["retention is a contract", {"note": "the key lives in env", "item": "F1"}])
+    for mode in ("review", "plan"):
+        out = parse_verdict(text, mode=mode, me="Agent1", known_items=set(KNOWN))
+        assert out.data["notes"] == [
+            {"text": "retention is a contract", "item": None},
+            {"text": "the key lives in env", "item": "F1"},
+        ]
+
+
+def test_a_note_that_says_nothing_is_dropped_and_owes_no_repair():
+    out = parse(verdict(**positions(("F1", "agree")), notes=["", "   ", 7, {"item": "F1"}, {"note": "kept"}]))
+    assert out.data["notes"] == [{"text": "kept", "item": None}]
+    assert not out.errors and not out.invalid and not out.repaired
+
+
+def test_retract_note_names_the_note_ledger_and_normalizes_like_an_ask_id():
+    out = parse(verdict(**positions(("F1", "agree")), retract_note=["n1", "#N2", "  "]))
+    assert out.data["retract_note"] == [{"id": "N1", "reason": ""}, {"id": "N2", "reason": ""}]
+
+
+def test_a_retraction_carries_the_reason_the_human_is_told():
+    """`note` is a synonym of `reason`: under it an id names the note and prose says what was wrong with it."""
+    out = parse(
+        verdict(
+            **positions(("F1", "agree")),
+            retract_note=[
+                {"id": "n1", "why": "the contract says 90 days"},
+                {"note": "N2"},
+                {"note": "N3", "reason": "wrong clause"},
+                {"id": "N4", "note": "the clause moved, it is not 90 days"},
+                {"id": "N5", "comment": "I never read the contract"},
+            ],
+        )
+    )
+    assert out.data["retract_note"] == [
+        {"id": "N1", "reason": "the contract says 90 days"},
+        {"id": "N2", "reason": ""},
+        {"id": "N3", "reason": "wrong clause"},
+        {"id": "N4", "reason": "the clause moved, it is not 90 days"},
+        {"id": "N5", "reason": "I never read the contract"},
+    ]
+
+
+def test_a_top_level_note_is_a_note_while_a_finding_s_is_still_its_detail():
+    """`notes` is a synonym of a finding's `detail`; the two are read out of different tables."""
+    payload = json.dumps({"findings": [{"claim": "x", "notes": "keys are global"}], "notes": ["the human should know"]})
+    out = parse_phase0(payload, mode="review")
+    assert out.data["findings"][0]["detail"] == "keys are global"
+    assert out.data["notes"] == [{"text": "the human should know", "item": None}]
+
+
+def test_phase_0_reads_notes_and_has_nothing_to_retract():
+    out = parse_phase0(json.dumps({"findings": [], "notes": [{"note": "env holds the key"}], "retract_note": ["n1"]}), mode="review")
+    assert out.data["notes"] == [{"text": "env holds the key", "item": None}]
+    assert out.data["retract_note"] == [], "phase 0 mints the first notes: it reads no retraction, and the field keeps the round's shape"
+
+
 # --------------------------------------------------------------------------- phase 0
 
 

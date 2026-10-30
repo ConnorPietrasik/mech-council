@@ -33,6 +33,7 @@ from .escalations import (
     showable,
     stop_for,
 )
+from .notes import mark_shown, raise_note, retract_note, unshown
 from .stalemate import signature
 from .state import (
     ABSTAIN,
@@ -198,6 +199,7 @@ class Engine:
                     )
                     if entry.get("blocking") and ask_to_stop(self.docket, question, agent):
                         self.emit("question_stop_requested", id=question.id, seat=agent, holders=list(question.blocked_by), round=0)
+            self._notes(parsed.data.get("notes") or [], agent, 0)
             self._phase0_summary[agent] = parsed.data.get("summary", "")
         if len(valid) < 2:
             raise Abort(
@@ -389,6 +391,9 @@ class Engine:
         self._answers(data.get("answers") or [], agent, round_)
         self._questions(data.get("questions") or [], agent, round_)
         self._human_input(data.get("human_input") or [], agent, round_)
+        # before the raises: a retraction cannot name an id this same reply is minting
+        self._retract_notes(data.get("retract_note") or [], agent, round_)
+        self._notes(data.get("notes") or [], agent, round_)
         self._apply_asks(agent, data, round_)
         for question in data.get("open_questions") or []:
             raise_question(self.docket, text=question, asker=agent, item_id=None, round_=round_)
@@ -526,6 +531,32 @@ class Engine:
             self.docket.next_qa += 1
             self.docket.qa[qa.id] = qa
             self.docket.qa_order.append(qa.id)
+
+    def _notes(self, entries: list[dict], asker: str, round_: int) -> None:
+        """An unknown item costs the link, never the note."""
+        for entry in entries:
+            item_id = entry.get("item")
+            if item_id and item_id not in self.docket.items:
+                self.emit("verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a note named an unknown item")
+                item_id = None
+            note, updated = raise_note(self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_)
+            self.emit(
+                "note_updated" if updated else "note_raised",
+                id=note.id,
+                seat=asker,
+                item=note.item_id,
+                round=round_,
+                chars=len(note.text),
+            )
+
+    def _retract_notes(self, entries: list[dict], asker: str, round_: int) -> None:
+        for entry in entries:
+            nid, why = entry["id"], entry["reason"]
+            note, refusal = retract_note(self.docket, nid=nid, agent=asker, round_=round_, reason=why)
+            if note is None or refusal:
+                self.emit("note_retract_refused", member=asker, id=nid, round=round_, reason=refusal or "no standing note with that id")
+                continue
+            self.emit("note_retracted", id=nid, seat=asker, round=round_, shown=note.shown_round is not None, reason=why)
 
     def _human_input(self, entries: list[dict], asker: str, round_: int) -> None:
         for entry in entries:
@@ -948,7 +979,8 @@ class Engine:
         """Once, before the run ends: every seat gets one last look at the asks the human will not be shown.
 
         It lets go — answer one, back one, drop one's own, or stance away from an item a peer settled — and it lets
-        the seat that raised an ask say a peer's answer was not enough. Nothing else in that reply is read.
+        the seat that raised an ask say a peer's answer was not enough. Notes and their retractions are read here
+        too. Nothing else in that reply is read.
         """
         from .termination import held_back_questions
 
@@ -974,6 +1006,8 @@ class Engine:
         # stance takes its own stop and ask with it. One loop over the roster would let that order decide what a
         # peer's reply means.
         for agent, data in replies.items():
+            self._retract_notes(data.get("retract_note") or [], agent, round_)
+            self._notes(data.get("notes") or [], agent, round_)
             self._apply_asks(agent, data, round_)
         self._read_insists(seen=round_)
         for agent, data in replies.items():
@@ -1047,10 +1081,24 @@ class Engine:
         if terminal:
             self._mark_held_back([q for q in open_asks if q not in ask], round_)
         listing = ask
+        pending_notes = unshown(self.docket)
         if not listing:
             if terminal and len(open_asks) > len(ask):
                 self.emit_note(_held_back_note(self.docket, open_asks))
-            self.emit("human_checkpoint", round=round_, ask_set=[], waited=False, answered=0, skipped=0, terminal=terminal)
+            if pending_notes:
+                # nothing to ask, and still the notes' only showing
+                await self.port.checkpoint([], round_=round_, terminal=terminal, listing=[], waiting=False, notes=pending_notes)
+                mark_shown(pending_notes, round_)
+            self.emit(
+                "human_checkpoint",
+                round=round_,
+                ask_set=[],
+                waited=False,
+                answered=0,
+                skipped=0,
+                terminal=terminal,
+                notes=[n.id for n, _kind in pending_notes],
+            )
             return None
         at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
@@ -1058,7 +1106,9 @@ class Engine:
         waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0)
         if terminal and not waiting:
             self._mark_unasked()  # the ledger has to say the run ended without asking
-        outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting)
+        outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting, notes=pending_notes)
+        # the block reached the console whether or not the run waited
+        mark_shown(pending_notes, round_)
         if outcome.waited:
             self._asked_of_human.update(q.id for q in ask)
         self.emit(
@@ -1069,6 +1119,7 @@ class Engine:
             answered=len(outcome.answers),
             skipped=len(outcome.skipped),
             terminal=terminal,
+            notes=[n.id for n, _kind in pending_notes],
         )
         selections: dict[str, int] = {}
         for qid, number in outcome.answer_options.items():

@@ -87,12 +87,13 @@ printed last after a blank line.
    run. Asks that are backed but not waited on are put to you when the run would otherwise end;
    unbacked ones are never put to you at all, only reported. Before that report the seats get one
    last look at those: a seat may answer one, back one, drop one, call a peer's answer to one it
-   raised not enough, or stance away from an item a peer's answer settled — and nothing else. Only a
-   stance releases an item; dropping the ask raised about it never does. An ask goes the other way
-   too: letting go of an item drops the ask your `needs_human` raised on it, and so does the council
+   raised not enough, stance away from an item a peer's answer settled, or unsay a **note** of its own —
+   and nothing else. Only a stance releases an item; dropping the ask raised about it never does. An ask goes the
+   other way too: letting go of an item drops the ask your `needs_human` raised on it, and so does the council
    **settling that item** — the closure *is* the answer to a question about it — unless a majority
    declared a stop on it, which is the one claim that outranks a closure. So a settled item reaches
    you only as something more than one seat needed the run to wait for.
+   What a seat wants you to **know** and not decide is a `note`: no second seat, and nothing for you to answer.
 5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached` — but a run
    that would end with a question standing spends a **grace round** first: it asks you, and any
    answer buys the seats one more round to plan against it (`grace_rounds`). A question it did show
@@ -126,6 +127,8 @@ Only backed questions appear here. The ones no second seat wanted are in the rep
 with that answer beside it; and an ask about an item the council settled is reported `moot` — it was
 never going to be put to you.
 
+Notes (`N1`) print once at the next checkpoint and are listed again in the report; they exist to stop the agent from spamming pointless questions.
+
 ## What you get
 
 | File | What's in it |
@@ -133,7 +136,7 @@ never going to be put to you.
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
 | `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. |
+| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note and the round each one was shown at. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else

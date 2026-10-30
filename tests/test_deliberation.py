@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mech_council import naming
-from mech_council.deliberation import dispositions, escalations, stalemate, termination
+from mech_council.deliberation import dispositions, escalations, notes, stalemate, termination
 from mech_council.deliberation.state import (
     ABSTAIN,
     AGREE,
@@ -773,3 +773,67 @@ def test_docket_shows_you_and_yours_to_the_viewer():
     assert "Agent1" in body and "you" in body and "Agent2" not in body
     own = render.render(docket, "Agent1")
     assert "[yours]" in own
+
+
+# --------------------------------------------------------------------------- the note ledger
+
+
+def noted(docket: Docket, text: str, by: str = "Agent1", **kw) -> str:
+    note, _updated = notes.raise_note(docket, by=by, text=text, item_id=kw.pop("item_id", None), round_=kw.pop("round_", 1))
+    return note.id
+
+
+def test_a_seat_repeating_itself_updates_its_note_instead_of_forking_it():
+    docket = docket_with(3)
+    first = noted(docket, "retention is a contract", round_=1)
+    again = noted(docket, "Retention   is a   contract.", round_=3)
+    assert first == again == "N1" and docket.note_order == ["N1"], "one seat, one sentence, one note"
+    assert docket.human_notes["N1"].updated_round == 3
+
+
+def test_two_seats_saying_one_thing_write_two_notes():
+    docket = docket_with(3)
+    noted(docket, "retention is a contract", by="Agent1")
+    noted(docket, "retention is a contract", by="Agent2")
+    assert docket.note_order == ["N1", "N2"], "the docket credits each seat its own statement"
+
+
+def test_a_note_the_human_never_saw_is_nothing_to_print_or_to_report():
+    docket = docket_with(3)
+    noted(docket, "retention is a contract")
+    notes.retract_note(docket, nid="N1", agent="Agent1", round_=2, reason="the contract says otherwise")
+    assert notes.unshown(docket) == [], "a note retracted before it was read never reaches the human"
+    assert notes.report_notes(docket) == [], "and the report does not reprint what the council unsaid"
+
+
+def test_a_retraction_of_a_note_the_human_read_is_its_own_one_shot_finding():
+    docket = docket_with(3)
+    noted(docket, "retention is a contract")
+    notes.mark_shown(notes.unshown(docket), 0)
+    notes.retract_note(docket, nid="N1", agent="Agent1", round_=4, reason="the contract says otherwise")
+    pending = notes.unshown(docket)
+    assert [(n.id, kind) for n, kind in pending] == [("N1", "retraction")]
+    notes.mark_shown(pending, 4)
+    assert notes.unshown(docket) == [], "the correction is said once, like the note it corrects"
+    assert [n.id for n in notes.report_notes(docket)] == ["N1"], "the report keeps what the human was told"
+
+
+def test_saying_a_note_again_after_retracting_it_is_a_fresh_claim():
+    docket = docket_with(3)
+    noted(docket, "retention is a contract")
+    notes.retract_note(docket, nid="N1", agent="Agent1", round_=2)
+    assert noted(docket, "retention is a contract", round_=3) == "N2"
+
+
+def test_an_id_from_the_other_ledger_moves_nothing_in_either_ledger():
+    docket = docket_with(3)
+    ask, _ = escalations.raise_question(docket, text="which tenant?", asker="Agent1", item_id=None, round_=1)
+    noted(docket, "retention is a contract")
+    assert notes.retract_note(docket, nid=ask.id, agent="Agent1", round_=2)[0] is None, "an ask id is no note to unsay"
+    for field in (escalations.second, escalations.stop_for, escalations.retract):
+        assert field(docket, qid="N1", agent="Agent2", round_=2)[0] is None, "a note id is not an ask to work"
+    assert escalations.answer_by_seat(docket, qid="N1", agent="Agent2", text="config holds it", round_=2)[0] is None
+    assert escalations.insist(docket, qid="N1", agent="Agent2", round_=2, seen=2)[0] is None
+    assert (docket.human_notes["N1"].state, ask.state) == (STANDING, ASKED), "a crossed id changes neither ledger"
+    notes.retract_note(docket, nid="N1", agent="Agent1", round_=3)
+    assert escalations.second(docket, qid="N1", agent="Agent2", round_=4)[0] is None, "a retracted note is not an open ask either"

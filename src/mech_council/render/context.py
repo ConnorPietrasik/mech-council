@@ -89,7 +89,7 @@ class ReportContext:
             f"- `run.json` — the machine-readable manifest ({manifest})",
             f"- `{self.report_name}` — this report",
             "- `events.jsonl` — the run's events, one JSON object per line, append-only",
-            "- `human_input.json` — every question, answer, recommendation and skip",
+            "- `human_input.json` — every question, answer, recommendation and skip, and every note with where it was shown",
         ]
         if self.transcripts == "full":
             lines.append("- `agents/<file_base>.transcripts.jsonl` — the verbatim protocol stream, per member")

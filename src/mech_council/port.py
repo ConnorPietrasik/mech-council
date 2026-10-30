@@ -75,8 +75,8 @@ class Port:
         except ChairUnusable as failure:
             raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
 
-    async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool):
-        return await self.checkpoint_run.run(listing, ask_set=ask_set, round_=round_, terminal=terminal, waiting=waiting)
+    async def checkpoint(self, ask_set, *, round_: int, terminal: bool, listing: list, waiting: bool, notes=()):
+        return await self.checkpoint_run.run(listing, ask_set=ask_set, round_=round_, terminal=terminal, waiting=waiting, notes=notes)
 
 
 def _raw(outcome) -> RawAsk:

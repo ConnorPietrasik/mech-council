@@ -4,8 +4,7 @@ SANDBOX = """\
 # Your workspace
 
 Your working directory is the project, and an absolute path into it is your own private
-copy of the project: a file another member created is not in your copy, and a file you
-create is invisible to them. Directory surgery on the project is limited by the
+copy of the project. Directory surgery on the project is limited by the
 overlay: `rm -rf` of a project directory fails with `EIO` and leaves it half-emptied,
 `rename` of one gives `EXDEV`, and `mv` copies the tree, fails to delete the source and
 leaves both copies. A directory you created yourself removes normally. `$TMPDIR`
@@ -17,8 +16,7 @@ project does. If you hit one, say what you were trying to do and move on.
 SHARED = """\
 # Your workspace
 
-Your working directory is the project, and it is the real one: your writes land in it and
-stay there. The other seats work in this same tree at the same time, so a file or an edit
+Your working directory is the project. The other seats work in this same tree at the same time, so a file or an edit
 you did not make is a peer's work in progress — never a defect, and never yours to finish,
 revert or reformat. Touch only what your own task touches, and leave the rest of the tree
 as you found it. `$TMPDIR` is a directory of your own outside the project: put anything
@@ -37,8 +35,7 @@ human what you cannot settle.
 - Verify before you claim. An item survives because peers with workspace access failed
   to knock it down, not because somebody asserted it. Cite the file, the line or the
   command output that shows it.
-- Peers are numbers. You are shown `AgentN`, never a name: a claim carries its evidence or
-  it carries nothing, and who reported it is never a reason to believe or to fold.
+- Peers are numbers. You are shown `AgentN`, never a name: who reported a claim is never a reason to believe or to fold.
 - Silence is never consent and never rejection: you are asked for a stance on every open
   item, and an answer you withhold is asked for. `abstain` is always valid, costs
   nothing, and neither endorses nor blocks — abstain rather than going quiet.
@@ -52,14 +49,13 @@ ESCALATION = """\
 
 - `human_input` entries ask. Naming an item says what the ask is about; it does **not**
   escalate it, hold it open, or stop the run. Only the stance `needs_human` says you will not
-  sign that item off, and that is the act a peer can challenge you to defend.
+  sign that item off, and a peer can challenge you to defend.
 - An ask is a proposal to the council, not a message to the human. It reaches them only once
   a **second seat backs it** with `second: ["H1"]`; an unbacked ask is reported and never
   asked. Back the ones you would act on and leave the rest alone.
 - A peer who wants the same decision will word it differently. Two of you holding **one item** raise
   one ask together — each of you the other's second seat, without either saying so — and the chair
-  folds asks that want one answer into the ask raised first. So word yours such that the answer you
-  need is the only answer that fits — a sharp ask folded into a vague one stops nothing.
+  folds asks that want one answer into the ask raised first.
 - Every ask carries an id (`H1`) on the docket, and most of them belong to the council, not
   to the human: `answer_question` answers a peer's ask from the workspace, `insist: ["H1"]` says a
   peer's answer to one of yours was not enough, and `retract: ["H1"]` drops one you raised and no
@@ -109,14 +105,21 @@ the second seat that gets the ask put to the human.
 
 `blocking` is a separate claim from the ask: it says the council must *wait* for the answer,
 and it takes a majority making the same claim to mean anything.
+
+`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats nothing a finding already says.
+"""
+
+#: phase 0 has no note to retract yet
+NOTE_RETRACTION = """\
+
+If your note was wrong: retract before restating — `retract_note: [{"id": "N1", "reason": "what was wrong"}]`.
 """
 
 ANSWER_SHAPE = """\
 # Answer shape
 
-Answer with a single JSON object at the start of your reply (prose after it is fine, and
-is welcome). Field names are matched case- and separator-insensitively, so
-`validationGate` and `validation_gate` are the same field.
+Answer with a single JSON object at the start of your reply (prose after it is fine). Field names are matched
+case- and separator-insensitively, so `validationGate` and `validation_gate` are the same field.
 """
 
 
@@ -180,7 +183,7 @@ def round_briefing(
             PROTOCOL,
             ESCALATION,
             text.EXTRA_BRIEFING,
-            QUESTION_SHAPE,
+            QUESTION_SHAPE + NOTE_RETRACTION,
             _workspace(in_place),
             ANSWER_SHAPE,
             text.ROUND_SCHEMA,
@@ -228,10 +231,10 @@ def peer_pass_task(listing: str, mode: str) -> str:
             "answer about that item.",
             "",
             "This pass lets go and calls one answer not enough. Findings, sign-offs, new asks and `human_input` belong to",
-            "a round and are read by nobody here; `positions` are read for one thing — if a peer's answer settles an item",
-            "you are holding with `needs_human`, stance it as you now see it and that hold goes. You cannot",
-            "open a hold, take another seat's, or keep one by stancing `needs_human` again. Say nothing",
-            "about an ask you have nothing on.",
+            "a round and are read by nobody here; `notes` and `retract_note` are read; `positions` are read for one thing —",
+            "if a peer's answer settles an item you are holding with `needs_human`, stance it as you now see it and that",
+            "hold goes. You cannot open a hold, take another seat's, or keep one by stancing `needs_human` again. Say",
+            "nothing about an ask you have nothing on.",
             "",
             ANSWER_SHAPE,
             schema_hint(mode, phase="round"),

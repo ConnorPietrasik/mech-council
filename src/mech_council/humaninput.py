@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from .deliberation.engine import CheckpointOutcome
 from .deliberation.escalations import effective_class, stop_holders
-from .deliberation.state import Docket, Question
+from .deliberation.state import Docket, Note, Question
 
 #: The id and the separator are both tolerant.
 _ANSWER = re.compile(r"^\s*(h\d+)\s*[:=]\s*(.*)$", re.DOTALL | re.IGNORECASE)
@@ -14,6 +15,8 @@ _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
 _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
 #: a line that opens like a command gets the grammar said back to it
 _COMMAND_HEAD = re.compile(r"^\s*(?:(?:skip|none)\b|(?:explain|ask)\s+h\d+)", re.IGNORECASE)
+#: `N1:` reads like `H1:`, and would answer whichever ask happens to be open
+_NOTE_LINE = re.compile(r"^\s*(?:note\s+)?n\d+\s*[:=]", re.IGNORECASE)
 #: a bare number takes that option, and only when the question offered that many
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
 
@@ -48,6 +51,8 @@ def parse_line(text: str) -> Line:
         return Line("explain", id=match.group(1).upper(), text=(match.group(2) or "").strip() or "Why are you asking this?")
     if _COMMAND_HEAD.match(text):
         return Line("error", text=_GRAMMAR)
+    if _NOTE_LINE.match(text):
+        return Line("error", text="a note needs no answer and nothing you type retracts one; `H1: <text>` answers an open question")
     return Line("answer", id="", text=text.strip())
 
 
@@ -110,6 +115,37 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
     return "\n".join(lines)
 
 
+def _folded(notes: Sequence[tuple[Note, str]]) -> list[tuple[str, list[Note]]]:
+    """Seats that noted one sentence say it to the human once, under both names.
+
+    The ledger keeps each seat its own entry: fold only here, where a note is read aloud.
+    """
+    out: dict[tuple[str, str], tuple[str, list[Note]]] = {}
+    for note, kind in notes:
+        out.setdefault((kind, note.key if kind == "note" else note.id), (kind, []))[1].append(note)
+    return list(out.values())
+
+
+def render_notes(notes: Sequence[tuple[Note, str]], *, names: dict[str, str]) -> str:
+    """What the human is told about a note, once; the report holds the whole ledger."""
+    from .render.text import name_of
+
+    lines = ["notes from the council (nothing to answer):"]
+    for kind, group in _folded(notes):
+        first = group[0]
+        ids = ", ".join(note.id for note in group)
+        who = ", ".join(name_of(note.by, names) for note in group)
+        if kind == "retraction":
+            reason = f": {first.retract_reason}" if first.retract_reason else ""
+            lines.append(f"  {ids} was retracted by {who} (round {first.retracted_round}){reason}")
+            lines.append(f"    it had said: {first.text}")
+            continue
+        items = {note.item_id for note in group}
+        where = f" on {first.item_id}" if len(items) == 1 and first.item_id else ""
+        lines.append(f"  {ids}{where} {who} (round {min(note.round for note in group)}): {first.text}")
+    return "\n".join(lines)
+
+
 def take_selection(text: str, question: Question) -> tuple[str, int]:
     match = _SELECTION.match(text or "")
     if not match or not question.options:
@@ -129,9 +165,19 @@ class Checkpoint:
         self.ask_seat = ask_seat
 
     async def run(
-        self, listing: list[Question], *, ask_set: list[Question], round_: int, terminal: bool, waiting: bool
+        self,
+        listing: list[Question],
+        *,
+        ask_set: list[Question],
+        round_: int,
+        terminal: bool,
+        waiting: bool,
+        notes: Sequence[tuple[Note, str]] = (),
     ) -> CheckpointOutcome:
         result = CheckpointOutcome(waited=False)
+        if notes:
+            # above the questions: the human reads this before deciding what to type
+            self.console.say(render_notes(notes, names=self.names))
         self.console.say(render_ask_set(self.docket, listing, names=self.names, waiting=waiting))
         if not listing and not ask_set:
             return result

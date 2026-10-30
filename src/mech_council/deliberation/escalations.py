@@ -91,10 +91,22 @@ def _moved(question: Question | None) -> str:
     return ""
 
 
-def _open_ask(docket: Docket, qid: str) -> tuple[Question | None, str]:
+def _other_ledger(docket: Docket, qid: str, agent: str) -> str:
+    """A note id in an ask field: whose note it is, and what this caller may do about it."""
+    note = docket.human_notes.get(qid)
+    if note is None:
+        return ""
+    if note.state != STANDING:
+        return f"{qid} is a note {note.by} retracted in round {note.retracted_round}: it asks nothing"
+    if note.by != agent:
+        return f"{qid} is {note.by}'s note, not an ask: it asks and blocks nothing — say your own piece in `notes`"
+    return f'{qid} is a note of yours, not an ask: retract it with `retract_note: ["{qid}"]`'
+
+
+def _open_ask(docket: Docket, qid: str, agent: str) -> tuple[Question | None, str]:
     question = docket.questions.get(qid)
     if question is None:
-        return None, "no open question with that id"
+        return None, _other_ledger(docket, qid, agent) or "no open question with that id"
     if moved := _moved(question):
         return question, moved
     if question.state != ASKED:
@@ -125,7 +137,7 @@ def _note_wording(question: Question, asker: str, text: str) -> None:
 
 def second(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Question | None, str]:
     """Back a peer's ask. Backing is not raising: a seconder cannot call an answer to it not enough."""
-    question, reason = _open_ask(docket, qid)
+    question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
         return question, reason
     if agent in question.askers:
@@ -145,7 +157,7 @@ def ask_to_stop(docket: Docket, question: Question, agent: str) -> bool:
 
 def stop_for(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Question | None, str]:
     """Back an ask *and* declare that the run waits for the answer."""
-    question, reason = _open_ask(docket, qid)
+    question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
         return question, reason
     if agent not in question.askers:
@@ -157,7 +169,7 @@ def stop_for(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Ques
 
 def answer_by_seat(docket: Docket, *, qid: str, agent: str, text: str, round_: int = 0) -> tuple[Question | None, str]:
     """Settle a peer's ask from the workspace. The asker's own guess is not an answer."""
-    question, reason = _open_ask(docket, qid)
+    question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
         return question, reason
     if agent in question.askers:
@@ -175,7 +187,7 @@ def insist(docket: Docket, *, qid: str, agent: str, round_: int, seen: int) -> t
     `seen` is the latest round of peer answers this pass shows the seat: an insistence rebuts those and nothing later,
     so an answer that landed in the round a verdict was written in is not one that verdict can have read.
     """
-    question, reason = _open_ask(docket, qid)
+    question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
         return question, reason
     if agent not in question.raised_by:
@@ -194,7 +206,7 @@ def retract(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Quest
     """Drop one asker: the ask survives until the last one walks away. An answered one goes moot, never void."""
     question = docket.questions.get(qid)
     if question is None:
-        return None, "no open question with that id"
+        return None, _other_ledger(docket, qid, agent) or "no open question with that id"
     if moved := _moved(question):
         return question, moved
     if question.state not in (ASKED, ANSWERED):

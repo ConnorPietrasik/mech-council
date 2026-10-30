@@ -3,8 +3,7 @@ from __future__ import annotations
 PHASE0_TASK = """\
 ## Your task
 
-Investigate the project with whatever tools you have — read the code, run the tests,
-grep, look at git history. Then report what you would fix or improve.
+Investigate the project, then report what you would fix or improve according to the goal.
 
 - An empty findings list is a valid answer. Do not invent work to justify the run.
 - Every finding needs evidence you actually looked at.
@@ -24,7 +23,8 @@ PHASE0_SCHEMA = """\
   "open_questions": ["a question only the human can answer"],
   "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
                    "context": "what you saw that leaves it open, and the cost of guessing",
-                   "options": ["an answer you would accept", "another you would accept"]}]
+                   "options": ["an answer you would accept", "another you would accept"]}],
+  "notes": ["what the human should know and need not answer"]
 }
 ```
 """
@@ -56,6 +56,8 @@ ROUND_SCHEMA = """\
   "second": ["H1"], "blocking_for": ["H4"], "retract": ["H2"], "insist": ["H3"],
   "answer_question": [{"id": "H3", "answer": "what the workspace shows, so the human is not asked"}],
   "open_questions": ["…"],
+  "notes": ["what the human should know and need not answer"],
+  "retract_note": [{"id": "N1", "reason": "what was wrong"}],
   "signoff": false
 }
 ```

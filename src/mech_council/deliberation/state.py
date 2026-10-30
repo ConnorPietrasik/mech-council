@@ -10,6 +10,7 @@ AGREED, UNHEARD, UNSEEN, DISPUTED, HUMAN, REJECTED = ("agreed", "unheard", "unse
 
 STANDING, WITHDRAWN, RETIRED, DEMOTED = "standing", "withdrawn", "retired", "demoted"
 ASKED, ANSWERED, SKIPPED = "asked", "answered", "skipped"
+RETRACTED = "retracted"
 
 CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs_human", "stalemate", "round_limit_reached", "aborted")
 
@@ -27,6 +28,11 @@ CHAIR_ID = "chair"
 
 def normalize_text(text: str) -> str:
     return " ".join((text or "").split()).casefold()
+
+
+def note_key(text: str) -> str:
+    """A note's identity, punctuation aside."""
+    return normalize_text(text).rstrip(".!?;")
 
 
 @dataclass
@@ -127,6 +133,29 @@ class Question:
 
 
 @dataclass
+class Note:
+    """What a seat wants the human to know and not answer: it asks, holds and blocks nothing."""
+
+    id: str
+    by: str
+    text: str
+    item_id: str | None = None
+    round: int = 0
+    updated_round: int = 0
+    state: str = STANDING
+    #: the round whose checkpoint printed this text
+    shown_round: int | None = None
+    retracted_round: int = 0
+    retract_reason: str = ""
+    #: the round whose checkpoint printed the retraction
+    retraction_shown_round: int | None = None
+
+    @property
+    def key(self) -> str:
+        return note_key(self.text)
+
+
+@dataclass
 class QA:
     id: str
     asker: str
@@ -173,6 +202,9 @@ class Docket:
     question_order: list[str] = field(default_factory=list)
     qa: dict[str, QA] = field(default_factory=dict)
     qa_order: list[str] = field(default_factory=list)
+    #: what seats told the human that needs no answer
+    human_notes: dict[str, Note] = field(default_factory=dict)
+    note_order: list[str] = field(default_factory=list)
     approaches: dict[str, Approach] = field(default_factory=dict)  # plan
     agreed_points: list[dict] = field(default_factory=list)  # plan: compare
     backing: dict[str, str] = field(default_factory=dict)  # plan
@@ -185,6 +217,7 @@ class Docket:
     outcome: str | None = None
     next_question: int = 1
     next_qa: int = 1
+    next_note: int = 1
 
     @property
     def n(self) -> int:

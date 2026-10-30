@@ -11,6 +11,8 @@ from .conftest import DEFAULT_CONFIG, FAKE_PI, no_user_config, write_project_con
 
 pytestmark = [pytest.mark.timeout(200)]
 
+_NOTED = "the retention window is a contract, not a config choice"
+
 SCRIPT = json.dumps(
     [
         {
@@ -18,6 +20,7 @@ SCRIPT = json.dumps(
             "reply": {
                 "findings": [{"claim": "the cache ignores tenants", "severity": "major", "evidence": "src/app.py:1"}],
                 "open_questions": ["Which retention policy applies?"],
+                "notes": [_NOTED],
             },
         },
         {"contains": "Round ", "reply": {"positions": [{"id": "F1", "stance": "agree", "note": "read the key"}], "sign_off": True}},
@@ -108,7 +111,7 @@ def test_events_jsonl_is_one_object_per_line_and_covers_the_whole_run(finished):
 
 def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
     record = json.loads(finished.artifact("human_input.json"))
-    assert set(record) == {"questions", "escalations"}
+    assert set(record) == {"questions", "notes", "escalations"}
     asked = [q for q in record["questions"] if q["askers"]]
     assert asked, "phase 0 raised a question that never reached the record"
     for question in asked:
@@ -116,6 +119,15 @@ def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
             assert field_name in question, f"{question['id']} is missing {field_name}"
         assert not {"item_id", "text"} & set(question), f"{question['id']} carries the docket's field names, not the wire's"
     assert asked[0]["item"] is None, "a phase-0 open question is item-less"
+
+
+def test_every_note_is_recorded_with_where_it_was_shown(finished):
+    notes = json.loads(finished.artifact("human_input.json"))["notes"]
+    assert [note["note"] for note in notes] == [_NOTED, _NOTED], "two seats saying one thing is two notes"
+    assert {note["seat"] for note in notes} == {"Agent1", "Agent2"}
+    # round 0 is a real checkpoint: `null` would mean the human was never shown it
+    assert [note["shown_round"] for note in notes] == [0, 0]
+    assert all(note["state"] == "standing" for note in notes)
 
 
 def test_full_transcripts_write_one_verbatim_file_per_member(finished):

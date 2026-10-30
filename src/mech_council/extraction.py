@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from .deliberation.notes import NOTE_MAX_CHARS, NOTE_MAX_PER_REPLY
 from .deliberation.state import ABSTAIN, AGREE, DISAGREE, MERGED, NEEDS_HUMAN, NO_PREFERENCE, STANCES
 
 
@@ -29,6 +30,16 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "signoff": ("signoff", "sign_off", "signed_off", "approve", "approval", "done"),
     "summary": ("summary", "overview", "wrap_up"),
     "open_questions": ("open_questions", "questions_open", "unresolved", "queries"),
+    "notes": ("notes", "note", "human_notes", "notes_for_human", "human_note", "note_to_human", "remarks", "observations"),
+    "retract_note": (
+        "retract_note",
+        "retract_notes",
+        "drop_note",
+        "drop_notes",
+        "withdraw_note",
+        "withdrawn_notes",
+        "retracted_notes",
+    ),
     "revised_plan": ("revised_plan", "plan", "revision", "updated_plan", "the_plan"),
     "backing": ("backing", "back", "support", "backs", "vote_for", "choose", "pick"),
     "stages": ("stages", "steps", "phases"),
@@ -349,6 +360,8 @@ def parse_verdict(
     out.data["signoff"] = bool(signoff) if signoff is not None else False
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
+    out.data["notes"] = _notes(pick(data, "notes"))
+    out.data["retract_note"] = _retract_note(pick(data, "retract_note"))
     if mode == "plan":
         revised = pick(data, "revised_plan")
         out.data["revised_plan"] = _revised_plan(revised)
@@ -392,6 +405,57 @@ def _strings(value: object) -> list[str]:
     return [text_of(v) for v in value if text_of(v).strip()]
 
 
+def _notes(value: object) -> list[dict]:
+    """`notes` lines, written as strings or as `{"note": …, "item": "F2"}` objects.
+
+    Junk is dropped, never an error: a bad note must not send the whole verdict through the repair loop.
+    """
+    raw = [value] if isinstance(value, (dict, str)) else value if isinstance(value, list) else []
+    out: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            entry = {"note": entry}
+        if not isinstance(entry, dict):
+            continue
+        text = text_of(pick(entry, "note", ("text", "message", "remark", "observation", "human_note", "content", "value")))
+        text = text.strip()
+        if not text:
+            continue
+        item = text_of(pick(entry, "item")).strip() or None
+        out.append({"text": text[:NOTE_MAX_CHARS], "item": item})
+    return out[:NOTE_MAX_PER_REPLY]
+
+
+def _retract_note(value: object) -> list[dict]:
+    """`retract_note` lines: `["N1"]`, or `[{"id": "N1", "reason": "what was wrong"}]`.
+
+    A bare id retracts; the reason is what the human is told.
+    """
+    raw = [value] if isinstance(value, (dict, str)) else value if isinstance(value, list) else []
+    out: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, (str, int, float)):
+            entry = {"id": entry}
+        if not isinstance(entry, dict):
+            continue
+        entry = dict(entry)
+        said = ""
+        for key in [k for k in entry if fold(k) == "note"]:
+            # `note` is a synonym of both `id` and `reason`: an id names the note, prose is the reason
+            under_note = entry.pop(key)
+            named = _ids(under_note)
+            if named and _NOTE_ID.fullmatch(named[0]):
+                entry.setdefault("id", named[0])
+            else:
+                said = text_of(under_note).strip()
+        token = _ids(pick(entry, "id", ("note_id", "nid", "n")))
+        if not token or any(one["id"] == token[0] for one in out):
+            continue
+        reason = text_of(pick(entry, "reason")).strip() or said or text_of(pick(entry, "note")).strip()
+        out.append({"id": token[0], "reason": reason[:NOTE_MAX_CHARS]})
+    return out
+
+
 def _texts(value: object) -> list[str]:
     """`open_questions` lines, whether a seat wrote strings or `{"question": …}` objects."""
     raw = [value] if isinstance(value, dict) else value if isinstance(value, list) else [value] if isinstance(value, str) else []
@@ -405,6 +469,9 @@ def _texts(value: object) -> list[str]:
 
 #: an ask id and nothing else
 _ASK_ID = re.compile(r"H\d+")
+
+#: a note id and nothing else
+_NOTE_ID = re.compile(r"N\d+")
 
 
 def _ids(value: object) -> list[str]:
@@ -551,6 +618,9 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
             out.repaired = True
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
+    out.data["notes"] = _notes(pick(data, "notes"))
+    # phase 0 mints the first notes, so no note id exists to retract: the field is still the round's shape
+    out.data["retract_note"] = []
     out.data["human_input"] = _human_input(data)
     return out
 

@@ -29,7 +29,8 @@ PHASE0_SCHEMA = """\
   "open_questions": ["…"],
   "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
                    "context": "what you saw that leaves it open, and the cost of guessing",
-                   "options": ["an answer you would accept", "another you would accept"]}]
+                   "options": ["an answer you would accept", "another you would accept"]}],
+  "notes": ["what the human should know and need not answer"]
 }
 ```
 """
@@ -67,6 +68,8 @@ ROUND_SCHEMA = """\
                    "options": ["an answer you would accept", "another you would accept"]}],
   "second": ["H1"], "blocking_for": ["H4"], "retract": ["H2"], "insist": ["H3"],
   "answer_question": [{"id": "H3", "answer": "what the workspace shows, so the human is not asked"}],
+  "notes": ["what the human should know and need not answer"],
+  "retract_note": [{"id": "N1", "reason": "what was wrong"}],
   "signoff": false
 }
 ```
@@ -104,7 +107,7 @@ build the decision map; you never plan anything yourself.
 - `uncovered`: what the council's goal needs and no plan covers.
 - Judge plans by consequence: mechanism is fair game, naming and phrasing are not worth a
   round.
-- You ask the human nothing from this pass. A conflict the seats cannot settle becomes their
+- A conflict the seats cannot settle becomes their
   escalation, and the council's own split goes to the human on its own.
 - Echo the agent IDs exactly; make none up.
 """

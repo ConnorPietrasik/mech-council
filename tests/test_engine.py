@@ -7,7 +7,7 @@ import re
 import pytest
 
 from mech_council.deliberation.engine import Abort, Engine
-from mech_council.deliberation.state import DEMOTED, STANDING, WITHDRAWN, Docket
+from mech_council.deliberation.state import DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
 from mech_council.prompts.brief import Brief
@@ -2233,3 +2233,160 @@ def test_a_rephrased_reask_that_is_not_a_defense_also_updates_rather_than_forks(
     assert built.docket.question_order == [escalation.question_id], "two rounds, one question"
     question = built.docket.questions[escalation.question_id]
     assert question.text == "which key, then?" and question.item_id == "F1"
+
+
+# --------------------------------------------------------------------------- the note ledger
+
+
+def test_a_note_needs_no_second_seat_and_ends_the_run_like_silence():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[], notes=["retention is a contract, not a config choice"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply)
+        return await built.run(), port, built
+
+    outcome, port, built = asyncio.run(main())
+    assert outcome == "consensus", "an unseconded note ends nothing: it asks nothing"
+    assert all(cp["ask_set"] == [] for cp in port.checkpoints), "a note is never put to the human as a question"
+    assert [n.shown_round for n in built.docket.human_notes.values()] == [0, 0, 0], "and every one still reaches the human"
+
+
+def test_each_note_says_itself_once_and_its_retraction_once():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[], notes=[] if ask.who != "Agent1" else ["retention is a contract"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent3" and ask.round == 1:
+            return stance_all(ask, "agree", signoff=False)  # keep the council another round
+        if ask.who == "Agent2":
+            if ask.round == 1:
+                return stance_all(ask, "agree", notes=["the lease renews in march"])
+            if ask.round == 2:
+                return stance_all(ask, "agree", retract_note=["N2"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, max_rounds=3)
+        return await built.run(), port, built
+
+    outcome, port, built = asyncio.run(main())
+    assert outcome == "consensus"
+    printed = [(cp["round"], one) for cp in port.checkpoints for one in cp["notes"]]
+    assert printed == [(0, "N1:note"), (1, "N2:note"), (2, "N2:retraction")], "each statement once, at the next checkpoint"
+    assert [built.docket.human_notes[i].shown_round for i in ("N1", "N2")] == [0, 1]
+    assert built.docket.human_notes["N2"].state == RETRACTED
+    assert built.docket.human_notes["N2"].retraction_shown_round == 2
+
+
+def test_only_the_author_retracts_a_note_and_the_refusal_is_said_not_swallowed():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[], notes=[] if ask.who != "Agent1" else ["retention is a contract"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2":
+            if ask.round == 1:
+                return stance_all(ask, "agree", signoff=False)
+            return stance_all(ask, "agree", retract_note=["N1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2)
+        return await built.run(), records, built
+
+    _outcome, records, built = asyncio.run(main())
+    refused = [r for r in records if r["event"] == "note_retract_refused"]
+    assert [(r["member"], r["id"]) for r in refused] == [("Agent2", "N1")], "the refusal is recorded, not swallowed"
+    assert built.docket.human_notes["N1"].state == STANDING, "a peer's refusal changes nothing"
+
+
+def test_a_retraction_carries_the_reason_the_human_is_told():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[], notes=[] if ask.who != "Agent2" else ["the key lives in env"])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1" and ask.round == 1:
+            return stance_all(ask, "agree", signoff=False)  # keep the council another round
+        if ask.who == "Agent2" and ask.round == 2:
+            return stance_all(ask, "agree", retract_note=[{"id": "N1", "reason": "the config holds it, not env"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=3)
+        return await built.run(), records, built
+
+    _outcome, records, built = asyncio.run(main())
+    note = built.docket.human_notes["N1"]
+    assert (note.state, note.retract_reason) == (RETRACTED, "the config holds it, not env")
+    said = [r for r in records if r["event"] == "note_retracted"]
+    assert said and said[0]["reason"] == "the config holds it, not env"
+
+
+def test_a_note_about_an_item_that_does_not_exist_keeps_the_note_and_drops_the_link():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[], notes=[{"note": "the lease renews in march", "item": "F9"}] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply)
+        return await built.run(), records, built
+
+    _outcome, records, built = asyncio.run(main())
+    assert built.docket.human_notes["N1"].item_id is None
+    assert any(r["event"] == "verdict_unknown_findings" for r in records), "the bad id is said, not silently obeyed"
+
+
+def test_the_last_pass_reaches_the_human_because_the_asking_follows_it():
+    """A peer's answer is what proves a note wrong, and that is learned on the last pass: dropping it there
+    would leave the wrong statement standing in front of the human with no checkpoint left to correct it.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["which tenant owns the key?"] if ask.who == "Agent1" else [],
+                notes=["the key lives in env"] if ask.who == "Agent1" else [],
+            )
+        if ask.kind in {"merge", "asks"}:
+            return {"groups": []}
+        if ask.phase == "seconding":
+            if ask.who == "Agent1":
+                return payload(retract_note=[{"id": "N1", "reason": "config holds it after all"}], notes=["config holds the key"])
+            return payload()
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", answer_question=[{"id": "H1", "answer": "config names it: tenant_id"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply)
+        return await built.run(), built, port, records
+
+    _outcome, built, port, records = asyncio.run(main())
+    printed = [one for cp in port.checkpoints for one in cp["notes"]]
+    assert printed == ["N1:note", "N1:retraction", "N2:note"], "the last pass corrects what the human was told"
+    assert [r["event"] for r in records if r["event"].startswith("note_")] == ["note_raised", "note_retracted", "note_raised"]
+    notes = built.docket.human_notes
+    assert notes["N1"].state == RETRACTED and notes["N1"].retract_reason == "config holds it after all"
+    assert notes["N2"].shown_round is not None, "and the fresh note is not left in the report alone"

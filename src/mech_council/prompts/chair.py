@@ -9,8 +9,6 @@ so.
 
 - Conservative beats tidy: when unsure, keep them apart.
 - Every entry below carries an ID. Echo those IDs exactly; make none up.
-- You raise nothing to the human from this pass: a seat with the code in front of it raises what its
-  evidence supports, and a decision no seat will put its name to is not one you can settle.
 """
 
 ASK_MERGE = """\
@@ -20,8 +18,7 @@ You are the council's chair. Below are the open asks seats have raised for the h
 often want one decision and word it differently; your job is to say which asks are one ask, so
 the human is asked once and a second seat counting toward it is visible.
 
-- Conservative beats tidy: when unsure, keep them apart. Two asks whose acceptable answers
-  differ are two asks, however similar their subject.
+- Conservative beats tidy: when unsure, keep them apart.
 - Asks listed on the same item (`H2 (on F1)`) are the likeliest to be one ask: an item is one
   decision, and two seats each asking the human about it separately is what this fold is for.
 - Name the ask raised **first** as `canonical`: its words are what the human reads, and the others

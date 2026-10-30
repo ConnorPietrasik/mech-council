@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import MOOT, SETTLED, UNBACKED, effective_class, held_back, showable, stop_holders
-from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, Docket, Question
+from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, STANDING, Docket, Question
 from ..modes.base import adapter_for
 
 
@@ -87,6 +87,11 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
             out.append(_question_line(docket, question, viewer))
         out.append("")
 
+    notes = _notes_section(docket, viewer)
+    if notes:
+        out += notes
+        out.append("")
+
     answered = [qid for qid in docket.qa_order if docket.qa[qid].answer]
     unanswered = [qid for qid in docket.qa_order if not docket.qa[qid].answer]
     if answered or unanswered:
@@ -101,6 +106,27 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
     if docket.mode == "plan":
         out += _plan_sections(docket, viewer)
     return "\n".join(out).rstrip() + "\n"
+
+
+#: notes older than this wait in the report
+NOTE_WINDOW = 2
+
+
+def _notes_section(docket: Docket, viewer: str) -> list[str]:
+    """What peers told the human without asking — owed nothing here."""
+    standing = [docket.human_notes[nid] for nid in docket.note_order if docket.human_notes[nid].state == STANDING]
+    fresh = [note for note in standing if note.updated_round >= docket.round - NOTE_WINDOW]
+    if not fresh:
+        return []
+    out = [f"## Notes for the human — nothing to answer ({len(fresh)})"]
+    for note in fresh:
+        where = f" (on {note.item_id})" if note.item_id else ""
+        out.append(f"- {note.id}{where} {_who([note.by], viewer)}, round {note.round}: {note.text}")
+    if len(fresh) < len(standing):
+        out.append(f"- +{len(standing) - len(fresh)} older note(s), in the report")
+    if any(note.by == viewer for note in fresh):
+        out.append('  retract one of yours that turns out wrong: `retract_note: ["N1"]` — the human may have read it')
+    return out
 
 
 def _question_line(docket: Docket, question: Question, viewer: str) -> str:

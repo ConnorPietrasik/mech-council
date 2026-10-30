@@ -7,7 +7,8 @@ import asyncio
 import pytest
 
 from mech_council.deliberation import escalations, state
-from mech_council.humaninput import Checkpoint, parse_line, render_ask_set
+from mech_council.deliberation import notes as ledger
+from mech_council.humaninput import Checkpoint, parse_line, render_ask_set, render_notes
 from mech_council.humanio import EOF
 
 NAMES = {"Agent1": "Metic", "Agent2": "Senior", "chair": "Gavel"}
@@ -411,3 +412,55 @@ def test_explain_without_a_channel_says_so_and_keeps_waiting():
     cp, _console, _reader = make_checkpoint(docket, lines=["explain H1", ""])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert not outcome.recommendations and not outcome.answers
+
+
+# --------------------------------------------------------------------------- notes: shown, never answered
+
+
+def note(docket, text="retention is a contract", by="Agent1", round_=1):
+    return ledger.raise_note(docket, by=by, text=text, item_id=None, round_=round_)[0]
+
+
+def test_notes_print_above_the_questions_and_ask_no_line_of_their_own():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    cp, console, _reader = make_checkpoint(docket, lines=[])
+    asyncio.run(cp.run(listing, ask_set=listing, round_=2, terminal=True, waiting=True, notes=[(note(docket), "note")]))
+    said = "\n".join(console.lines)
+    assert said.index("retention is a contract") < said.index("H1"), "the free information comes first"
+    assert "Metic" in said, "the human reads names, not AgentN"
+
+
+def test_two_seats_noting_one_sentence_cost_the_human_one_line():
+    """Phase 0 seats cannot see each other, so identical notes arrive together: read aloud once, credited twice."""
+    docket = build()
+    pairs = [(note(docket, by="Agent1"), "note"), (note(docket, by="Agent2"), "note")]
+    said = render_notes(pairs, names=NAMES)
+    assert said.count("retention is a contract") == 1, "the same sentence is not read out twice"
+    assert "N1, N2" in said and "Metic, Senior" in said, "folding the line keeps both seats on it"
+    one, two = [pair[0] for pair in pairs]
+    for each, why in ((one, "wrong clause"), (two, "the lease says otherwise")):
+        ledger.retract_note(docket, nid=each.id, agent=each.by, round_=4, reason=why)
+    said = render_notes([(one, "retraction"), (two, "retraction")], names=NAMES)
+    assert "wrong clause" in said and "the lease says otherwise" in said, "each seat's reason for unsaying is its own"
+
+
+def test_a_retracted_note_is_corrected_in_front_of_the_human_once_the_human_had_read_it():
+    docket = build()
+    held = note(docket, by="Agent2")
+    ledger.mark_shown(ledger.unshown(docket), 0)
+    ledger.retract_note(docket, nid=held.id, agent="Agent2", round_=3, reason="the contract says 90 days")
+    cp, console, _reader = make_checkpoint(docket)
+    asyncio.run(cp.run([], ask_set=[], round_=3, terminal=True, waiting=False, notes=[(held, "retraction")]))
+    said = "\n".join(console.lines)
+    assert held.retract_reason in said, "the human is told what was wrong with it"
+    assert held.text in said, "and which statement the correction unsays"
+    assert "Senior" in said, "the seat that unsays it is named"
+
+
+def test_typing_to_a_note_answers_nothing():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    cp, _console, _reader = make_checkpoint(docket, lines=["N1: forget it"])
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert not outcome.answers, "the line was refused, not taken as the answer to whichever question was open"

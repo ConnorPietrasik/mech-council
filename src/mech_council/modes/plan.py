@@ -13,7 +13,7 @@ PLAN = register(
         report_name="plan.md",
         phase0_schema="plan",
         verdict_fields=("revised_plan", "backing"),
-        docket_sections=("approaches", "agreed_points", "open", "closed", "questions", "backing"),
+        docket_sections=("approaches", "agreed_points", "open", "closed", "questions", "notes", "backing"),
         report_sections=(
             "rules",
             "chosen_direction",
@@ -24,6 +24,7 @@ PLAN = register(
             "agreed_points",
             "decision_points",
             "human_input",
+            "notes",
             "qa",
             "alternatives",
             "rounds",

@@ -12,7 +12,7 @@ REVIEW = register(
         report_name="report.md",
         phase0_schema="findings",
         verdict_fields=(),
-        docket_sections=("open", "closed", "questions"),
+        docket_sections=("open", "closed", "questions", "notes"),
         report_sections=(
             "consensus",
             "not_fully_vetted",
@@ -20,6 +20,7 @@ REVIEW = register(
             "rejected",
             "never_vetted",
             "sandbox_writes",
+            "notes",
             "open_questions",
             "rounds",
         ),

@@ -493,6 +493,21 @@ def _write_human_input(run_dir: str, docket, console: Console) -> None:
             }
             for q in (docket.questions[i] for i in docket.question_order)
         ],
+        "notes": [
+            {
+                "id": note.id,
+                "seat": note.by,
+                "item": note.item_id,
+                "raised_round": note.round,
+                "note": note.text,
+                "state": note.state,
+                "shown_round": note.shown_round,
+                "retracted_round": note.retracted_round,
+                "retract_reason": note.retract_reason,
+                "retraction_shown_round": note.retraction_shown_round,
+            }
+            for note in (docket.human_notes[nid] for nid in docket.note_order)
+        ],
         "escalations": [
             {
                 "item": item_id,

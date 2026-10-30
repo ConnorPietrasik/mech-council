@@ -418,3 +418,60 @@ def test_a_long_preview_keeps_both_ends_because_the_tail_is_the_part_that_bites(
     assert shown.startswith("npm test xxxx"), "the head still says what was run"
     assert shown.endswith("xxxx") and "…" in shown, "the tail survives, so a long target is still readable"
     assert len(shown) <= 60
+
+
+# --------------------------------------------------------------------------- the note ledger
+
+
+def noted(docket, text, by="Agent1", round_=1, item_id=None):
+    from mech_council.deliberation import notes
+
+    note, _updated = notes.raise_note(docket, by=by, text=text, item_id=item_id, round_=round_)
+    return note
+
+
+def test_the_docket_shows_peers_the_notes_they_left_for_the_human():
+    docket = build()
+    noted(docket, "retention is a contract, not a config choice", by="Agent2", item_id="F1")
+    for viewer in ("Agent1", "Agent2"):
+        body = section(docket_render.render(docket, viewer), "Notes for the human")
+        assert "retention is a contract" in body and "on F1" in body, "every seat sees the note and what it is about"
+
+
+def test_a_retracted_note_leaves_the_docket_a_seat_reads():
+    from mech_council.deliberation import notes
+
+    docket = build()
+    noted(docket, "retention is a contract")
+    notes.retract_note(docket, nid="N1", agent="Agent1", round_=2)
+    assert section(docket_render.render(docket, "Agent2"), "Notes for the human") == ""
+
+
+def test_the_docket_prints_the_notes_that_are_still_news_and_leaves_the_old_ones_to_the_report():
+    docket = build()
+    noted(docket, "the old one", round_=1)
+    noted(docket, "the fresh one", by="Agent2", round_=10)
+    docket.round = 10
+    body = section(docket_render.render(docket, "Agent1"), "Notes for the human")
+    assert "the fresh one" in body and "the old one" not in body
+
+
+def test_the_review_report_keeps_a_retracted_note_the_human_was_shown():
+    from mech_council.deliberation import notes
+
+    docket = build()
+    noted(docket, "retention is a contract, not a config choice", item_id="F1")
+    noted(docket, "and the lease renews in march", by="Agent2")
+    notes.mark_shown(notes.unshown(docket), 0)
+    notes.retract_note(docket, nid="N2", agent="Agent2", round_=3, reason="wrong clause")
+    body = section(report_review.render(docket, context()), "Notes for the human")
+    assert "N1" in body and "F1" in body and "round 0" in body, "what the human already read says which round showed it"
+    assert "retracted" in body and "wrong clause" in body
+    assert "retention is a contract" in body, "the report is the whole ledger the checkpoint showed once"
+
+
+def test_a_note_no_checkpoint_showed_still_reaches_the_report():
+    docket = build()
+    noted(docket, "retention is a contract, not a config choice")
+    body = section(report_plan.render(docket, context(), converged="Agent1"), "Notes for the human")
+    assert "N1" in body and "retention is a contract" in body, "the report holds the ledger, shown or not"
