@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import sys
 
 from .sandbox import mount
+
+
+def _die_with_the_supervisor() -> None:
+    """SIGTERM here when the supervisor dies: the run takes its own exit path instead of orphaning members."""
+    with contextlib.suppress(Exception):
+        mount.prctl(mount.PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
 def _write_map(pid: int) -> None:
@@ -31,6 +38,8 @@ def spawn_orchestrator(body, *, name: str = "orchestrator", in_place: bool = Fal
 
 
 def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
+    # the orchestrator stays in the terminal's group: out of it, its first stdin read is a background-group
+    # read, which the terminal answers with SIGTTIN
     if not in_place:
         try:
             mount.unshare(mount.CLONE_NEWUSER | mount.CLONE_NEWNS)
@@ -48,6 +57,7 @@ def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
     if released != b"m":
         sys.stderr.write("released without a uid/gid map\n")
         return 1
+    _die_with_the_supervisor()  # after the credential changes, which clear it
     try:
         return int(body())
     except KeyboardInterrupt:  # pragma: no cover — the handler path owns this
@@ -90,6 +100,8 @@ def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: 
 
 
 def _relay(pid: int, signum: int = signal.SIGTERM) -> None:
+    # a keystroke reaches the orchestrator twice, from the terminal and from here, and `interrupt.Brake`
+    # counts presses inside one second as the one press it is
     try:
         os.kill(pid, signum)
     except ProcessLookupError:

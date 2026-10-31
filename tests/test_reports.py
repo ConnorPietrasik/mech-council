@@ -393,7 +393,7 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
 
     with mock.patch("mech_council.render.report_review.render", side_effect=RuntimeError("the renderer had a bug")):
-        path = run_mod._report(council, docket, console, str(run_dir), "consensus", 1, [], manifest, "")
+        path = run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "")
 
     assert path and os.path.exists(path), "a failed renderer must not cost the report too"
     with open(path, encoding="utf-8") as handle:

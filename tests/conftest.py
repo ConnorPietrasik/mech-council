@@ -7,11 +7,13 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 
 import pytest
 
+from mech_council.interrupt import COALESCE_S
 from tests.support.ground import FIXTURE_ROOT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -250,6 +252,70 @@ def _kill_group_pid(pid: int) -> None:
         except with_open_errors:
             return
         time.sleep(0.05)
+
+
+@pytest.fixture
+def signalled_cli(child_env):
+    """`interrupt(args, cwd=...)` — the CLI in its own session, signalled the way a terminal signals it."""
+
+    def interrupt(
+        args,
+        *,
+        cwd=None,
+        env=None,
+        signum=signal.SIGINT,
+        times=1,
+        # a second press inside the coalescing window is the same keystroke, so a test that means two presses waits out the window
+        gap=COALESCE_S + 0.5,
+        wait_for="run directory",
+        settle=0.0,
+        timeout=120,
+    ) -> Run:
+        full = dict(child_env)
+        full.update(env or {})
+        for key in ("COUNCIL_CONFIG", "COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):
+            full.pop(key, None)
+        child = subprocess.Popen(
+            [sys.executable, "-m", "mech_council", *args],
+            cwd=cwd,
+            env=full,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        lines: list[str] = []
+        threading.Thread(target=lambda: lines.extend(child.stdout or []), daemon=True).start()
+        try:
+            _await_line(lines, wait_for, timeout=timeout)
+            time.sleep(settle)
+            for press in range(times):
+                if press:
+                    time.sleep(gap)
+                os.killpg(child.pid, signum)
+            code = child.wait(timeout=timeout)
+        finally:
+            _kill_group_pid(child.pid)
+        time.sleep(0.3)  # the reader thread's last lines
+        out = "".join(lines)
+        record = Run(code, out, "")
+        record.run_dir = _run_dir_from(out)
+        if record.run_dir:
+            record.events = _read_events(record.run_dir)
+            record.manifest = _read_json(os.path.join(record.run_dir, "run.json"))
+        return record
+
+    return interrupt
+
+
+def _await_line(lines: list[str], marker: str, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(marker in line for line in lines):
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"the run never printed {marker!r}: {''.join(lines)}")
 
 
 def _run_dir_from(text: str) -> str | None:

@@ -9,10 +9,12 @@ from .config import Council
 from .console import Console
 from .extraction import extract
 from .members import Members
-from .pi_rpc import ABORT_TIMEOUT_S, Answer, ChildGone, ProtocolError
+from .pi_rpc import Answer, ChildGone, ProtocolError
 from .prompts import common
 
 REPAIR_ASKS = 2
+#: All members drop their queues at once, under one budget: a wedged one costs the exit one timeout, not N.
+ABORT_ALL_BUDGET_S = 10.0
 
 
 def round_note(round_: int | None) -> str:
@@ -264,6 +266,13 @@ class Lanes:
             self.prompts[file_base] = self.prompts.get(file_base, 0) + 1
 
     async def abort_all(self) -> None:
-        for member in list(self.members.members.values()):
+        async def drop(member) -> None:
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(member.rpc.abort(), timeout=ABORT_TIMEOUT_S + 1)
+                await member.rpc.abort()
+
+        members = list(self.members.members.values())
+        if not members:
+            return
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(ABORT_ALL_BUDGET_S):
+                await asyncio.gather(*(drop(member) for member in members))

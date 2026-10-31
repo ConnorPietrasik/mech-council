@@ -130,6 +130,18 @@ def test_closing_stdin_is_what_shuts_the_child_down_with_no_signal_at_all(tmp_pa
     os.close(member.ns_fd)
 
 
+def test_the_hurried_disposal_asks_with_a_closed_stdin_before_it_kills(tmp_path):
+    """`kill_all` kills what a closed stdin left running, never instead of it."""
+    script = json.dumps([{"contains": "", "sleep": 30}])
+
+    async def scenario():
+        member = await live_member(tmp_path, env={"FAKE_PI_SCRIPT": script})
+        await lifecycle.kill_all([member], own_namespace=None)
+        return member.proc.returncode
+
+    assert asyncio.run(scenario()) == 0, "a -9 is a KILL that landed before the closed stdin could settle the member"
+
+
 def test_a_member_ignoring_term_escalates_to_kill_and_still_goes(tmp_path):
     """The dispose escalation order, on a child that will not take TERM."""
     stubborn = subprocess.Popen(

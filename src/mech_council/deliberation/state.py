@@ -25,6 +25,9 @@ GO = "go"
 #: the chair's protocol label; never one of `AgentN`
 CHAIR_ID = "chair"
 
+#: the docket's phase while the checkpoint holds for an answer
+WAITING = "waiting for the human"
+
 
 def normalize_text(text: str) -> str:
     return " ".join((text or "").split()).casefold()
@@ -211,6 +214,10 @@ class Docket:
     #: an ask reaches the human only once a second seat backs it
     seconding: bool = True
     round: int = 0
+    #: the pass the engine had reached, for the report of a run that was cut short
+    phase: str = ""
+    #: the asks the checkpoint is parked on: empty whenever the run is not waiting on the human
+    parked_on: list[str] = field(default_factory=list)
     rounds: list[RoundRecord] = field(default_factory=list)
     phase0_counts: dict[str, int] = field(default_factory=dict)
     chair_name: str = "Chair"
@@ -222,6 +229,11 @@ class Docket:
     @property
     def n(self) -> int:
         return len(self.roster)
+
+    @property
+    def blank(self) -> bool:
+        """Nothing was ever said: there is no state to report, only a reason."""
+        return not (self.round or self.order or self.questions or self.human_notes or self.approaches or self.rounds)
 
     def bar(self) -> int:
         return self.n // 2 + 1

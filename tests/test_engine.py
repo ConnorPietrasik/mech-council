@@ -71,6 +71,15 @@ def stance_all(ask, value, *, signoff=True, **extra):
     )
 
 
+def needs_human(ask, note="needs the product owner"):
+    return payload(
+        positions=[{"item": item, "stance": "needs_human", "note": note} for item in shown_items(ask.text)],
+        human_input=[{"question": note, "item": item, "blocking": True} for item in shown_items(ask.text)],
+        backing="no_preference",
+        signoff=True,
+    )
+
+
 # --------------------------------------------------------------------------- phase 0
 
 
@@ -1013,14 +1022,6 @@ def test_the_pass_before_the_report_opens_no_hold_and_moves_none():
 def test_a_needs_human_at_the_bar_holds_the_run_until_the_human_answers():
     import asyncio
 
-    def needs_human(ask, note="needs the product owner"):
-        return payload(
-            positions=[{"item": item, "stance": "needs_human", "note": note} for item in shown_items(ask.text)],
-            human_input=[{"question": note, "item": item, "blocking": True} for item in shown_items(ask.text)],
-            backing="no_preference",
-            signoff=True,
-        )
-
     def reply(ask):
         if ask.phase == "phase0":
             return phase0_first(ask.who, "a bug")
@@ -1037,6 +1038,32 @@ def test_a_needs_human_at_the_bar_holds_the_run_until_the_human_answers():
     outcome, port = asyncio.run(main())
     assert outcome == "needs_human"
     assert any(c["waiting"] for c in port.checkpoints), "a declared stop at the bar makes the checkpoint wait"
+
+
+def test_the_park_is_the_only_thing_that_says_the_run_is_waiting():
+    """A run cut short reports the answer it waited on: a phase left standing after the checkpoint closed
+    would go on naming asks it had stopped putting to the human.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who in ("Agent1", "Agent2"):
+            return needs_human(ask)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply)
+        return await built.run(), built, port
+
+    _outcome, built, port = asyncio.run(main())
+    waiting = [c for c in port.checkpoints if c["waiting"]]
+    assert waiting and all(c["parked_on"] == c["ask_set"] for c in waiting), "the park names what it waits on"
+    assert all(c["parked_on"] == [] for c in port.checkpoints if not c["waiting"]), "a checkpoint that waits on nothing"
+    assert built.docket.parked_on == [], "and nothing at all once the checkpoint is done"
 
 
 def test_one_seat_cannot_stop_the_run_by_wanting_to():

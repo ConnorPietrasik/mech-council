@@ -50,6 +50,7 @@ from .state import (
     SKIPPED,
     STALEMATE,
     STANDING,
+    WAITING,
     Approach,
     Docket,
     Item,
@@ -138,6 +139,10 @@ class Engine:
         self._next_item += 1
         return item_id
 
+    def phase(self, where: str) -> None:
+        """Where the run had reached, written as it happens."""
+        self.docket.phase = where
+
     def add_item(self, entry: dict, raiser: str, round_: int) -> Item:
         item = Item(
             id=self.new_id(),
@@ -152,6 +157,7 @@ class Engine:
 
     async def phase0(self) -> list[str]:
         assert self.brief is not None
+        self.phase("phase 0")
         message = self.brief.phase0(mode=self.docket.mode, goal=self.goal, project=self.project)
         batch = [(agent, message) for agent in self.docket.roster]
         self.emit("phase0_start", seats=len(batch))
@@ -209,12 +215,14 @@ class Engine:
         return valid
 
     async def publish_review(self) -> None:
+        self.phase("the chair's merge")
         if not self.docket.order:
             self.emit("chair_merge_skipped", reason="nothing to merge")
             return
         await self._merge_pass(round_=0, ids=list(self.docket.order))
 
     async def publish_plan(self) -> None:
+        self.phase("the chair's comparison")
         listing = self._approach_listing()
         comparison = await self.port.chair_compare(listing, round_=0)
         self.docket.agreed_points = comparison.get("agreed") or []
@@ -261,6 +269,7 @@ class Engine:
             return
         split = self.docket.directions()
         held = ", ".join(direction_label(token, self.names) for token in split)
+        self.phase("the chair wording the council's split")
         wording = await self._direction_wording(split, round_)
         question = raise_direction_ask(
             self.docket,
@@ -330,6 +339,7 @@ class Engine:
         self.docket.round = round_
         await self._listen(round_)
         self.asks_used = {}
+        self.phase("verdicts")
         self.shown = {agent: [item.id for item in self.docket.open_items()] for agent in self.docket.roster}
         batch = []
         for agent in self.docket.roster:
@@ -358,7 +368,9 @@ class Engine:
                 continue
             self._apply_verdict(agent, result.text or "", round_)
         await self._merge_new_items(round_)
+        self.phase("the gap ladder")
         await self._gap_ladder(round_, rejected)
+        self.phase("the challenge pass")
         await self._challenge_pass(round_)
         self._read_insists(seen=round_ - 1)
         await self._merge_asks(round_)
@@ -799,6 +811,7 @@ class Engine:
         return (note + (" | " + evidence if evidence else "")).strip()
 
     async def _merge_new_items(self, round_: int) -> None:
+        self.phase("the chair's merge of what the round raised")
         fresh = [i for i in self.docket.order if not self.docket.items[i].closed and self.docket.items[i].opened_round == round_]
         if not fresh:
             return
@@ -962,6 +975,7 @@ class Engine:
             return
         if _ask_signature(asks) == self._folded_asks:
             return
+        self.phase("the chair folding the asks")
         try:
             merged = await self.port.chair_merge_questions(self._ask_listing(asks), round_=round_)
         except Abort as failure:
@@ -992,6 +1006,7 @@ class Engine:
         if not weighing:
             return
         self._peer_pass_done = True
+        self.phase("the last look at the asks before you are asked")
         self.emit("peer_pass_start", round=round_, asks=[q.id for q in weighing])
         message = self.brief.peer_pass(self._ask_listing(weighing))
         results = await self.port.ask_seats([(agent, message) for agent in self.docket.roster], round_=round_, phase="seconding")
@@ -1089,6 +1104,7 @@ class Engine:
                 self.emit_note(_held_back_note(self.docket, open_asks))
             if pending_notes:
                 # nothing to ask, and still the notes' only showing
+                self.phase("the notes for you")
                 await self.port.checkpoint([], round_=round_, terminal=terminal, listing=[], waiting=False, notes=pending_notes)
                 mark_shown(pending_notes, round_)
             self.emit(
@@ -1109,7 +1125,17 @@ class Engine:
         waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
         if terminal and not waiting:
             self._mark_unasked()  # the ledger has to say the run ended without asking
-        outcome = await self.port.checkpoint(ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting, notes=pending_notes)
+        self.phase(WAITING if waiting else "showing you the asks")
+        self.docket.parked_on = [q.id for q in ask] if waiting else []
+        try:
+            outcome = await self.port.checkpoint(
+                ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting, notes=pending_notes
+            )
+        finally:
+            # the park is over the moment the checkpoint is done: a run cut short later must not go on
+            # reporting that it waits on an answer, or naming asks it never put to the human
+            self.docket.parked_on = []
+            self.phase("applying what you said")
         # the block reached the console whether or not the run waited
         mark_shown(pending_notes, round_)
         if outcome.waited:
@@ -1133,6 +1159,7 @@ class Engine:
 
     async def _listen(self, round_: int) -> None:
         """Answers the human gave while the run was working, applied at a boundary with no ask in flight."""
+        self.phase("reading what you typed")
         outcome = await self.port.drain_human()
         if not (outcome.answers or outcome.skipped or outcome.recommendations):
             return

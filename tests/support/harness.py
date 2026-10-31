@@ -121,6 +121,7 @@ class ScriptPort:
                 "waiting": waiting,
                 "ask_set": [q.id for q in ask_set],
                 "listing": [q.id for q in listing],
+                "parked_on": list(self.docket.parked_on),
                 "notes": [f"{note.id}:{kind}" for note, kind in notes],
             }
         )

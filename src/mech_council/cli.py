@@ -75,7 +75,10 @@ flags:
   -h, --help               show this help and exit
   -V, --version            show the version and exit
 
-exit codes: 0 a result was written, 1 no result, 2 usage error, 130/143 signalled
+exit codes: 0 a result was written, 1 no result, 2 usage error, 130/143 signalled — the first
+              signal reports where the run stood; a second, a beat later, stops waiting for the
+              members, kills what is left, and ends faster; one more after that starts the two
+              seconds it takes to end over from there
 """
 
 

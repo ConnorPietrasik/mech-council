@@ -28,6 +28,7 @@ from .text import caption, severity_key, wrap
 
 def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
     lines = context.header("Code review") + [""]
+    lines += context.interrupted_block()
     lines += ["## Roster", ""] + context.roster_table() + [""]
 
     buckets = _bucket(docket)

@@ -136,12 +136,34 @@ never going to be put to you.
 
 Notes (`N1`) print once at the next checkpoint and are listed again in the report; they exist to stop the agent from spamming pointless questions.
 
+### Interrupting a run
+
+One `Ctrl+C` stops the deliberation and still writes the report. It leads with **Cut short by
+`SIGINT`** — the round, the pass it was in, what it was asking you, and what each seat was doing when
+the signal landed — and then reports the docket exactly as it stood, write journal and `run.json`
+included. Nothing in it is settled: a plan whose direction a majority held when the signal arrived
+says so beside that direction.
+
+A second `Ctrl+C`, a second or more after the first, is the way out when that is taking too long: the
+members get a closed stdin and a moment to take their own tool shells down with them and are killed where
+they stand; the write journal walk ends where it had got to; and the whole hurried exit gets two seconds
+before the process is abandoned where it stands — leaving a `run.json` that says the namespace sweep never
+ran, never one that says less than the manifest already written. What those two seconds reach is what you
+get: usually the report, `human_input.json` and a `run.json` with `exit_path: "fast"` and the list of what
+was given up. When they don't, **the report is what the abandoning costs you** — `run.json` and
+`events.jsonl` hold what the run knew, and the console says it ran out of time. Press again a second or
+more later and the two seconds start over from there, so the bound cannot run out while the run can still
+be reached, and every press says what it did rather than being swallowed. One keystroke arrives twice —
+once from the terminal, whose process group the orchestrator stays in so it can still read the keyboard,
+and once relayed by the supervisor — so any press within a second of the last counted one is that same
+press, and nothing you do with the keyboard in that second hurries a run that is already stopping.
+
 ## What you get
 
 | File | What's in it |
 |---|---|
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
-| `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. |
+| `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
 | `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note and the round each one was shown at. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
@@ -156,7 +178,7 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 | `0` | A result was written — including `needs_human` and `round_limit_reached`. |
 | `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a host that cannot fork. |
 | `2` | Usage error. |
-| `130`/`143` | Interrupted. Every child is disposed, every namespace this run created is swept, and `run.json` finalized first. |
+| `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |
 
 ## Configuration
 

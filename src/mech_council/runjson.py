@@ -151,7 +151,8 @@ def finalize(
 
 
 def _write(manifest: RunManifest) -> None:
-    tmp = manifest.path + ".tmp"
+    # a unique tmp: the hurried exit can write while this write is mid-flight
+    tmp = f"{manifest.path}.tmp-{os.getpid()}-{time.time_ns()}"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(manifest.data, handle, indent=2, ensure_ascii=False, default=str)
         handle.write("\n")

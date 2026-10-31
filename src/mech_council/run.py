@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 import traceback
+from dataclasses import asdict
 
 from . import runjson
 from .asks import AskUnusable, Lanes
@@ -16,13 +17,25 @@ from .config import Council
 from .console import Console, Transcripts
 from .deliberation.engine import Abort, Engine
 from .deliberation.escalations import MOOT, SETTLED, effective_class, showable
-from .deliberation.state import ABORTED, CONSENSUS, NEEDS_OUTCOME, NO_PREFERENCE, RETIRED, ROUND_LIMIT, STALEMATE, Docket
+from .deliberation.state import (
+    ABORTED,
+    CONSENSUS,
+    NEEDS_OUTCOME,
+    NO_PREFERENCE,
+    RETIRED,
+    ROUND_LIMIT,
+    STALEMATE,
+    Docket,
+)
 from .deliberation.termination import direction_rule
 from .humaninput import Checkpoint
+from .interrupt import Brake, owed, signal_name
 from .members import MemberGone, Members
 from .port import Port
+from .process import lifecycle
 from .prompts.brief import Brief
 from .render import context as report_context
+from .render.context import Interrupted
 from .sandbox import journal as journal_mod
 from .watchdog import Watchdog
 
@@ -62,24 +75,70 @@ async def orchestrate(launch, sandbox) -> int:
     )
     transcripts = Transcripts(run_dir, council.transcripts)
     outcome, aborted = ABORTED, ""
-    rounds, report_path = 0, ""
-    signalled: list[int] = []
-    stop = asyncio.Event()
-
-    def on_signal(sig: int) -> None:
-        if not signalled:
-            signalled.append(sig)
-            console.say(f"signal {sig}: disposing every child, finalizing run.json")
-        stop.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with contextlib.suppress(NotImplementedError, ValueError, RuntimeError):
-            asyncio.get_running_loop().add_signal_handler(sig, on_signal, sig)
-
+    report_path = ""
     members: Members | None = None
     lanes: Lanes | None = None
-    docket: Docket | None = None
+    # the docket is made here, so an aborted run still has its state to report
+    docket = _docket(council)
+    # whether this run's own `run.json` write has started, so the last-resort exit does not replace it
+    manifest_claimed = False
     baselines: dict[str, dict[str, str]] = {}
+
+    def picture(signum: int) -> Interrupted:
+        return Interrupted(
+            name=signal_name(signum),
+            elapsed=console.duration(),
+            round=docket.round,
+            phase=docket.phase,
+            waiting_on=list(docket.parked_on),
+            in_flight=lanes.digest() if lanes is not None else [],
+        )
+
+    def kill_now() -> None:
+        """What the hurried exit does to the members once a closed stdin has not settled them."""
+        if members is None:
+            return
+        brake.skip("the members' stop grace")
+        own_pgid = os.getpgid(0)
+        for member in list(members.members.values()):
+            lifecycle.send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
+
+    def run_json_extra() -> dict:
+        extra: dict = {}
+        if aborted:
+            extra["aborted_reason"] = aborted
+        if brake.at is not None:
+            extra["interrupted"] = asdict(brake.at)
+        if brake.hard:
+            extra["exit_path"] = "fast"
+            extra["skipped_steps"] = brake.skipped
+        return extra
+
+    def write_run_json(survivors: lifecycle.SweepResult, journal: list[dict], report: str, *, swept: bool = True) -> None:
+        nonlocal manifest_claimed
+        # claimed before the write: an exit landing mid-write must leave this manifest, not replace it
+        manifest_claimed = True
+        runjson.finalize(
+            manifest,
+            outcome=outcome,
+            journal=journal,
+            survivor_pids=survivors.pids,
+            survivor_ns=survivors.namespaces,
+            rounds=docket.round,
+            report=report,
+            namespace_sweep="none (in place)" if council.in_place else ("namespace" if swept else "not swept"),
+            **run_json_extra(),
+        )
+
+    def abandon() -> None:
+        """The last-resort exit's manifest, skipped once the full write has started."""
+        if manifest_claimed:
+            return
+        write_run_json(lifecycle.SweepResult(), [], "", swept=False)
+
+    brake = Brake(console=console, picture=picture, kill=kill_now, abandon=abandon)
+    brake.arm()
+
     try:
         baselines = {} if sandbox.in_place else {base: journal_mod.listing(sandbox.upper(base)) for base in _file_bases(council)}
         members = Members(
@@ -93,7 +152,7 @@ async def orchestrate(launch, sandbox) -> int:
         )
         await members.start_all()
         lanes = Lanes(council, members, console)
-        outcome, rounds, docket = await _deliberate(council, members, console, stop, lanes)
+        outcome = await _deliberate(council, members, console, brake, lanes, docket)
     except (Abort, AskUnusable, ChairUnusable, MemberGone) as failure:
         aborted, outcome = str(failure), ABORTED
         console.say(aborted)
@@ -106,49 +165,39 @@ async def orchestrate(launch, sandbox) -> int:
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
     finally:
-        # Each step is independent: one failing must not cancel the others.
-        survivors = await _teardown(members, console, in_place=council.in_place)
-        journal = _owed(console, "the write journal", _journal, council, sandbox, baselines, console) or []
+        # Each step is independent: one failing must not cancel the others, and a hurried exit skips the waits.
+        survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
+        journal = owed(console, "the write journal", _journal, council, sandbox, baselines, console, brake) or []
         report_path = (
-            _owed(console, "the report", _report, council, docket, console, run_dir, outcome, rounds, journal, manifest, aborted) or ""
+            owed(console, "the report", _report, council, docket, console, run_dir, outcome, journal, manifest, aborted, brake.at) or ""
         )
-        _owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
+        owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
         if lanes is not None:
-            _owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
-        _owed(
-            console,
-            "run.json",
-            runjson.finalize,
-            manifest,
-            outcome=outcome,
-            journal=journal,
-            survivor_pids=survivors.pids,
-            survivor_ns=survivors.namespaces,
-            rounds=rounds,
-            report=report_path,
-            namespace_sweep="none (in place)" if council.in_place else "namespace",
-            **({"aborted_reason": aborted} if aborted else {}),
-        )
-        _owed(console, "the transcripts", transcripts.close)
-        _owed(console, "the transcript tally", console.say, f"transcripts: {transcripts.tally()}")
-        if signalled:
-            console.say(f"exiting on signal {signalled[0]}")
+            owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
+        owed(console, "run.json", write_run_json, survivors, journal, report_path)
+        owed(console, "the transcripts", transcripts.close)
+        owed(console, "the transcript tally", console.say, f"transcripts: {transcripts.tally()}")
+        if brake.first:
+            console.say(f"exiting on signal {brake.first}")
+            if brake.skipped:
+                console.say("skipped: " + ", ".join(brake.skipped))
         elif outcome in RESULTS:
             console.say(f"outcome: {outcome}")
         if report_path:
-            _print_report(report_path)
-    return 128 + signalled[0] if signalled else (EXIT_OK if outcome in RESULTS else EXIT_ABORT)
+            owed(console, "the report's console copy", _print_report, report_path)
+        # the hurried exit's clock outlasts every wait in this block: the wedged step can be a write
+        brake.disarm()
+    return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS else EXIT_ABORT)
 
 
-def _owed(console: Console, what: str, call, *args, **kw):
-    """One owed exit-path step: its failure is a console line and an event, and the caller falls back on None."""
-    try:
-        return call(*args, **kw)
-    except Exception as failure:
-        frames = traceback.format_exc(limit=4).strip().splitlines()[-3:]
-        console.say(f"{what} failed on the way out ({type(failure).__name__}: {failure})")
-        console.event("exit_step_failed", step=what, kind=type(failure).__name__, reason=str(failure), frames=frames)
-        return None
+def _docket(council: Council) -> Docket:
+    return Docket(
+        mode=council.mode,
+        goal=council.goal,
+        roster=council.seat_ids,
+        chair_name=council.chair.name,
+        seconding=council.seconding,
+    )
 
 
 def _file_bases(council: Council) -> list[str]:
@@ -162,12 +211,10 @@ def _roster(council: Council) -> str:
     return " · ".join(shown)
 
 
-async def _deliberate(council: Council, members: Members, console: Console, stop: asyncio.Event, lanes: Lanes):
+async def _deliberate(council: Council, members: Members, console: Console, brake: Brake, lanes: Lanes, docket: Docket) -> str:
     from .humanio import LineReader
 
-    roster = council.seat_ids
     names = council.roster_names
-    docket = Docket(mode=council.mode, goal=council.goal, roster=roster, chair_name=council.chair.name, seconding=council.seconding)
     brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place)
     chair = Chair(council, lanes, console, brief)
     reader = LineReader()
@@ -191,17 +238,16 @@ async def _deliberate(council: Council, members: Members, console: Console, stop
     watchdog = Watchdog(council=council, lanes=lanes, chair=chair, console=console)
     watchdog.start()
     try:
-        outcome = await _race(engine.run(), stop)
+        return await _race(engine.run(), brake)
     finally:
         await watchdog.stop()
         await lanes.abort_all()
-    return outcome, docket.round, docket
 
 
-async def _race(run, stop: asyncio.Event):
+async def _race(run, brake: Brake):
     """A signal interrupts the current ask; the run still leaves through `finally`."""
     task = asyncio.ensure_future(run)
-    waiter = asyncio.ensure_future(stop.wait())
+    waiter = asyncio.ensure_future(brake.stop.wait())
     done, _ = await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
     if task in done:
         waiter.cancel()
@@ -214,8 +260,16 @@ async def _race(run, stop: asyncio.Event):
     except asyncio.CancelledError:
         pass
     except Exception as failure:
-        raise Abort(f"the run was signalled, and the loop also raised {type(failure).__name__}: {failure}") from failure
-    raise Abort("the run was signalled")
+        raise Abort(f"{_interruption(brake)}, and the loop also raised {type(failure).__name__}: {failure}") from failure
+    raise Abort(_interruption(brake))
+
+
+def _interruption(brake: Brake) -> str:
+    at = brake.at
+    if at is None:
+        return "the run was signalled"
+    where = f" ({at.where})" if at.where else ""
+    return f"interrupted by {at.name} {at.elapsed:.1f} s in{where}"
 
 
 def _explainer(lanes: Lanes, council: Council, docket: Docket):
@@ -341,27 +395,31 @@ def _seats(ids: list[str], names: dict[str, str]) -> str:
     return ", ".join(name_of(one, names) for one in ids) or "nobody"
 
 
-async def _teardown(members: Members | None, console: Console, *, in_place: bool = False):
-    from .process import lifecycle
-
+async def _teardown(members: Members | None, console: Console, *, in_place: bool = False, brake: Brake):
     if members is None:
         result = lifecycle.SweepResult()
         console.say(lifecycle.NO_SWEEP_LINE if in_place else lifecycle.survivor_line(result))
         return result
     try:
+        if brake.hard:
+            brake.skip("the members' stop grace")
+            return await members.dispose_fast()
         return await members.dispose_all()
     except Exception as failure:  # pragma: no cover - defensive
         console.say(f"dispose failed: {failure}")
         return lifecycle.SweepResult()
 
 
-def _journal(council: Council, sandbox, baselines: dict, console: Console) -> list[dict]:
+def _journal(council: Council, sandbox, baselines: dict, console: Console, brake: Brake) -> list[dict]:
     if not baselines:
         return []
     from .render.text import name_of
 
     out = []
     for base in _file_bases(council):
+        if brake.hard:
+            brake.skip("the rest of the write journal walk")
+            break
         who = name_of(base, council.display_names)
         try:
             changes = journal_mod.journal(sandbox.upper(base), sandbox.lower_fd)
@@ -383,22 +441,30 @@ def _journal(council: Council, sandbox, baselines: dict, console: Console) -> li
 
 
 def _report(
-    council: Council, docket, console: Console, run_dir: str, outcome: str, rounds: int, journal: list[dict], manifest, aborted: str
+    council: Council,
+    docket: Docket | None,
+    console: Console,
+    run_dir: str,
+    outcome: str,
+    journal: list[dict],
+    manifest,
+    aborted: str,
+    interrupted: Interrupted | None = None,
 ) -> str:
     from .render import report_plan, report_review
 
     try:
-        if docket is not None:
+        context = _report_context(council, console, outcome, journal, manifest, docket, aborted, interrupted)
+        if docket is None or docket.blank:
+            text = report_context.minimal_report(reason=aborted or outcome, context=context)
+        else:
             from .sandbox.journal import mark_sandbox_items
 
             mark_sandbox_items(docket, journal, project=council.project)
-        context = _report_context(council, console, outcome, rounds, journal, manifest, docket, aborted)
-        if docket is None:
-            text = report_context.minimal_report(reason=aborted or outcome, context=context)
-        elif council.mode == "plan":
-            text = report_plan.render(docket, context, run_dir=run_dir, converged=_converged(docket))
-        else:
-            text = report_review.render(docket, context, run_dir=run_dir)
+            if council.mode == "plan":
+                text = report_plan.render(docket, context, run_dir=run_dir, converged=_converged(docket))
+            else:
+                text = report_review.render(docket, context, run_dir=run_dir)
     except Exception as failure:
         console.say(f"the report could not be rendered ({type(failure).__name__}: {failure}) — writing what can be said instead")
         console.event(
@@ -413,9 +479,13 @@ def _report(
             f"{type(failure).__name__}: {failure}. `events.jsonl` holds the run.\n"
         )
     path = os.path.join(run_dir, council.adapter.report_name)
+    # a unique tmp, replaced into place: the hurried exit can abandon the run mid-write, and half a report
+    # reads as a whole one
+    tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
     try:
-        with open(path, "w", encoding="utf-8") as handle:
+        with open(tmp, "w", encoding="utf-8") as handle:
             handle.write(text)
+        os.replace(tmp, path)
     except OSError as failure:
         console.say(f"could not write the report: {failure}")
         return ""
@@ -428,7 +498,14 @@ def _converged(docket) -> str | None:
 
 
 def _report_context(
-    council: Council, console: Console, outcome: str, rounds: int, journal: list[dict], manifest, docket=None, aborted: str = ""
+    council: Council,
+    console: Console,
+    outcome: str,
+    journal: list[dict],
+    manifest,
+    docket: Docket | None = None,
+    aborted: str = "",
+    interrupted: Interrupted | None = None,
 ) -> report_context.ReportContext:
     roster = []
     for agent_id, spec in zip(council.seat_ids, council.agents):
@@ -450,7 +527,7 @@ def _report_context(
         council_lineage=f"extends {' → '.join(council.extends)}" if council.extends else "",
         outcome=outcome,
         mode=council.mode,
-        rounds=rounds,
+        rounds=docket.round if docket else 0,
         date=time.strftime("%Y-%m-%d %H:%M:%S"),
         sandbox_mib=council.sandbox_mib,
         member_count=len(_file_bases(council)),
@@ -468,11 +545,12 @@ def _report_context(
         goal=council.goal,
         aborted_reason=aborted,
         captions=council.roster_names,
+        interrupted=interrupted,
     )
 
 
-def _write_human_input(run_dir: str, docket, console: Console) -> None:
-    if docket is None:
+def _write_human_input(run_dir: str, docket: Docket | None, console: Console) -> None:
+    if docket is None or docket.blank:
         return
     record = {
         "questions": [

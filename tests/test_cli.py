@@ -8,11 +8,10 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
-from .conftest import DEFAULT_CONFIG, FAKE_PI, _kill_group_pid, canary_entries, write_project_config
+from .conftest import DEFAULT_CONFIG, FAKE_PI, canary_entries, write_project_config
 
 TWO_COUNCILS = """\
 [defaults]
@@ -181,33 +180,59 @@ def test_a_bad_project_is_a_usage_error(cli, canary):
     assert canary_entries(canary) == []
 
 
-def test_sigterm_leaves_on_128_plus_signum(cli, project, child_env):
-    env = dict(child_env, **runs_env(project), FAKE_PI_SCRIPT=json.dumps([{"contains": "", "sleep": 60}]))
-    child = subprocess.Popen(
-        [sys.executable, "-m", "mech_council", "review"],
-        cwd=project,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
+def test_sigterm_leaves_on_128_plus_signum(signalled_cli, project, child_env):
+    """One keystroke is one press, delivered twice: the group signal reaches the orchestrator and the supervisor relays it."""
+    env = dict(child_env, **runs_env(project), FAKE_PI_SCRIPT=_cut_short_script())
+    result = signalled_cli(["review"], cwd=project, env=env, signum=signal.SIGTERM, wait_for="chair merged", settle=0.5)
+    assert result.returncode == 128 + signal.SIGTERM, result.console
+    assert "## Cut short by SIGTERM" in result.report(), result.console
+    assert "exit_path" not in result.manifest, "the relay of a press must not hurry the run it is relaying"
+
+
+def test_an_interrupted_run_reports_where_it_stood(signalled_cli, project):
+    """The signal stops the deliberation, not the report: the state the seats built is what gets written."""
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_cut_short_script())
+    result = signalled_cli(["review"], cwd=project, env=env, wait_for="chair merged", settle=0.5)
+    assert result.returncode == 130, result.console
+    assert result.manifest["outcome"] == "aborted" and result.manifest["finished"], "an interrupted run finalizes like any other"
+    assert result.manifest["rounds"] == 1
+    assert result.manifest["interrupted"]["round"] == 1
+    report = result.report()
+    assert "# Why nothing ran" not in report, "the docket held state, so the report holds it"
+    assert "the cache ignores tenants" in report, "what the seats raised before the signal survives into the report"
+    head = report.split("## Roster")[0]
+    assert "## Cut short by SIGINT" in head and "round 1" in head, "the cut short leads, before anything that reads as a verdict"
+    assert "in flight" in head, "the seats that were mid-answer are named"
+
+
+def test_a_second_signal_ends_the_run_where_it_stood(signalled_cli, project):
+    """The second press buys time, not silence: the waits go, what the seats said stays."""
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_cut_short_script(), FAKE_PI_SILENT_ABORT="1")
+    result = signalled_cli(["review"], cwd=project, env=env, times=2, wait_for="chair merged", settle=0.5)
+    assert result.returncode == 130, result.console
+    assert result.manifest["exit_path"] == "fast", "a press after the coalescing window is a second press"
+    assert result.manifest["outcome"] == "aborted" and result.manifest["finished"], "the fast way out still finalizes run.json"
+    assert "the cache ignores tenants" in result.report(), "the report is what the second press must never cost"
+    skipped = result.manifest["skipped_steps"]
+    assert "the members' stop grace" in skipped and "the rest of the write journal walk" in skipped, skipped
+    assert result.manifest["survivor_pids"] == [] and result.manifest["survivor_ns"] == [], "the fast way out leaves nothing alive"
+
+
+def _cut_short_script() -> str:
+    """Phase 0 and the merge answer at once; round 1 never ends, so the signal lands on a docket with state."""
+    return json.dumps(
+        [
+            {
+                "contains": "Phase 0",
+                "reply": {
+                    "findings": [{"claim": "the cache ignores tenants", "severity": "major", "evidence": "src/app.py:1"}],
+                    "summary": "one finding",
+                },
+            },
+            {"contains": "# Deduplicate", "reply": {"groups": [], "human_input": []}},
+            {"contains": "Round deliberation", "sleep": 90},
+        ]
     )
-    try:
-        assert child.stdout is not None, "stdout was PIPEd above: it is how the run directory is awaited"
-        # Wait until the run exists, then signal the group the way a terminal would.
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            line = child.stdout.readline()
-            if "run directory" in line:
-                break
-            if not line:
-                break
-        time.sleep(0.3)
-        os.killpg(child.pid, signal.SIGTERM)
-        code = child.wait(timeout=60)
-        assert code == 128 + signal.SIGTERM, (code, child.stdout.read())
-    finally:
-        _kill_group_pid(child.pid)
 
 
 # ------------------------------------------------------- The nested-council guard

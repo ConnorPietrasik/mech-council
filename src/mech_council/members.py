@@ -154,6 +154,15 @@ class Members:
         self.transcripts.close()
         return self.survivors
 
+    async def dispose_fast(self) -> lifecycle.SweepResult:
+        """A second signal's disposal: the closed stdins, then SIGKILL, then the sweep — each step on a short bound."""
+        self.stopping = True
+        self.console.say(f"killing {len(self.council.agents) + 1} member(s)")
+        held = list(self.members.values())
+        self.survivors = await lifecycle.kill_all(held, own_namespace=self.own_namespace(), on_line=self.console.say)
+        self.transcripts.close()
+        return self.survivors
+
     def own_namespace(self) -> int | None:
         if self.council.in_place:
             return None

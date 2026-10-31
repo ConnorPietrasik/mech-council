@@ -4,13 +4,15 @@ import asyncio
 import contextlib
 import os
 import signal
-import time
+from collections.abc import Awaitable, Iterable
 from dataclasses import dataclass, field
 
 from ..sandbox.mount import DISPOSE_SWEEP_AFTER_S, TERM_GRACE_S
 from .spawn import Member
 
 STDIN_CLOSE_GRACE_S = 3.0
+#: The hurried disposal's bound on one step: a member's notice of its closed stdin, then the reap after the kill.
+HURRY_STEP_S = 0.5
 
 
 @dataclass
@@ -38,11 +40,7 @@ async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
     detached into its own process group, so it comes first.
     """
     own_pgid = own_pgid if own_pgid is not None else os.getpgid(0)
-    with contextlib.suppress(Exception):
-        await member.rpc.close_stdin()
-    deadline = time.monotonic() + STDIN_CLOSE_GRACE_S
-    while time.monotonic() < deadline and member.proc.returncode is None:
-        await asyncio.sleep(0.05)
+    await _bounded(STDIN_CLOSE_GRACE_S, (_settle(member),))
     if member.proc.returncode is None:
         send(member.pgid, signal.SIGTERM, own_pgid=own_pgid)
         try:
@@ -65,6 +63,47 @@ def namespace_set(members: list[Member], *, own_namespace: int | None) -> set[in
     for member in members:
         out.update(member.ns_records)
     return out
+
+
+async def kill_all(members: list[Member], *, own_namespace: int | None, on_line=None) -> SweepResult:
+    """The hurried disposal: closed stdins, then group SIGKILL for what is left, then the sweep."""
+    await _bounded(HURRY_STEP_S, (_settle(member) for member in members))
+    own_pgid = os.getpgid(0)
+    for member in list(members):
+        if member.proc.returncode is None:
+            send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
+    await _bounded(HURRY_STEP_S, (_reap(member) for member in members))
+    return _sweep_and_report(members, own_namespace=own_namespace, on_line=on_line)
+
+
+async def _bounded(seconds: float, steps: Iterable[Awaitable[None]]) -> None:
+    """Do these at once, giving up on them after `seconds`."""
+    with contextlib.suppress(TimeoutError):
+        async with asyncio.timeout(seconds):
+            await asyncio.gather(*steps)
+
+
+async def _settle(member: Member) -> None:
+    """The closed stdin, then the member's own way out — the only one that reaches what it detached on its own."""
+    with contextlib.suppress(Exception):
+        await member.rpc.close_stdin()
+    await _await_exit(member)
+
+
+async def _reap(member: Member) -> None:
+    await _await_exit(member)
+    with contextlib.suppress(Exception):
+        await member.rpc.stop()
+    if member.stderr_task is not None:
+        member.stderr_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await member.stderr_task
+
+
+async def _await_exit(member: Member) -> None:
+    """Wait for the member's own exit without awaiting its transport, which `close_stdin` has already half closed."""
+    while member.proc.returncode is None:
+        await asyncio.sleep(0.05)
 
 
 def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None = None) -> SweepResult:
@@ -139,8 +178,12 @@ async def dispose_all(
         for member in members:
             send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
     await asyncio.sleep(0)
-    namespaces = namespace_set(members, own_namespace=own_namespace)
+    return _sweep_and_report(members, own_namespace=own_namespace, on_line=on_line)
+
+
+def _sweep_and_report(members: list[Member], *, own_namespace: int | None, on_line=None) -> SweepResult:
     # in place the members share this namespace, so there is nothing to sweep without reaching past the run
+    namespaces = namespace_set(members, own_namespace=own_namespace)
     result = sweep(namespaces, keep_fds=[member.ns_fd for member in members]) if namespaces else SweepResult()
     close_ns_fds(members)
     if on_line:

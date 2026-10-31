@@ -30,6 +30,7 @@ RULES = """\
 
 def render(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> str:
     lines = context.header("Implementation plan") + [""]
+    lines += context.interrupted_block()
     lines += [RULES, ""]
     lines += ["## Roster", ""] + context.roster_table(extra="backing") + [""]
     lines += _chosen(docket, context, converged)
@@ -69,6 +70,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
         return out + [""]
     artifact, note = resolve_direction(docket, converged, context.captions)
     out.append(f"- converged token: `{converged}`")
+    if context.interrupted is not None:
+        out.append(f"- **{context.interrupted.name} ended the run with this direction holding the majority, not settled**")
     if note:
         out.append(f"- **{note}**")
     out.append("")

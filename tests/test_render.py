@@ -7,7 +7,7 @@ import re
 from mech_council.deliberation import dispositions, escalations, state
 from mech_council.render import docket as docket_render
 from mech_council.render import preview, report_plan, report_review
-from mech_council.render.context import ReportContext, RosterRow
+from mech_council.render.context import Interrupted, ReportContext, RosterRow, minimal_report
 
 
 def build(mode="review", n=3, goal="g"):
@@ -329,6 +329,34 @@ def test_an_aborted_run_still_renders_a_report_naming_the_reason():
     assert text.startswith("# Code review")
     assert "aborted" in text and "Agent2: no answer" in text
     assert "a finding the run never finished vetting" in text
+
+
+def test_a_cut_short_run_leads_with_where_it_stopped_in_every_report():
+    cut = Interrupted(
+        name="SIGINT",
+        elapsed=41.2,
+        round=2,
+        phase="the gap ladder",
+        waiting_on=["H1"],
+        in_flight=[{"agent": "Agent1", "elapsed": 9.0, "idle": 1.0, "tool_name": "edit", "last_tool": "path=src/app.py"}],
+    )
+
+    docket = build()
+    item(docket, "F1", "the guard is missing")
+    review = report_review.render(docket, context(outcome="aborted", interrupted=cut))
+    head = review.split("## Roster")[0]
+    assert "## Cut short by SIGINT" in head and "round 2 · the gap ladder" in head
+    assert "it was asking you: H1" in head, "what the run wanted from the human is the first thing it says"
+    assert "Metic (Agent1)" in head and "`edit`" in head, "the seat mid-answer is named with what it was doing"
+
+    plan = build(mode="plan")
+    plan.backing = {"Agent1": "Agent1", "Agent2": "Agent1", "Agent3": "Agent2"}
+    text = report_plan.render(plan, context(mode="plan", outcome="aborted", interrupted=cut), converged="Agent1")
+    assert "Cut short by SIGINT" in text.split("## Rules for the implementer")[0]
+    assert "not settled" in section(text, "Chosen direction"), "a majority a signal cut short is not a chosen direction"
+
+    sparse = minimal_report(reason="interrupted by SIGINT 41.2 s in (phase 0)", context=context(outcome="aborted", interrupted=cut))
+    assert "## Cut short by SIGINT" in sparse.split("# Why nothing ran")[0], "a docket with nothing on it still says where it stood"
 
 
 def test_the_artifacts_section_names_the_real_files():

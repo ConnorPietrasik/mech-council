@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .text import caption
+
 
 @dataclass
 class RosterRow:
@@ -11,6 +13,24 @@ class RosterRow:
     phase0_count: int = 0
     warning: str = ""
     backing: str = ""  # plan: the token from the round that ended the run
+
+
+@dataclass
+class Interrupted:
+    """Where the run stood when the signal landed."""
+
+    name: str = ""
+    elapsed: float = 0.0
+    round: int = 0
+    phase: str = ""
+    #: the asks the run was parked on when the signal landed
+    waiting_on: list[str] = field(default_factory=list)
+    #: `Lanes.digest()` rows: what each seat was doing
+    in_flight: list[dict] = field(default_factory=list)
+
+    @property
+    def where(self) -> str:
+        return " · ".join(part for part in (f"round {self.round}" if self.round else "", self.phase) if part)
 
 
 @dataclass
@@ -39,6 +59,7 @@ class ReportContext:
     goal: str | None = None
     aborted_reason: str = ""
     captions: dict[str, str] = field(default_factory=dict)
+    interrupted: Interrupted | None = None
 
     def header(self, title: str) -> list[str]:
         trust = "no-approve (untrusted)" if self.untrusted else "approve"
@@ -62,6 +83,26 @@ class ReportContext:
             f"- project trust: {trust} · transcripts: {self.transcripts} ({self.transcript_note})",
             f"- pi: `{self.pi_cli}` ({self.pi_version})",
         ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
+
+    def interrupted_block(self) -> list[str]:
+        """The cut short leads the report, so nothing below it reads as settled."""
+        cut = self.interrupted
+        if cut is None:
+            return []
+        out = [f"## Cut short by {cut.name}", ""]
+        out.append(
+            f"Nothing below is settled: {cut.name} arrived {cut.elapsed:.1f} s in"
+            + (f", with the run at {cut.where}." if cut.where else ", before the first round.")
+        )
+        out.append("")
+        if cut.waiting_on:
+            out.append("- it was asking you: " + ", ".join(cut.waiting_on))
+        for row in cut.in_flight:
+            who = caption(str(row.get("agent", "?")), self.captions)
+            tool = str(row.get("tool_name") or "")
+            doing = f"`{tool}` {row.get('last_tool')}".strip() if tool else f"last event: {row.get('last_event') or 'none yet'}"
+            out.append(f"- in flight: {who} — {doing} ({row.get('elapsed', 0)} s, idle {row.get('idle', 0)} s)")
+        return out + [""]
 
     def roster_table(self, *, extra: str = "") -> list[str]:
         noun = "plans" if self.mode == "plan" else "findings"
@@ -103,7 +144,8 @@ class ReportContext:
 
 
 def minimal_report(*, reason: str, context: ReportContext) -> str:
-    lines = context.header("Council run: no result") + ["", "# Why nothing ran", "", reason, ""]
+    lines = context.header("Council run: no result") + [""] + context.interrupted_block()
+    lines += ["# Why nothing ran", "", reason, ""]
     if context.roster or context.chair_model:
         lines += ["The council it convened:", ""] + context.roster_table() + [""]
     return "\n".join(lines) + "\n"
