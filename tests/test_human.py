@@ -419,6 +419,22 @@ def test_explain_without_a_channel_says_so_and_keeps_waiting():
     assert not outcome.recommendations and not outcome.answers
 
 
+def test_an_explain_reply_of_nothing_buys_no_recommendation():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+
+    class Blank:
+        text = " \n\n "
+
+    async def ask_seat(agent, text, *, round_, phase):
+        return Blank()
+
+    cp, console, _reader = make_checkpoint(docket, lines=["explain H1", ""], ask_seat=ask_seat)
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert outcome.recommendations == {}
+    assert any("sent nothing" in line for line in console.lines)
+
+
 # --------------------------------------------------------------------------- notes: shown, never answered
 
 

@@ -150,7 +150,7 @@ def test_the_ask_fold_brief_shows_the_chair_asks_and_their_ids():
 
 
 def test_every_seat_phase_repairs_with_the_verdict_shape():
-    """A repair re-ask quotes the shape of the pass it repairs: the gap, defense, explain and seconding passes had the chair's."""
+    """A repair re-ask quotes the shape of the pass it repairs: the gap, defense and seconding passes had the chair's."""
     verdict = common.schema_hint("review", phase="round")
     for phase in common.SEAT_PHASES:
         assert common.schema_hint("review", phase=phase) == verdict

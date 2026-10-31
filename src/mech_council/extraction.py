@@ -146,7 +146,6 @@ class Extraction:
     repaired: bool = False
     errors: list[str] = field(default_factory=list)  # repairable problems
     invalid: bool = False  # no JSON object at all
-    summary: str = ""
 
 
 def find_json(text: str) -> tuple[dict | None, str | None]:
@@ -768,4 +767,7 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
     if kind == "watchdog":
         decisions, errors = parse_watchdog(text)
         return Extraction(data={"decisions": decisions}, invalid=not decisions, errors=errors)
+    if kind == "prose":
+        # an `explain` reply: prose is the shape the ask asked for, so nothing here is repairable, and `Outcome.text` is the whole answer
+        return Extraction()
     raise KeyError(kind)

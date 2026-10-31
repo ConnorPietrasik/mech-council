@@ -268,8 +268,9 @@ def merge_schema(mode: str) -> str:
     return chair.MERGE_SCHEMA.replace("{id}", adapter_for(mode).id_prefix)
 
 
-#: the passes where a seat owes a verdict-shaped reply, so a repair re-ask quotes the round schema back to it
-SEAT_PHASES = ("round", "gap", "defense", "explain", "seconding")
+#: the passes where a seat owes a verdict-shaped reply, so a repair re-ask quotes the round schema back to it;
+#: `explain` owes prose instead, so it is not one of them
+SEAT_PHASES = ("round", "gap", "defense", "seconding")
 
 
 def schema_hint(mode: str, *, phase: str) -> str:
@@ -393,8 +394,8 @@ def explain_ask(question: str, followup: str) -> str:
             f"Your question was: {question}",
             f"They ask: {followup}",
             "",
-            "Answer with the tradeoffs and **a recommendation**. You may re-read the "
-            "workspace. Your reply is shown beside the question as your own text: it changes "
+            "Answer in prose — no JSON — with the tradeoffs and **a recommendation**. You may re-read "
+            "the workspace. Your reply is shown beside the question as your own text: it changes "
             "no stance and settles nothing — the human still decides.",
         ]
     )

@@ -11,7 +11,7 @@ import traceback
 from dataclasses import asdict
 
 from . import runjson
-from .asks import AskUnusable, Lanes
+from .asks import AskLost, AskUnusable, Lanes, Outcome
 from .chairwork import Chair, ChairUnusable
 from .config import Council
 from .console import Console, Transcripts
@@ -220,7 +220,7 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
     reader = LineReader()
     reader.start()
     checkpoint = Checkpoint(docket, reader, console=console, names=names)
-    checkpoint.ask_seat = _explainer(lanes, council, docket)
+    checkpoint.ask_seat = _explainer(lanes)
     port = Port(
         council=council, lanes=lanes, chair=chair, brief=brief, console=console, checkpoint_run=checkpoint, docket=docket, names=names
     )
@@ -272,21 +272,18 @@ def _interruption(brake: Brake) -> str:
     return f"interrupted by {at.name} {at.elapsed:.1f} s in{where}"
 
 
-def _explainer(lanes: Lanes, council: Council, docket: Docket):
+def _explainer(lanes: Lanes):
+    """The `explain H1` lane: the seat answers in prose for the human, so nothing is parsed out of it.
+
+    A seat that will not answer is the human's news, not a reason to end the run they are still working.
+    """
+
     async def explain(agent: str, message: str, *, round_: int, phase: str):
-        return await lanes.ask_agent(
-            agent,
-            message,
-            round_=round_,
-            phase=phase,
-            kind="verdict",
-            parse_kw={
-                "mode": council.mode,
-                "me": agent,
-                "known_items": set(docket.items),
-                "closed_items": {i for i in docket.items if docket.items[i].closed},
-            },
-        )
+        try:
+            return await lanes.ask_agent(agent, message, round_=round_, phase=phase, kind="prose", parse_kw={})
+        except (AskUnusable, AskLost) as failure:
+            # no `text`: an error string is not a recommendation, and the blank reply has its own line
+            return Outcome(text="", failure=str(failure))
 
     return explain
 

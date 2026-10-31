@@ -340,9 +340,15 @@ class Checkpoint:
         who = name_of(asker, self.names)
         self.console.say(f"asking {who} to explain {qid}; {when}")
         outcome = await self.ask_seat(asker, common.explain_ask(target.text, question), round_=self.docket.round, phase="explain")
-        text = (getattr(outcome, "text", "") or "").strip()
-        if text:
-            self.console.say(f"{qid}, {who}'s recommendation: {_clip(text)}")
+        if failure := getattr(outcome, "failure", None):
+            self.console.say(f"{failure} — {qid} is still yours to answer or skip")
+            return None
+        # one line, because the recommendation rides one docket line and one report bullet
+        text = " ".join(line.strip() for line in (getattr(outcome, "text", "") or "").splitlines() if line.strip())
+        if not text:
+            self.console.say(f"{who} sent nothing for {qid}")
+            return None
+        self.console.say(f"{qid}, {who}'s recommendation: {_clip(text)}")
         return text
 
 

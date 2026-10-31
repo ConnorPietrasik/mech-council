@@ -13,6 +13,9 @@ from mech_council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_re
 from mech_council.chairwork import Chair
 from mech_council.config import Council, MemberSpec
 from mech_council.console import Console as RunConsole
+from mech_council.deliberation import escalations
+from mech_council.deliberation.state import Docket
+from mech_council.humaninput import Checkpoint
 from mech_council.members import Members
 from mech_council.pi_rpc import Answer, ChildGone
 from mech_council.prompts.brief import Brief
@@ -320,6 +323,52 @@ def test_needs_repair_distinguishes_the_repairable_from_themerely_empty():
     assert needs_repair(Parsed(errors=["no JSON object"]))
     assert needs_repair(Parsed(invalid=["bad stance"]))
     assert not needs_repair(Parsed())
+
+
+# --------------------------------------------------------------- The explain pass
+
+
+class Reader:
+    """Off-cycle stdin: the human typed `explain H1` and nothing else."""
+
+    tty = True
+
+    def __init__(self):
+        self.lines = ["explain H1"]
+
+    def read_nowait(self):
+        return self.lines.pop(0) if self.lines else None
+
+
+def explain_lane(replies):
+    """The `explain` lane, with Agent1 holding the one open question and `explain H1` typed; `replies` are the seat's."""
+    from mech_council.run import _explainer
+
+    board, members, console, _council = lanes(script={"seat1-one": replies})
+    docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    escalations.raise_question(docket, text="which tenant?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    return members, console, Checkpoint(docket, Reader(), console=console, names={"Agent1": "one"}, ask_seat=_explainer(board))
+
+
+def test_an_explain_ask_costs_one_prompt_and_answers_in_the_seat_s_own_words():
+    """`explain H1` asks for prose, so the lane must not parse a verdict out of it: one prompt, no repair ladder."""
+    said = "keep the tenant key:\n\nbecause the cache is indexed by it"
+    members, console, cp = explain_lane([{"text": said}])
+    result = run(cp.drain())
+
+    assert len(members.members["seat1-one"].rpc.calls) == 1, "the seat is asked once"
+    assert result.recommendations == {"H1": "keep the tenant key: because the cache is indexed by it"}, "the reply, in one line"
+    assert not [line for line in console.lines if "refused" in line or "rejected" in line], "prose is not a refused answer"
+
+
+def test_an_explain_asked_of_a_dead_seat_costs_the_answer_and_not_the_run():
+    """The one ask a human asks for themselves cannot end the run: the dead seat is reported, the question stays open."""
+    members, console, cp = explain_lane([GONE, GONE])
+    result = run(cp.drain())
+
+    assert members.members["seat1-one"].restarts == 1, "the lane took its one restart and one re-ask before giving up"
+    assert not result.recommendations
+    assert any("still yours to answer or skip" in line for line in console.lines)
 
 
 # -------------------------------------------------- The restart-and-re-ask path
