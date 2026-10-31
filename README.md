@@ -15,9 +15,8 @@ you get a report with the findings.
   pi's RPC mode over pipes — one long-lived child per member, the chair included, JSONL in both
   directions.
 - **Linux with unprivileged user and mount namespaces**, to sandbox the members. Each member runs in its
-  own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs
-  `--privileged` or a seccomp profile that allows `unshare(2)`. `--in-place` is the default otherwise;
-  a host that cannot fork at all is refused.
+  own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs a seccomp
+  profile that allows `unshare(2)`. `--in-place` is the default otherwise; a host that cannot fork at all is refused.
 
 ## Install
 
@@ -138,25 +137,7 @@ Notes (`N1`) print once at the next checkpoint and are listed again in the repor
 
 ### Interrupting a run
 
-One `Ctrl+C` stops the deliberation and still writes the report. It leads with **Cut short by
-`SIGINT`** — the round, the pass it was in, what it was asking you, and what each seat was doing when
-the signal landed — and then reports the docket exactly as it stood, write journal and `run.json`
-included. Nothing in it is settled: a plan whose direction a majority held when the signal arrived
-says so beside that direction.
-
-A second `Ctrl+C`, a second or more after the first, is the way out when that is taking too long: the
-members get a closed stdin and a moment to take their own tool shells down with them and are killed where
-they stand; the write journal walk ends where it had got to; and the whole hurried exit gets two seconds
-before the process is abandoned where it stands — leaving a `run.json` that says the namespace sweep never
-ran, never one that says less than the manifest already written. What those two seconds reach is what you
-get: usually the report, `human_input.json` and a `run.json` with `exit_path: "fast"` and the list of what
-was given up. When they don't, **the report is what the abandoning costs you** — `run.json` and
-`events.jsonl` hold what the run knew, and the console says it ran out of time. Press again a second or
-more later and the two seconds start over from there, so the bound cannot run out while the run can still
-be reached, and every press says what it did rather than being swallowed. One keystroke arrives twice —
-once from the terminal, whose process group the orchestrator stays in so it can still read the keyboard,
-and once relayed by the supervisor — so any press within a second of the last counted one is that same
-press, and nothing you do with the keyboard in that second hurries a run that is already stopping.
+One `Ctrl+C` stops the deliberation and still writes the report. A second `Ctrl+C` kills it faster with no guarantee of a report.
 
 ## What you get
 
@@ -273,13 +254,14 @@ into several councils.
 
 Each member sees your project through an overlay: the project is the read-only lower layer,
 its own writes land in an upper layer inside a tmpfs that is discarded, and its `$TMPDIR` is
-scratch that never enters the write journal. `/proc` shows it the orchestrator's process
-information as unreadable, and its run directory is masked. When the run ends, every
-namespace it created is swept — including tool shells a member detached into its own process
-group — and the survivors are named in `run.json` if any remain.
+scratch that never enters the write journal. Its run directory is masked, and `/proc` closes the
+run's own file objects to it — reading the run's `cwd`, `environ` or `exe`, or opening one of its
+`fd` links, answers `EACCES`. That clearing is best-effort.
+When the run ends, every namespace it created is swept — including tool shells a member detached
+into its own process group — and the survivors are named in `run.json` if any remain.
 
-The sandbox keeps members from confusing each other; it is not a cage for a hostile agent. Run it
-in a VM, or in a container mounted to the project directory alone.
+The sandbox is only to minimize agents stepping on the toes of other agents; recommended method
+is to run this is a docker container with only the directory you want to work in mounted.
 
 ### In place
 
@@ -307,8 +289,9 @@ python -m mypy               # over src and tests
 The offline suite drives real orchestrator, sandbox, RPC and dispose paths against a scripted fake
 pi. The `sandbox` family is the only one with a platform requirement: its fixture lower must sit on
 a plain filesystem (ext4, or a tmpfs such as a member's `$TMPDIR`); point `COUNCIL_TEST_FS` at a
-plain directory to choose it explicitly. Everything else, `test_in_place.py` included, runs on any
-POSIX host that can fork.
+plain directory to choose it explicitly. Its one `/proc` case asserts unprivileged-only, so a suite
+run as mapped root skips that case naming the uid rule above and still asserts everything it can prove there. Everything else,
+`test_in_place.py` included, runs on any POSIX host that can fork.
 
 GitHub Actions runs ruff, mypy and the offline suite on every push to `master` and every pull
 request ([`ci.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/ci.yml)),

@@ -41,10 +41,15 @@ def setup_member_namespace(*, project: str, runs_dir: str, slot_dir: str, mask_t
         step = f"chdir {project}"
         os.chdir(project)  # so cwd is not masked
     except m.MountError as failure:
-        raise SetupFailure(failure.syscall, failure.err) from failure
+        raise SetupFailure(_labelled(step, failure.syscall), failure.err) from failure
     except OSError as failure:
         raise SetupFailure(f"{step}: {failure.__class__.__name__}", failure.errno or 0) from failure
     return m.namespace_id()
+
+
+def _labelled(step: str, syscall: str) -> str:
+    """Which step failed, for the launcher's report: the syscall text alone would be a bare `mount(2)` repr."""
+    return syscall if step.partition("(")[0] == syscall.partition("(")[0] else f"{step}: {syscall}"
 
 
 def _under(path: str, parent: str) -> bool:

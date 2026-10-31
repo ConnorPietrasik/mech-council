@@ -48,6 +48,8 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     notes += _layer_notes(loaded)
     notes += _trust_notes(council, args)
     notes += _in_place_notes(loaded, council, args, plat=plat)
+    if note := cli.proc_clearing_note(council.in_place):
+        notes.append(note)
     return args, Launch(
         council=council,
         runs_dir=runs_dir,

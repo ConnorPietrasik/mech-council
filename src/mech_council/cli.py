@@ -221,6 +221,18 @@ def downgrade_hint() -> str:
     return " Pass --in-place to run the members in the project itself instead."
 
 
+def proc_clearing_note(in_place: bool) -> str:
+    """Which side of the uid line the run is on: `supervisor._write_map` maps the member's root to the run's own uid, so
+    at uid 0 a member resolves to the owner of the `/proc` objects the dumpability clearing re-owns to root.
+    """
+    if in_place or os.getuid() != 0:
+        return ""
+    return (
+        "running as uid 0: the sandbox's /proc clearing is best-effort at this uid — a seat can list this run's open "
+        "descriptors (their numbers only; its cwd, environ and exe stay unreadable)"
+    )
+
+
 def check_nested_guard(allow_nested: bool, environ: dict[str, str]) -> str | None:
     marker = environ.get("COUNCIL_RUN_DIR") or ""
     if not marker or allow_nested:
