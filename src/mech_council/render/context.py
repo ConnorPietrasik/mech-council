@@ -56,6 +56,8 @@ class ReportContext:
     chair_model: str = ""
     journal: list[dict] = field(default_factory=list)  # per member, from run.json
     report_name: str = "report.md"
+    #: The report's own path when it sits outside the run directory (`--output`).
+    report_path: str = ""
     goal: str | None = None
     aborted_reason: str = ""
     captions: dict[str, str] = field(default_factory=dict)
@@ -128,7 +130,7 @@ class ReportContext:
             "## Artifacts",
             "",
             f"- `run.json` — the machine-readable manifest ({manifest})",
-            f"- `{self.report_name}` — this report",
+            f"- `{self.report_path or self.report_name}` — this report{' (outside the run directory)' if self.report_path else ''}",
             "- `events.jsonl` — the run's events, one JSON object per line, append-only",
             "- `human_input.json` — every question, answer, recommendation and skip, and every note with where it was shown",
         ]

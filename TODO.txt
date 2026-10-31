@@ -1,3 +1,2 @@
-Set a different report location
 A way to message agents?
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever

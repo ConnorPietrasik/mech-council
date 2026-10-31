@@ -152,12 +152,29 @@ One `Ctrl+C` stops the deliberation and still writes the report. A second `Ctrl+
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else
 `~/.cache/council/runs`; each run is a `<timestamp>-<project>` directory inside it.
 
+### `--output`: the report somewhere else
+
+`-o`/`--output <path>` writes the report there instead of the run directory — one file moves
+and nothing else follows it. An existing directory keeps the mode's name, so
+`-o docs/` writes `docs/plan.md`; anything else is the file itself. `run.json` stays in the run
+directory and names the path the report landed at, so nothing about a run is harder to find.
+
+```sh
+mech-council review -o .                 # -> ./report.md
+mech-council review -o docs/REVIEW.md    # -> exactly that file
+```
+
+This is the way to keep a result out of a container that is about to go away.
+
+When the target already exists, the run asks before replacing it. With no
+terminal to answer from the run refuses and says so; `--overwrite` skips the asking.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | A result was written — including `needs_human` and `round_limit_reached`. |
-| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a host that cannot fork. |
+| `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a declined `--output` overwrite, a report that never landed, a host that cannot fork. |
 | `2` | Usage error. |
 | `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |
 

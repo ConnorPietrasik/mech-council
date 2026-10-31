@@ -365,30 +365,36 @@ def test_an_item_whose_evidence_is_an_overlay_refusal_is_a_limit_not_a_finding(t
     assert "sandbox_artifact" not in docket.items["F1"].markers
 
 
-def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(project, tmp_path):
-    """The owed steps are independent — one failing may not cancel the rest."""
-    import os
-    from unittest import mock
-
-    from mech_council import run as run_mod
+def _report_bits(project, tmp_path):
+    """Enough of a run for `run._report` to write into."""
     from mech_council import runjson
     from mech_council.console import Console
-    from mech_council.deliberation.state import Docket, Item
     from mech_council.startup import convene
 
     _, launch = convene(["review", "-p", project], environ=no_user_config(COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
-    council = launch.council
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     console = Console(run_dir=str(run_dir))
     manifest = runjson.create(
         str(run_dir / "run.json"),
-        council,
+        launch.council,
         run_dir=str(run_dir),
         runs_dir=str(tmp_path / "runs"),
         project=project,
         orchestrator_pid=os.getpid(),
     )
+    return launch.council, console, manifest, run_dir
+
+
+def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(project, tmp_path):
+    """The owed steps are independent — one failing may not cancel the rest."""
+    from unittest import mock
+
+    from mech_council import run as run_mod
+    from mech_council import runjson
+    from mech_council.deliberation.state import Docket, Item
+
+    council, console, manifest, run_dir = _report_bits(project, tmp_path)
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
 
@@ -408,3 +414,19 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     with open(str(run_dir / "run.json"), encoding="utf-8") as handle:
         finalized = json.load(handle)
     assert finalized["outcome"] == "consensus", "the manifest still finalizes"
+
+
+def test_a_report_that_cannot_be_replaced_into_place_leaves_no_tmp_behind(project, tmp_path):
+    from mech_council import run as run_mod
+    from mech_council.deliberation.state import Docket, Item
+
+    council, console, manifest, run_dir = _report_bits(project, tmp_path)
+    holder = tmp_path / "reported"
+    holder.mkdir()
+    target = holder / "report.md"
+    target.mkdir()  # os.replace cannot land on a directory
+    docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
+
+    assert run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "", report_at=str(target)) == ""
+    assert os.listdir(holder) == ["report.md"], "only the thing that refused the report is left"

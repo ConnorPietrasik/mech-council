@@ -29,10 +29,12 @@ FLAGS: tuple[Flag, ...] = (
     Flag("config", "c", note="config file"),
     Flag("rounds", "r", note="round limit"),
     Flag("goal", "g", note="goal"),
+    Flag("output", "o", note="where the report is written"),
     Flag("transcripts", "t", choices=("off", "full"), note="transcripts level"),
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
     Flag("in-place", None, takes_value=False),
+    Flag("overwrite", None, takes_value=False),
 )
 
 _LONG = {f"--{f.long}": f for f in FLAGS}
@@ -47,9 +49,11 @@ class Args:
     rounds: int | None = None
     goal: str | None = None
     transcripts: str | None = None
+    output: str | None = None
     allow_nested: bool = False
     untrusted: bool = False
     in_place: bool = False
+    overwrite: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -69,6 +73,10 @@ flags:
   -r, --rounds <N>         round limit (whole number, no cap)
   -g, --goal <text>        the goal the seats are briefed with
   -t, --transcripts <lvl>  off (default) or full
+  -o, --output <path>      write the report here instead of into the run directory: an existing
+                           directory keeps the mode's name (report.md / plan.md), anything else is
+                           the file itself.  Nothing else follows it there; run.json still names it
+      --overwrite          replace an existing --output target without being asked first
       --allow-nested       let this invocation start inside a running council
       --untrusted          spawn members with --no-approve: ignore project-local files
       --in-place           run members in the real project: no namespaces, no overlays, no masks
@@ -257,6 +265,11 @@ def main(argv: list[str] | None = None) -> int:
         _args, launch = startup.convene(argv)
     except UsageError as failure:
         return fail(str(failure))
+    except ConfigError as failure:
+        sys.stderr.write(f"{failure}\n")
+        return 1
+    try:
+        launch.notes += startup.confirm_overwrite(launch)
     except ConfigError as failure:
         sys.stderr.write(f"{failure}\n")
         return 1

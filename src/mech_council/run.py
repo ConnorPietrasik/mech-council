@@ -130,6 +130,9 @@ async def orchestrate(launch, sandbox) -> int:
             **run_json_extra(),
         )
 
+    def write_report(journal: list[dict]) -> str:
+        return _report(council, docket, console, run_dir, outcome, journal, manifest, aborted, brake.at, report_at=launch.output_path)
+
     def abandon() -> None:
         """The last-resort exit's manifest, skipped once the full write has started."""
         if manifest_claimed:
@@ -168,9 +171,7 @@ async def orchestrate(launch, sandbox) -> int:
         # Each step is independent: one failing must not cancel the others, and a hurried exit skips the waits.
         survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
         journal = owed(console, "the write journal", _journal, council, sandbox, baselines, console, brake) or []
-        report_path = (
-            owed(console, "the report", _report, council, docket, console, run_dir, outcome, journal, manifest, aborted, brake.at) or ""
-        )
+        report_path = owed(console, "the report", write_report, journal) or ""
         owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
         if lanes is not None:
             owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
@@ -187,7 +188,7 @@ async def orchestrate(launch, sandbox) -> int:
             owed(console, "the report's console copy", _print_report, report_path)
         # the hurried exit's clock outlasts every wait in this block: the wedged step can be a write
         brake.disarm()
-    return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS else EXIT_ABORT)
+    return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS and report_path else EXIT_ABORT)
 
 
 def _docket(council: Council) -> Docket:
@@ -447,11 +448,24 @@ def _report(
     manifest,
     aborted: str,
     interrupted: Interrupted | None = None,
+    *,
+    report_at: str = "",
 ) -> str:
     from .render import report_plan, report_review
 
+    path = report_at or os.path.join(run_dir, council.adapter.report_name)
     try:
-        context = _report_context(council, console, outcome, journal, manifest, docket, aborted, interrupted)
+        context = _report_context(
+            council,
+            console,
+            outcome,
+            journal,
+            manifest,
+            docket,
+            aborted,
+            interrupted,
+            report_path=report_at,
+        )
         if docket is None or docket.blank:
             text = report_context.minimal_report(reason=aborted or outcome, context=context)
         else:
@@ -475,7 +489,6 @@ def _report(
             f"({aborted or outcome or 'no outcome'}). The report renderer failed: "
             f"{type(failure).__name__}: {failure}. `events.jsonl` holds the run.\n"
         )
-    path = os.path.join(run_dir, council.adapter.report_name)
     # a unique tmp, replaced into place: the hurried exit can abandon the run mid-write, and half a report
     # reads as a whole one
     tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
@@ -484,8 +497,12 @@ def _report(
             handle.write(text)
         os.replace(tmp, path)
     except OSError as failure:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
         console.say(f"could not write the report: {failure}")
         return ""
+    if report_at:
+        console.say(f"report {report_at}")
     return path
 
 
@@ -503,6 +520,8 @@ def _report_context(
     docket: Docket | None = None,
     aborted: str = "",
     interrupted: Interrupted | None = None,
+    *,
+    report_path: str = "",
 ) -> report_context.ReportContext:
     roster = []
     for agent_id, spec in zip(council.seat_ids, council.agents):
@@ -539,6 +558,7 @@ def _report_context(
         chair_model=council.chair.model or "pi default",
         journal=journal,
         report_name=council.adapter.report_name,
+        report_path=report_path,
         goal=council.goal,
         aborted_reason=aborted,
         captions=council.roster_names,

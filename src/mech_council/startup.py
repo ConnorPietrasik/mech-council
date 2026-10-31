@@ -19,6 +19,10 @@ class Launch:
     run_dir: str
     sandbox_dir: str
     notes: list[str]
+    #: Where `--output` sends the report; empty leaves it in `run_dir`.
+    output_path: str = ""
+    #: `--overwrite`: replace an existing `output_path` without asking.
+    output_overwrite: bool = False
 
 
 def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[cli.Args, Launch]:
@@ -39,6 +43,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     loaded = config_mod.load_layers(paths, project_layer=project_layer)
     name = config_mod.select_council(loaded, args.council)
     council = config_mod.convene(loaded, name, args, project, untrusted=args.untrusted, namespaces_available=namespaces_available)
+    output_path = _output_target(args, council)
     runs_dir = cli._runs_root_from_env(environ)
     _check_runs_root(runs_dir, project)
     run_name = _run_name(project)
@@ -48,6 +53,12 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     notes += _layer_notes(loaded)
     notes += _trust_notes(council, args)
     notes += _in_place_notes(loaded, council, args, plat=plat)
+    if output_path:
+        notes.append(f"--output writes the report to {output_path} instead of into the run directory; every other artifact stays there")
+        if cli.is_within(output_path, project):
+            notes.append(f"the report lands inside {project} as an ordinary write by the orchestrator, so it is in no write journal")
+    elif args.overwrite:
+        notes.append("--overwrite asks about an existing --output target, and there is none")
     if note := cli.proc_clearing_note(council.in_place):
         notes.append(note)
     return args, Launch(
@@ -57,7 +68,55 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
         run_dir=os.path.join(runs_dir, run_name),
         sandbox_dir=os.path.join(runs_dir, "sandbox", run_name),
         notes=notes,
+        output_path=output_path,
+        output_overwrite=args.overwrite,
     )
+
+
+def _output_target(args: cli.Args, council: config_mod.Council) -> str:
+    """The file `--output` names, resolved against the invoking cwd; a directory keeps the mode's report name."""
+    raw = args.output
+    if raw is None:
+        return ""
+    expanded = os.path.expanduser(raw)
+    if not expanded:
+        raise UsageError("--output wants a path")
+    path = os.path.realpath(expanded if os.path.isabs(expanded) else os.path.join(os.getcwd(), expanded))
+    if raw.endswith((os.sep, "/")) or os.path.isdir(path):
+        if not os.path.isdir(path):
+            raise UsageError(f"--output is not a directory: {raw!r}")
+        path = os.path.join(path, council.adapter.report_name)
+    holder = os.path.dirname(path)
+    if not os.path.isdir(holder):
+        raise UsageError(f"--output wants a directory, or a file in a directory that exists: {raw!r}")
+    if not os.access(holder, os.W_OK | os.X_OK):
+        raise UsageError(f"--output wants a directory you can write: {holder}")
+    return path
+
+
+def confirm_overwrite(launch: Launch) -> list[str]:
+    """Ask before `--output` replaces a file that is already there, on stderr: a guard is not narration, and
+    a question that lives in a redirected stdout is a question nobody sees.
+    """
+    target = launch.output_path
+    if not os.path.exists(target):
+        return []
+    note = f"--output replaces the {target} that was already there"
+    if not launch.output_overwrite:
+        sys.stderr.write(f"--output {target} already exists: overwrite it? [y/N] ")
+        sys.stderr.flush()
+        try:
+            # fd 0 closed before the run started leaves `sys.stdin` None
+            terminal = bool(sys.stdin.isatty())
+            answer = sys.stdin.readline().strip().lower()
+        except AttributeError, OSError, ValueError:
+            terminal, answer = False, ""
+        if answer not in ("y", "yes"):
+            if not terminal:
+                sys.stderr.write("\n")  # no typed answer echoed onto the prompt's line, so the refusal owes one
+            unseen = "" if terminal else " (stdin is not a terminal, so the question above went unseen)"
+            raise ConfigError(f"{target} was left alone and nothing ran{unseen}: pass --overwrite to replace it without being asked")
+    return [note]
 
 
 def _check_runs_root(runs_dir: str, project: str) -> None:

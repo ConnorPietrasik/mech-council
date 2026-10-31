@@ -99,6 +99,15 @@ def test_a_repeat_that_changes_value_is_noted(cli, project):
     assert any("overrides" in line for line in result.console.splitlines()), result.console
 
 
+def test_a_note_is_printed_once_however_stdout_is_redirected(cli, project):
+    """The orchestrator is a fork: the parent's unflushed buffer would print twice."""
+    script = json.dumps([{"contains": "", "stop_reason": "error", "error_message": "429 provider quota exhausted"}])
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
+    result = cli(["review", "--in-place"], cwd=project, env=env, timeout=120)
+    notes = [line for line in result.console.splitlines() if line.startswith("note: --in-place")]
+    assert len(notes) == 1, f"one note, not one per process: {notes}"
+
+
 # ---------------------------------------------------- The exit-code table
 
 
@@ -698,3 +707,133 @@ def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_wait
     assert "unasked" in result.report(), "the review report marks the question unasked"
     checkpoint = [row for row in result.events if row["event"] == "human_checkpoint"][-1]
     assert checkpoint["terminal"] and not checkpoint["waited"]
+
+
+# ------------------------------------------------------ Where the report lands
+
+
+def output_dir(project: str) -> str:
+    """A directory that is neither the project nor the runs root."""
+    path = os.path.join(os.path.dirname(project), "reported")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def _one_finding_script() -> str:
+    """The shortest path to a whole report."""
+    return json.dumps(
+        [
+            {
+                "contains": "Phase 0",
+                "reply": {"findings": [{"claim": "the cache ignores tenants", "severity": "major", "evidence": "src/app.py:1"}]},
+            },
+            {"contains": "Round ", "reply": {"positions": [{"id": "F1", "stance": "agree", "note": "read the key"}], "sign_off": True}},
+            {"contains": "# Deduplicate", "reply": {"groups": [], "human_input": []}},
+        ]
+    )
+
+
+def test_output_writes_the_report_there_and_leaves_the_rest_behind(cli, project):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "-o", out], cwd=project, env=env, timeout=150)
+    target = os.path.join(out, "report.md")
+    assert result.returncode == 0, result.console
+    assert os.path.exists(target)
+    assert result.manifest["report"] == target, "run.json names where the report actually stands"
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "report.md" not in written and "plan.md" not in written, "-o replaces the run directory's copy rather than adding one"
+    assert "run.json" in written and "events.jsonl" in written, "everything else still lands in the run directory"
+    assert "the cache ignores tenants" in result.report()
+    assert f"report {target}" in result.console
+    assert f"note: --output writes the report to {target}" in result.console
+
+
+def test_an_interrupted_run_still_writes_the_report_where_you_asked(signalled_cli, project):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_cut_short_script())
+    result = signalled_cli(["review", "-o", out], cwd=project, env=env, wait_for="chair merged", settle=0.5)
+    assert result.returncode == 130, result.console
+    assert "the cache ignores tenants" in result.report(), "the interrupted run's report is at --output, not in the run directory"
+    assert not os.path.exists(os.path.join(result.run_dir, "report.md"))
+
+
+def test_a_directory_keeps_the_name_the_mode_gives_it(cli, project):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
+    result = cli(["plan", "-o", out], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    assert os.path.exists(os.path.join(out, "plan.md")), "plan mode keeps plan.md wherever it is asked to write"
+    assert not os.path.exists(os.path.join(out, "report.md"))
+
+
+def test_the_report_is_named_where_it_lands_and_says_so(cli, project):
+    out = os.path.join(output_dir(project), "PLAN.md")
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "-o", out], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    assert os.path.exists(out), "a file target is the file itself, whatever the mode's name"
+    assert f"- `{out}` — this report (outside the run directory)" in result.report(), "the report says where it is, not where it usually is"
+
+
+@pytest.mark.parametrize("way", ["answered yes", "--overwrite"])
+def test_output_replaces_a_file_once_you_said_so(cli, project, way):
+    out = output_dir(project)
+    target = os.path.join(out, "PLAN.md")
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write("handwritten\n")
+    argv = ["review", "-o", target] if way == "answered yes" else ["review", "-o", target, "--overwrite"]
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(argv, cwd=project, stdin="y\n" if way == "answered yes" else None, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    report = result.report()
+    assert "the cache ignores tenants" in report and "handwritten" not in report, "the report replaced the file you okayed"
+    assert ("overwrite it?" in result.stderr) == (way == "answered yes"), "--overwrite skips the asking, nothing else"
+    assert "overwrite it?" not in result.stdout, "the guard is not narration, so a redirected stdout does not swallow it"
+    assert "that was already there" in result.console
+
+
+def test_a_declined_overwrite_ends_before_anything_starts(cli, project, canary):
+    target = os.path.join(output_dir(project), "PLAN.md")
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write("handwritten\n")
+    result = cli(["review", "-o", target], cwd=project, stdin="\n", timeout=150)
+    assert result.returncode == 1, result.console
+    assert "--overwrite" in result.console, "the refusal says how to get past it"
+    assert "stdin is not a terminal" in result.console, "a question nobody could have seen is said out loud"
+    with open(target, encoding="utf-8") as handle:
+        assert handle.read() == "handwritten\n", "a no keeps the file as it was"
+    assert result.run_dir is None and canary_entries(canary) == [], "a declined overwrite creates nothing anywhere"
+
+
+def test_output_naming_a_place_that_cannot_hold_a_file_exits_two(cli, project, canary):
+    missing = os.path.join(os.path.dirname(project), "no-such-directory", "PLAN.md")
+    result = cli(["review", "-o", missing], cwd=project)
+    assert result.returncode == 2
+    assert "--output" in result.console
+    assert canary_entries(canary) == [], "a usage error creates nothing anywhere"
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="uid 0 writes anywhere, so only another uid can be refused")
+def test_output_naming_a_directory_you_cannot_write_exits_two(cli, project, canary):
+    out = output_dir(project)
+    os.chmod(out, 0o500)
+    result = cli(["review", "-o", out], cwd=project)
+    assert result.returncode == 2
+    assert "--output" in result.console
+    assert canary_entries(canary) == [], "a usage error creates nothing anywhere"
+
+
+def test_an_overwrite_with_nothing_to_replace_says_so(cli, project):
+    script = json.dumps([{"contains": "", "stop_reason": "error", "error_message": "429 provider quota exhausted"}])
+    result = cli(["review", "--overwrite"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=120)
+    assert any(line.startswith("note: --overwrite") for line in result.console.splitlines()), result.console
+
+
+def test_a_relative_output_lands_in_the_project_you_invoked_from(cli, project):
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
+    result = cli(["plan", "-o", "PLAN.md"], cwd=project, env=env, timeout=150)
+    target = os.path.join(project, "PLAN.md")
+    assert result.returncode == 0, result.console
+    assert os.path.exists(target) and result.manifest["report"] == target
+    assert "note: the report lands inside" in result.console, "an ordinary write into the project is said out loud"

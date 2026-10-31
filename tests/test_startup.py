@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 import pytest
 
 from mech_council import startup
+from mech_council.cli import ConfigError
 from mech_council.sandbox import mount
 
 from .conftest import FAKE_PI, write_project_config
@@ -22,12 +24,18 @@ def runs_env(project: str) -> dict:
 # ------------------------------------------------------------ Who asked to run in place
 
 
-def convened(argv: list[str], project: str, environ: dict[str, str] | None = None):
-    """`startup.convene` with no user config in reach: the notes are what it hands the CLI to print."""
+def launched(argv: list[str], project: str, environ: dict[str, str] | None = None):
+    """`startup.convene` with no user config in reach, and the `Launch` it built."""
     env = runs_env(project)
     env["XDG_CONFIG_HOME"] = os.path.join(os.path.dirname(project), "no-user-config")  # a directory nothing creates
     env.update(environ or {})
     _args, launch = startup.convene([*argv, "-p", project], environ=env)
+    return launch
+
+
+def convened(argv: list[str], project: str, environ: dict[str, str] | None = None):
+    """`startup.convene` with no user config in reach: the notes are what it hands the CLI to print."""
+    launch = launched(argv, project, environ)
     return launch.notes, launch.council
 
 
@@ -210,3 +218,17 @@ def test_a_chair_that_errors_its_first_publication_exits_one_after_one_prompt(cl
     assert "chair" in result.console.lower() and "500 upstream unavailable" in result.console
     chair = [r for r in result.manifest["members"].values() if r["kind"] == "chair"][0]
     assert chair["prompts"] == 1, f"the chair spent {chair['prompts']} prompts to be unusable"
+
+
+# ---------------------------------------------------------- Consenting to `--output`
+
+
+def test_a_consent_question_with_no_stdin_at_all_refuses_rather_than_crashes(project, tmp_path, monkeypatch):
+    """fd 0 closed before the run started (`0<&-`) leaves `sys.stdin` None."""
+    target = tmp_path / "report.md"
+    target.write_text("handwritten\n")
+    launch = launched(["review", "-o", str(target)], project)
+    monkeypatch.setattr(sys, "stdin", None)
+    with pytest.raises(ConfigError, match="was left alone"):
+        startup.confirm_overwrite(launch)
+    assert target.read_text() == "handwritten\n", "no answer replaces nothing"
