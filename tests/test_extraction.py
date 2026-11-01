@@ -67,6 +67,37 @@ def test_an_answer_cut_off_mid_object_owes_a_repair_and_never_becomes_the_object
     assert out.invalid and out.errors
 
 
+def test_an_object_quoted_in_the_prose_never_swallows_the_answer_after_it():
+    """The same lost-verdict reading, from a reply that was never cut off: one complete `{…}` in the preamble used
+    to be the answer, and nothing was refused, so the repair re-ask never ran.
+    """
+    text = 'The registry call `{"ok": true}` is the bug.\n\n' + json.dumps(positions(("F1", "disagree")))
+    out = parse(text)
+    assert not out.invalid and out.data["positions"][0]["item"] == "F1"
+
+
+def test_an_object_that_carries_none_of_the_answer_s_fields_owes_a_repair():
+    """A reply whose only JSON is not the shape the pass asked for is a fragment of prose, not an answer of nothing."""
+    out = parse('{"severity": "blocker"}')
+    assert out.invalid and out.errors, "the seat owes a repair re-ask, not a silent blank verdict"
+
+
+def test_phase_0_finds_its_object_past_one_quoted_in_the_prose():
+    """Phase 0 owes a report, and a `{…}` the seat quoted while making it is not that report."""
+    findings = json.dumps({"findings": [{"claim": "it drops the error", "evidence": "a.py:1"}]})
+    out = parse_phase0(f'A call like `{{"ok": true}}` is never checked.\n\n{findings}', mode="review")
+    assert not out.invalid and not out.errors
+    assert out.data["findings"][0]["claim"] == "it drops the error"
+
+
+def test_a_plan_seat_s_phase_0_answer_is_legible_to_the_verdict_parser():
+    """`Port.ask_seats` extracts every seat pass — phase 0 included — with the verdict parser, so a plan seat's
+    first report has to be an object that parser can see: drop `approach` and every plan run's phase 0 is refused.
+    """
+    approach = json.dumps({"approach": {"claim": "retry it", "stages": [{"state": "write it", "gate": "the tests"}]}})
+    assert not parse(approach, mode="plan").invalid
+
+
 # --------------------------------------------------------------------------- case and separators
 
 

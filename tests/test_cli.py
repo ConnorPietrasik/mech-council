@@ -590,14 +590,7 @@ PLAN_SCRIPT = json.dumps(
         },
         {
             "contains": "# Deduplicate",
-            "reply": {
-                "items": [
-                    {"claim": "retry the sync call with a bounded backoff", "severity": "major", "evidence": "app.py:1", "sources": [1]}
-                ],
-                "rules": ["A retry must never repeat a non-idempotent call"],
-                "direction": "bounded backoff",
-                "dropped": [],
-            },
+            "reply": {"groups": []},
         },
         {"contains": "# Compare the plans", "reply": {"agreed": ["both seats want the same retry"], "conflicts": []}},
     ]
@@ -659,11 +652,7 @@ def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project
             },
             {
                 "contains": "# Deduplicate",
-                "reply": {
-                    "items": [{"claim": "rewrite the sync path as a queue", "severity": "major", "evidence": "app.py:1", "sources": [1]}],
-                    "rules": [],
-                    "dropped": [],
-                },
+                "reply": {"groups": []},
             },
         ]
     )

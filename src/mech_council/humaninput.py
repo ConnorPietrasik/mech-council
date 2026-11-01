@@ -28,6 +28,8 @@ _GRAMMAR = (
     "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), and "
     "`explain H1: <question>` asks the seat that raised H1 — to answer in your own words, write `H1: <text>`"
 )
+#: an id and a colon answer nothing: `skip H1` is the word for declining one ask
+_EMPTY_ANSWER = "an empty answer changes nothing: `H1: <text>` answers an open question, `skip H1` declines one"
 
 
 class Line:
@@ -51,7 +53,9 @@ def parse_line(text: str) -> Line:
     if _SKIP_ALL.match(text):
         return Line("skip", text=text.strip())
     if match := _ANSWER.match(text):
-        return Line("answer", id=match.group(1).upper(), text=match.group(2).strip())
+        if answer := match.group(2).strip():
+            return Line("answer", id=match.group(1).upper(), text=answer)
+        return Line("error", text=_EMPTY_ANSWER)
     if match := _EXPLAIN.match(text):
         return Line("explain", id=match.group(1).upper(), text=(match.group(2) or "").strip() or "Why are you asking this?")
     if _NOTE_LINE.match(text):

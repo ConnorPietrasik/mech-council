@@ -140,6 +140,51 @@ BACKING_WORDS = {fold(word): value for word, value in BACKING_WORDS.items()}
 SEVERITIES = ("blocker", "major", "minor", "trivial")
 
 
+#: The fields each pass is told it may send (the `prompts/*_SCHEMA` blocks).  An object carrying none of them is a
+#: `{…}` quoted in the prose around the answer, and must never be read as a verdict that says nothing.
+#: `approach` belongs to phase 0 alone, but `Port.ask_seats` extracts every seat pass — phase 0 included —
+#: with the verdict parser, so a plan seat's answer has to be legible to it.
+VERDICT_FIELDS = (
+    "summary",
+    "positions",
+    "new_items",
+    "questions",
+    "answers",
+    "human_input",
+    "second",
+    "blocking_for",
+    "retract",
+    "insist",
+    "answer_question",
+    "open_questions",
+    "notes",
+    "retract_note",
+    "signoff",
+    "backing",
+    "revised_plan",
+    "approach",
+)
+#: phase 0 in either mode: `approach` may be the whole reply, or the reply itself
+PHASE0_FIELDS = (
+    "summary",
+    "new_items",
+    "approach",
+    "claim",
+    "stages",
+    "constraints",
+    "risks",
+    "assumptions",
+    "rejected_alternatives",
+    "open_questions",
+    "notes",
+    "human_input",
+)
+MERGE_FIELDS = ("groups",)
+DIRECTION_FIELDS = ("question", "context")
+COMPARISON_FIELDS = ("agreed", "conflicts", "uncovered", "summary")
+WATCHDOG_FIELDS = ("decisions",)
+
+
 @dataclass
 class Extraction:
     data: dict = field(default_factory=dict)
@@ -148,29 +193,50 @@ class Extraction:
     invalid: bool = False  # no JSON object at all
 
 
-def find_json(text: str) -> tuple[dict | None, str | None]:
+def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str | None]:
+    """The reply's answer object: the first complete object that carries one of `fields`, ignoring prose's own.
+
+    A seat may quote `{…}` anywhere in its prose, and the first balanced object is not then the answer: `fields`
+    names what only the answer carries.  A reply whose objects carry none of them is refused for a repair re-ask
+    rather than read as a verdict that says nothing.  With no `fields`, the first object still wins.
+    """
     if not text:
         return None, "empty answer"
     cleaned = text.replace("```json", "```")
-    start = cleaned.find("{")
+    unrelated = False  # an object was there; it just was not the answer
     last_error: str | None = None
+    start = cleaned.find("{")
     while start >= 0:
         end = _balanced_end(cleaned, start)
         if end is None:
             # an unclosed object is a reply cut off mid-answer; its contents are a fragment
             if _opens_an_object(cleaned, start):
                 return None, "unbalanced JSON object in the answer: the reply was cut off, so send the object whole"
-        else:
-            try:
-                value = json.loads(cleaned[start : end + 1])
-            except json.JSONDecodeError as exc:
-                last_error = f"unparseable JSON: {exc}"
-            else:
-                if isinstance(value, dict):
-                    return value, None
-                last_error = "the answer's JSON is not an object"
-        start = cleaned.find("{", start + 1)
+            start = cleaned.find("{", start + 1)
+            continue
+        try:
+            value = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError as exc:
+            last_error = f"unparseable JSON: {exc}"
+            start = cleaned.find("{", start + 1)
+            continue
+        if not isinstance(value, dict):
+            last_error = "the answer's JSON is not an object"
+            start = cleaned.find("{", start + 1)
+            continue
+        if not fields or _carries(value, fields):
+            return value, None
+        unrelated = True
+        # the whole object is prose, so anything nested in it is prose too
+        start = cleaned.find("{", end + 1)
+    if unrelated:
+        return None, "no answer object in the reply: its JSON carries none of the fields the schema names"
     return None, last_error or "no JSON object found in the answer"
+
+
+def _carries(data: dict, fields: tuple[str, ...]) -> bool:
+    """Whether the object is the payload: any of its fields, under any name the seat sent it with."""
+    return any(pick(data, name) is not None for name in fields)
 
 
 def _opens_an_object(text: str, start: int) -> bool:
@@ -278,7 +344,7 @@ def parse_verdict(
     known_items: set[str] | None = None,
     closed_items: set[str] | None = None,
 ) -> Extraction:
-    data, error = find_json(payload)
+    data, error = find_json(payload, VERDICT_FIELDS)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
     if extra_synonyms:
@@ -556,7 +622,7 @@ def _revised_plan(value: object) -> dict | None:
 
 
 def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None) -> Extraction:
-    data, error = find_json(payload)
+    data, error = find_json(payload, PHASE0_FIELDS)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
     out = Extraction(data=data)
@@ -625,7 +691,7 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
 
 
 def parse_merge_plan(payload: str) -> tuple[dict | None, list[str]]:
-    data, error = find_json(payload)
+    data, error = find_json(payload, MERGE_FIELDS)
     if data is None:
         return None, [error or "no JSON object found"]
     groups, merges = pick(data, "groups"), pick(data, "merges")
@@ -665,7 +731,7 @@ def _ask_token(text: str) -> str:
 
 
 def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
-    data, error = find_json(payload)
+    data, error = find_json(payload, DIRECTION_FIELDS)
     if data is None:
         return None, [error or "no JSON object found"]
     question = text_of(pick(data, "question")).strip()
@@ -675,7 +741,7 @@ def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
 
 
 def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
-    data, error = find_json(payload)
+    data, error = find_json(payload, COMPARISON_FIELDS)
     if data is None:
         return None, [error or "no JSON object found"]
     out = {
@@ -723,7 +789,7 @@ def _conflicts(value: object) -> list[dict]:
 
 
 def parse_watchdog(payload: str) -> tuple[list[dict], list[str]]:
-    data, error = find_json(payload)
+    data, error = find_json(payload, WATCHDOG_FIELDS)
     if data is None:
         return [], [error or "no JSON object found"]
     decisions = pick(data, "decisions")

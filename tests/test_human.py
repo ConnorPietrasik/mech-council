@@ -46,10 +46,24 @@ def test_the_line_grammar(text, kind, qid, body, ids):
 
 @pytest.mark.parametrize(
     "text",
-    ["skip the cache one", "skip H1 and H2", "skip all H1", "none of the above", "explain H1 why?", "the tenant is fixed", "2"],
+    [
+        "skip the cache one",
+        "skip H1 and H2",
+        "skip all H1",
+        "none of the above",
+        "explain H1 why?",
+        "the tenant is fixed",
+        "2",
+        "H1:",
+        "H1 =",
+        "h1:   ",
+    ],
 )
 def test_a_line_that_is_not_the_grammar_is_never_an_answer(text):
-    """Neither a near miss nor a line naming no question may answer whichever ask happens to be open."""
+    """Neither a near miss nor a line naming no question may answer whichever ask happens to be open.
+
+    `H1:` names an ask and answers nothing, and an empty answer was the one reading the checkpoint took.
+    """
     line = parse_line(text)
     assert line.kind == "error" and "`skip H1` declines one" in line.text
 
@@ -104,6 +118,18 @@ def test_a_number_with_any_word_after_it_stays_the_human_s_own_words():
     outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
     assert outcome.answers == {"H1": "1, only for new installs"} and outcome.answer_options == {}
     assert outcome.answers["H1"] != question.options[0], "the option was not taken on the human's behalf"
+
+
+def test_an_id_and_a_colon_answer_nothing_and_leave_the_ask_open():
+    """`H1:` used to mark the ask answered with an empty string: the hold behind it retired, a round was bought,
+    and the question vanished from every seat's docket — a typo the run could not undo.
+    """
+    docket = build()
+    question = offered(docket, "one", "two")
+    cp, console, _reader = make_checkpoint(docket, lines=["H1:", "H1: 30 days"])
+    outcome = asyncio.run(cp.run([question], ask_set=[question], round_=1, terminal=True, waiting=True))
+    assert outcome.answers == {"H1": "30 days"}, "the empty line answered nothing, so the ask stayed pending"
+    assert any("empty answer" in line for line in console.lines), "the refusal is said, not swallowed"
 
 
 # --------------------------------------------------------------------------- what prints

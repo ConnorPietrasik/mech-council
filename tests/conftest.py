@@ -58,9 +58,14 @@ def _try(func, *args) -> None:
 
 
 def no_user_config(**extra: str) -> dict[str, str]:
-    """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run."""
+    """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run.
+
+    The run markers go here because a seat's own env always carries them: without the scrub, a test that
+    convenes the CLI from inside a running council trips the nested-council guard and reports a phantom bug.
+    """
     out = dict(os.environ, **extra)
-    out.pop("COUNCIL_CONFIG", None)
+    for marker in ("COUNCIL_CONFIG", "COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):
+        out.pop(marker, None)
     out["XDG_CONFIG_HOME"] = os.path.join(FIXTURE_ROOT, "no-user-config")
     return out
 
@@ -69,8 +74,6 @@ def no_user_config(**extra: str) -> dict[str, str]:
 def child_env(ground):
     """A scrubbed env: no inherited run marker, throwaway pi state, an empty user config, offline."""
     env = no_user_config()
-    for key in ("COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):
-        env.pop(key, None)
     env["PI_CODING_AGENT_DIR"] = os.path.join(ground, "pi-state")
     # The user layer, this time a directory a test may write into.
     env["XDG_CONFIG_HOME"] = os.path.join(ground, "xdg-config")

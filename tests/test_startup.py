@@ -12,7 +12,7 @@ from mech_council import startup
 from mech_council.cli import ConfigError
 from mech_council.sandbox import mount
 
-from .conftest import FAKE_PI, write_project_config
+from .conftest import FAKE_PI, no_user_config, write_project_config
 
 pytestmark = [pytest.mark.timeout(180)]
 
@@ -232,3 +232,17 @@ def test_a_consent_question_with_no_stdin_at_all_refuses_rather_than_crashes(pro
     with pytest.raises(ConfigError, match="was left alone"):
         startup.confirm_overwrite(launch)
     assert target.read_text() == "handwritten\n", "no answer replaces nothing"
+
+
+# --------------------------------------------------- the env the suite hands a convene
+
+
+def test_an_inherited_run_marker_never_reaches_a_convene_built_by_the_harness(project, monkeypatch):
+    """Every seat's own env carries the run markers, and an inherited one makes a convene refuse to start: run the
+    suite from inside a running council without the scrub and two report cases fail as if the project had.
+    """
+    monkeypatch.setenv("COUNCIL_RUN_DIR", "20261101T000000-parent")
+    monkeypatch.setenv("COUNCIL_RUN_PATH", "/nowhere/this-suite-never-made-this-run")
+    env = no_user_config(**runs_env(project))
+    assert not {"COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"} & env.keys(), "the scrub is what keeps the guard asleep"
+    launched(["review"], project, env)

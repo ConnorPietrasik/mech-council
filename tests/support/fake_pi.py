@@ -34,6 +34,22 @@ DEFAULT_PHASE0 = {
     "open_questions": [],
 }
 DEFAULT_ROUND = {"positions": [], "new_items": [], "answers": [], "questions": [], "human_input": [], "signoff": True}
+#: The chair's passes are asked for a shape of their own, and an empty one is what a chair with nothing to fold says.
+DEFAULT_CHAIR: tuple[tuple[str, dict[str, object]], ...] = (
+    ("# Deduplicate", {"groups": []}),
+    ("# Fold the asks", {"groups": []}),
+    ("# Compare the plans", {"agreed": [], "conflicts": [], "uncovered": []}),
+)
+
+
+def default_reply(prompt: str) -> dict[str, object]:
+    """The canned answer for a prompt no script entry claimed."""
+    if "Phase 0" in prompt:
+        return dict(DEFAULT_PHASE0)
+    for marker, shape in DEFAULT_CHAIR:
+        if marker in prompt:
+            return dict(shape)
+    return dict(DEFAULT_ROUND)
 
 
 def say(record: dict) -> None:
@@ -43,7 +59,7 @@ def say(record: dict) -> None:
 
 def scripted(prompt: str, index: int):
     """The first script entry whose `contains` matches, or the index-default reply."""
-    default = {"reply": dict(DEFAULT_PHASE0 if "Phase 0" in prompt else DEFAULT_ROUND)}
+    default = {"reply": default_reply(prompt)}
     raw = os.environ.get("FAKE_PI_SCRIPT")
     if not raw:
         return default

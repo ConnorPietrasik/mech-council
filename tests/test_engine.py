@@ -2291,6 +2291,45 @@ def test_a_defense_that_answers_in_other_words_keeps_the_escalation_standing():
     assert "escalation_demoted" not in [r["event"] for r in records]
 
 
+def test_a_seat_demoted_in_one_round_wins_its_defense_in_the_next():
+    """A demotion used to arm a guard that outlived the round that armed it: on that item the seat's next defense
+    was thrown away unread and the report said it had not answered the challenge at all.
+    """
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "defense":
+            repeats = "does policy allow this" if ask.round == 1 else "that document predates the tenant work, so a person must decide"
+            return payload(positions=[{"item": "F1", "stance": "needs_human", "note": repeats}], signoff=True)
+        items = shown_items(ask.text)
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": i, "stance": "needs_human", "note": "does policy allow this"} for i in items],
+                human_input=[{"question": "does policy allow this", "item": i} for i in items],
+                signoff=True,
+            )
+        if ask.who == "Agent2":
+            return payload(positions=[{"item": i, "stance": "disagree", "evidence": "docs/policy.md:4"} for i in items], signoff=True)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    events = [r["event"] for r in records]
+    assert events.count("escalation_demoted") == 1, f"round 2 must not demote a defense that answered: {events}"
+    escalation = built.docket.escalations[("F1", "Agent1")]
+    assert escalation.state == STANDING and escalation.defended_round == 2, escalation
+    assert escalation.defense and not escalation.undefended, "the defense was read, and is reported as one"
+    assert [r["item"] for r in records if r["event"] == "escalation_defended"] == ["F1"]
+
+
 def test_a_defense_offering_the_human_a_menu_keeps_it():
     """A defense is a verdict, and the round schema asks every verdict for `context` and `options`."""
     built, _records = _escalation_and_defense(

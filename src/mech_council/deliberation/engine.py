@@ -129,7 +129,6 @@ class Engine:
         self._folded_asks: tuple | None = None  # the open asks the chair last read, so an unchanged set is not folded twice
         self._asked_of_human: set[str] = set()  # asks a waiting checkpoint actually put in front of the human
         self._insists: list[tuple[str, str, int]] = []  # (seat, ask id, round): read once every answer of the pass landed
-        self._demoted_this_round: set[tuple[str, str]] = set()
         self._stale = False
 
     def new_id(self) -> str:
@@ -752,8 +751,6 @@ class Engine:
             if result.failure:
                 raise Abort(result.failure, member=asker, round_=round_)
             defended = self._apply_defense(item_id, asker, result, round_)
-            if defended is None:
-                continue
             if escalation.state != STANDING:
                 # the defense restanced the item: the escalation is withdrawn, not demoted
                 continue
@@ -763,14 +760,12 @@ class Engine:
                 self.emit("escalation_defended", item=item_id, asker=asker, round=round_)
                 continue
             demote(escalation, round_)
-            escalation.undefended = True
             release_stops(self.docket, item_id=item_id, agent=asker)
-            self._demoted_this_round.add((item_id, asker))
             self.emit("escalation_demoted", item=item_id, asker=asker, round=round_)
             for event, fields in drop_ask(self.docket, escalation, asker, round_):
                 self.emit(event, **fields)
 
-    def _apply_defense(self, item_id: str, asker: str, result: RawAsk, round_: int) -> str | None:
+    def _apply_defense(self, item_id: str, asker: str, result: RawAsk, round_: int) -> str:
         if result.rejected:
             return ""
         data = parse_verdict(
@@ -805,8 +800,6 @@ class Engine:
                     self.emit("question_updated", id=question.id, asker=asker, round=round_)
         self._apply_asks(asker, data, round_)
         if not restated:
-            return ""
-        if (item_id, asker) in self._demoted_this_round:
             return ""
         return (note + (" | " + evidence if evidence else "")).strip()
 
