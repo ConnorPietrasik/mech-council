@@ -244,6 +244,86 @@ def test_the_merge_listing_carries_the_detail_the_chair_judges_causes_on():
     assert "cache.py:12" in listings[0], "the evidence still rides along"
 
 
+def test_a_round_merge_is_shown_the_open_docket_so_a_re_reported_claim_folds_once():
+    """A new duplicate of an older entry folds into it: the listing owes the chair both sides of that call."""
+    import asyncio
+
+    from mech_council.deliberation.state import Item
+
+    async def main():
+        built, port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="tenant key missing from the cache", severity="major", opened_round=1))
+        await built._merge_new_items(round_=1)
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "F2" not in built.docket.items and "F2" not in built.docket.order, "the round's duplicate of an older entry stood twice"
+    assert [r for r in records if r["event"] == "chair_merge"][-1]["groups"] == 1
+    listing = [ask.text for ask in port.asks if ask.kind == "merge"][-1]
+    assert "F2: tenant key missing from the cache" in listing.split("Already on the docket")[0], "what to group is listed first"
+    assert "F1: the cache ignores tenants" in listing.split("Already on the docket")[1], "what to fold into is listed too"
+
+
+def test_a_merge_of_an_id_the_chair_was_never_shown_retires_nothing():
+    """The listing is the chair's whole scope: an id outside it retires nothing, on either side of the group."""
+    import asyncio
+
+    from mech_council import run as run_mod
+    from mech_council.deliberation.state import Item
+
+    async def merge(group):
+        built, _port, records = engine(reply=lambda ask: payload(groups=[group]))
+        built.docket.add_item(Item(id="F1", claim="an open claim", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="the same claim again", severity="major", opened_round=1))
+        await built._merge_pass(round_=1, ids=["F2"])
+        return built, records
+
+    built, records = asyncio.run(merge({"canonical": "F2", "duplicates": ["F1"]}))
+    assert "F1" in built.docket.items and "F1" in built.docket.order, "an id the chair was never shown folded an item away"
+    unlisted = [r for r in records if r["event"] == "merge_duplicate_unlisted"]
+    assert unlisted and unlisted[0]["duplicate"] == "F1", "an out-of-listing duplicate is refused out loud"
+    assert run_mod._summary_line("merge_duplicate_unlisted", unlisted[0], {}), "the operator is told, not only the log"
+
+    built, records = asyncio.run(merge({"canonical": "F1", "duplicates": ["F2"]}))
+    assert "F2" in built.docket.items and "F2" in built.docket.order, "a shown item folded into a canonical the chair never saw"
+    unlisted = [r for r in records if r["event"] == "merge_canonical_unlisted"]
+    assert unlisted and unlisted[0]["canonical"] == "F1", "an out-of-listing canonical is refused out loud"
+    assert run_mod._summary_line("merge_canonical_unlisted", unlisted[0], {}), "the operator is told, not only the log"
+
+
+def test_a_group_that_names_the_later_entry_canonical_folds_it_into_the_earlier_one():
+    """The chair is told the earliest id is canonical; a group ignoring that must fold, not no-op.
+
+    The earlier entry carries verdicts and a merge may not discard them, so honoring the chair's later canonical
+    would retire nothing at all.
+    """
+    import asyncio
+
+    from mech_council import run as run_mod
+    from mech_council.deliberation import escalations
+    from mech_council.deliberation.state import AGREE, Item
+
+    async def merge(group):
+        built, _port, records = engine(reply=lambda ask: payload(groups=[group]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="tenant key missing from the cache", severity="major", opened_round=1))
+        for agent in built.docket.roster:
+            escalations.record_stance(built.docket, item_id="F1", agent=agent, stance=AGREE, round_=1)
+        await built._merge_new_items(round_=1)
+        return built, records
+
+    built, records = asyncio.run(merge({"canonical": "F2", "duplicates": ["F1"]}))
+    assert "F2" not in built.docket.items and "F1" in built.docket.items, "the inverted group folded nothing"
+    replaced = [r for r in records if r["event"] == "merge_canonical_replaced"]
+    assert replaced and replaced[0]["canonical"] == "F1" and replaced[0]["chair_named"] == "F2", replaced
+    assert run_mod._summary_line("merge_canonical_replaced", replaced[0], {}), "the operator is told, not only the log"
+    assert [r for r in records if r["event"] == "chair_merge"][-1]["groups"] == 1
+
+    built, _records = asyncio.run(merge({"canonical": "F1", "duplicates": ["F2", "F2"]}))
+    assert "F2" not in built.docket.items, "an id the chair echoed twice retires once, not twice"
+
+
 def test_a_phase_0_human_input_request_arrives_with_its_context_and_options():
     import asyncio
 
@@ -2209,6 +2289,30 @@ def test_an_answer_naming_its_addressee_instead_of_a_q_id_still_lands():
     assert answered, f"the answer was dropped instead of matched: {asked[0].id} is bare"
     assert answered[0].answer == "because it is per-tenant"
     assert "qa_answer_unmatched" not in [r["event"] for r in records]
+
+
+def test_a_seat_cannot_answer_a_question_the_docket_addressed_to_a_peer():
+    """An answer is printed under a name: a seat answering a question it was not asked puts words in a peer's mouth."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.who == "Agent1" and ask.round == 1:
+            return {"positions": [], "questions": [{"to": "Agent3", "question": "why is the key safe?"}]}
+        if ask.who == "Agent2" and ask.round == 1:
+            return {"positions": [], "answers": [{"to": "Agent1", "question": "Q1", "answer": "no, by inode"}]}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    assert not [qa for qa in built.docket.qa.values() if qa.answer], "Agent3 was answered over"
+    refused = [r for r in records if r["event"] == "qa_answer_not_addressed"]
+    assert refused and refused[0]["member"] == "Agent2", "the attempt is logged, not swallowed"
 
 
 def test_an_answer_naming_nobody_is_logged_and_kept_out_of_the_docket():

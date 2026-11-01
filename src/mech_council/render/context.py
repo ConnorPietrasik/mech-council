@@ -48,7 +48,7 @@ class ReportContext:
     pi_cli: str = ""
     pi_version: str = ""
     transcripts: str = "off"
-    transcript_note: str = "none written"
+    sink_claim: str = ""  # what the sinks hold, in the words of the object that counts their bytes; empty says nothing
     untrusted: bool = False
     in_place: bool = False
     roster: list[RosterRow] = field(default_factory=list)
@@ -74,6 +74,7 @@ class ReportContext:
                 f"{self.member_count} members ({self.member_count - 1} seats + the chair)"
             )
         )
+        sinks = f" ({self.sink_claim})" if self.sink_claim else ""
         return [
             f"# {title}",
             "",
@@ -82,7 +83,7 @@ class ReportContext:
             f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
             f"- date: {self.date}",
             where,
-            f"- project trust: {trust} · transcripts: {self.transcripts} ({self.transcript_note})",
+            f"- project trust: {trust} · transcripts: {self.transcripts}{sinks}",
             f"- pi: `{self.pi_cli}` ({self.pi_version})",
         ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
 

@@ -93,10 +93,11 @@ printed last after a blank line.
    declared a stop on it, which is the one claim that outranks a closure. So a settled item reaches
    you only as something more than one seat needed the run to wait for.
    What a seat wants you to **know** and not decide is a `note`: no second seat, and nothing for you to answer.
-5. **Termination.** `consensus`, `needs_human`, `stalemate`, or `round_limit_reached` — but a run
-   that would end with a question standing spends a **grace round** first: it asks you, and any
-   answer buys the seats one more round to plan against it (`grace_rounds`). A question it did show
-   you and you passed over is reported `unanswered`; only one it never showed you is `unasked`.
+5. **Termination.** `consensus`, `needs_human`, `stalemate`, `round_limit_reached`, or `unvetted` — the last
+   when everyone signed off but an open item was left unheard. A run that would end with a question standing
+   spends a **grace round** first: it asks you, and any answer buys the seats one more round to plan against
+   it (`grace_rounds`). A question it did show you and you passed over is reported `unanswered`; only one it
+   never showed you is `unasked`.
 
 The chair never takes a stance and never gets a roster ID, so it can't move the majority bar. It
 merges findings, folds asks that want the same answer, compares, words the council's split for you,
@@ -173,7 +174,7 @@ terminal to answer from the run refuses and says so; `--overwrite` skips the ask
 
 | Code | Meaning |
 |---|---|
-| `0` | A result was written — including `needs_human` and `round_limit_reached`. |
+| `0` | A result was written — including `needs_human`, `unvetted` and `round_limit_reached`. |
 | `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a declined `--output` overwrite, a report that never landed, a host that cannot fork. |
 | `2` | Usage error. |
 | `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |

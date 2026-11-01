@@ -25,6 +25,7 @@ from .deliberation.state import (
     RETIRED,
     ROUND_LIMIT,
     STALEMATE,
+    UNVETTED,
     Docket,
 )
 from .deliberation.termination import direction_rule
@@ -40,7 +41,7 @@ from .sandbox import journal as journal_mod
 from .watchdog import Watchdog
 
 EXIT_OK, EXIT_ABORT = 0, 1
-RESULTS = (CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
+RESULTS = (CONSENSUS, UNVETTED, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
 
 
 async def orchestrate(launch, sandbox) -> int:
@@ -131,7 +132,19 @@ async def orchestrate(launch, sandbox) -> int:
         )
 
     def write_report(journal: list[dict]) -> str:
-        return _report(council, docket, console, run_dir, outcome, journal, manifest, aborted, brake.at, report_at=launch.output_path)
+        return _report(
+            council,
+            docket,
+            console,
+            run_dir,
+            outcome,
+            journal,
+            manifest,
+            aborted,
+            brake.at,
+            report_at=launch.output_path,
+            sink_claim=transcripts.sink_claim(),
+        )
 
     def abandon() -> None:
         """The last-resort exit's manifest, skipped once the full write has started."""
@@ -335,6 +348,15 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"outcome: {fields['outcome']} — {fields['reason']}"
     if name == "merge_refused":
         return f"merge plan refused ({fields['reason']}) — the docket is printed as raised"
+    if name == "merge_canonical_unlisted":
+        return f"the chair folded into {fields['canonical']}, which it was never shown — nothing in that group is merged"
+    if name == "merge_duplicate_unlisted":
+        return f"the chair folded {fields['duplicate']} into {fields['into']}, an id it was never shown — that entry keeps its claim"
+    if name == "merge_canonical_replaced":
+        return (
+            f"the chair named {fields['chair_named']} the group's claim, but {fields['canonical']} was raised first — "
+            "the earlier entry is the one whose claim the human reads"
+        )
     if name == "answer_buys_a_round":
         return f"{fields['answered']} answer(s) settled: round {fields['round']} is a full one"
     if name == "grace_round_bought":
@@ -450,6 +472,7 @@ def _report(
     interrupted: Interrupted | None = None,
     *,
     report_at: str = "",
+    sink_claim: str = "",
 ) -> str:
     from .render import report_plan, report_review
 
@@ -457,7 +480,6 @@ def _report(
     try:
         context = _report_context(
             council,
-            console,
             outcome,
             journal,
             manifest,
@@ -465,6 +487,7 @@ def _report(
             aborted,
             interrupted,
             report_path=report_at,
+            sink_claim=sink_claim,
         )
         if docket is None or docket.blank:
             text = report_context.minimal_report(reason=aborted or outcome, context=context)
@@ -493,7 +516,7 @@ def _report(
     # reads as a whole one
     tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
     try:
-        with open(tmp, "w", encoding="utf-8") as handle:
+        with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
             handle.write(text)
         os.replace(tmp, path)
     except OSError as failure:
@@ -513,7 +536,6 @@ def _converged(docket) -> str | None:
 
 def _report_context(
     council: Council,
-    console: Console,
     outcome: str,
     journal: list[dict],
     manifest,
@@ -522,6 +544,7 @@ def _report_context(
     interrupted: Interrupted | None = None,
     *,
     report_path: str = "",
+    sink_claim: str = "",
 ) -> report_context.ReportContext:
     roster = []
     for agent_id, spec in zip(council.seat_ids, council.agents):
@@ -550,7 +573,7 @@ def _report_context(
         pi_cli=council.pi_cli,
         pi_version=council.pi_version,
         transcripts=council.transcripts,
-        transcript_note=console.transcript_note(),
+        sink_claim=sink_claim,
         untrusted=council.untrusted,
         in_place=council.in_place,
         roster=roster,
@@ -630,7 +653,7 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
         ],
     }
     try:
-        with open(os.path.join(run_dir, "human_input.json"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(run_dir, "human_input.json"), "w", encoding="utf-8", errors="backslashreplace") as handle:
             json.dump(record, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
     except OSError as failure:

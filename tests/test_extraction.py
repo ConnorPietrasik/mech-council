@@ -143,9 +143,9 @@ def test_an_unknown_stance_invalidates_only_that_position():
 
 def test_empty_positions_is_valid_but_an_all_invalid_array_is_a_repair():
     assert not parse(verdict(positions=[], signoff=True)).errors
-    assert not parse(verdict(positions=[])).repaired
+    assert not parse(verdict(positions=[])).errors, "an empty array is a seat with nothing to say"
     out = parse(verdict(positions=[{"item": "F1", "stance": "whatever"}]))
-    assert out.repaired and out.errors, "present but every entry invalid"
+    assert out.errors, "present but every entry invalid"
 
 
 def test_a_position_against_an_unknown_id_is_logged_not_dropped():
@@ -158,6 +158,85 @@ def test_a_position_against_an_unknown_id_is_logged_not_dropped():
 def test_a_position_on_a_closed_item_is_kept_and_marked():
     out = parse_verdict(verdict(**positions(("F1", "disagree"))), mode="review", me="Agent1", known_items=set(KNOWN), closed_items={"F1"})
     assert out.data["positions"][0]["on_closed"] is True, "the reopen path owns it"
+
+
+# --------------------------------------------------------------------------- a flag a seat sent as a word
+
+
+def test_a_bare_yes_or_no_word_sets_a_flag_whatever_punctuation_it_wore():
+    """`bool("false")` is True: a seat's stringified flag is read as the word it is."""
+
+    def flags(value):
+        out = parse(verdict(positions=[], signoff=value, human_input=[{"question": "which window?", "blocking": value}]))
+        assert not out.errors, out.errors
+        return out.data["signoff"], out.data["human_input"][0]["blocking"]
+
+    for no in (False, "false", "False", " no. ", "nope", "nah", "n", "none", "denied", "declined", "0", 0, "", None):
+        assert flags(no) == (False, False), no
+    for yes in (True, "true", "Yes!", "yeah", "yep", "y", "ok", "affirmative", "1", 1):
+        assert flags(yes) == (True, True), yes
+
+
+def test_a_signoff_word_signs_off_without_declaring_a_stop():
+    """`approved` is a seat's word for its own sign-off, and nobody's word for `blocking: true`."""
+
+    def flags(value):
+        out = parse(verdict(positions=[], signoff=value, human_input=[{"question": "which window?", "blocking": value}]))
+        return out.data["signoff"], out.data["human_input"][0]["blocking"], out.refused
+
+    for word in ("approved", "Approved.", "agreed", "accepted", "lgtm", "signed off", "signed_off"):
+        signoff, blocking, refused = flags(word)
+        assert signoff is True, f"{word!r} was refused as a sign-off"
+        assert blocking is False, f"{word!r} declared a stop on the run"
+        assert [entry["field"] for entry in refused] == ["blocking"], f"{word!r} is a sign-off word, not a `blocking` one: {refused}"
+        assert refused[0]["about"] == "which window?", "the refusal names the ask whose flag it was"
+
+    signed = parse(verdict(positions=[], approved=True))
+    assert not signed.errors and signed.data["signoff"] is True, "`approved` as a key is the same utterance"
+
+
+def test_a_prose_flag_is_refused_on_its_own_and_grants_nothing():
+    """`no problems, accepted` says two things at once: believe neither, refuse both, and say how each was read."""
+
+    def flags(value):
+        out = parse(verdict(**positions(("F1", "agree")), signoff=value, human_input=[{"question": "which window?", "blocking": value}]))
+        return out.errors, out.refused, out.problems, out.data
+
+    for prose in ("no problems, accepted", "not yet", "urgent", "approve if CI is green", "blocked on the tenant decision", "1.0"):
+        errors, refused, problems, data = flags(prose)
+        assert (data["signoff"], data["human_input"][0]["blocking"]) == (False, False), f"{prose!r} granted itself"
+        assert not errors, f"{prose!r} was filed as an unreadable reply, which forfeits the whole of it: {errors}"
+        assert {entry["field"] for entry in refused} == {"signoff", "blocking"}, f"{prose!r} was swallowed: {refused}"
+        assert len(data["positions"]) == 1, "the seat's stance stands: a refused flag is one field, not the reply"
+        assert [entry["counts"] for entry in refused] == ["false", "false"], refused
+        assert len(problems) == 2, f"the seat is owed one sentence per refused field: {problems}"
+        assert all("signoff" in said or "blocking" in said for said in problems), problems
+
+
+def test_two_refused_flags_are_two_sentences_the_seat_can_tell_apart():
+    """A refusal names the ask it was worded on, so a seat re-asked about two `blocking` fields fixes both."""
+    out = parse(
+        verdict(
+            positions=[],
+            human_input=[
+                {"question": "which window?", "blocking": "urgent"},
+                {"question": "roll back or forward?", "blocking": "urgent"},
+            ],
+        )
+    )
+    assert len(out.problems) == 2 and len(set(out.problems)) == 2, f"one sentence per refused field: {out.problems}"
+    assert "which window?" in out.problems[0] and "roll back or forward?" in out.problems[1], out.problems
+    alone = parse(verdict(positions=[], signoff="urgent"))
+    assert " on " not in alone.problems[0] and "`signoff`" in alone.problems[0], alone.problems
+
+
+def test_an_empty_container_is_a_flag_saying_no_rather_than_one_to_refuse():
+    """`{}` and `[]` carry no word: they read false like `""` does, and owe the seat no re-ask."""
+    empties: list[object] = [[], {}, "", None]
+    for empty in empties:
+        out = parse(verdict(positions=[], signoff=empty, human_input=[{"question": "which window?", "blocking": empty}]))
+        assert (out.data["signoff"], out.data["human_input"][0]["blocking"]) == (False, False), empty
+        assert not out.refused and not out.errors, f"{empty!r} was refused, which re-asks a seat for nothing"
 
 
 # --------------------------------------------------------------------------- severity
@@ -275,7 +354,7 @@ def test_notes_read_whether_written_as_lines_or_objects_in_both_modes():
 def test_a_note_that_says_nothing_is_dropped_and_owes_no_repair():
     out = parse(verdict(**positions(("F1", "agree")), notes=["", "   ", 7, {"item": "F1"}, {"note": "kept"}]))
     assert out.data["notes"] == [{"text": "kept", "item": None}]
-    assert not out.errors and not out.invalid and not out.repaired
+    assert not out.errors and not out.invalid
 
 
 def test_retract_note_names_the_note_ledger_and_normalizes_like_an_ask_id():
@@ -370,7 +449,7 @@ def test_phase0_plan_mode_reads_the_approach_schema():
 
 def test_a_plan_with_no_claim_and_no_stages_is_a_repair():
     out = parse_phase0(json.dumps({"approach": {}}), mode="plan")
-    assert out.repaired and out.errors == ["the plan carries no stages"], "the repair asks for the one thing missing, by name"
+    assert out.errors == ["the plan carries no stages"], "the repair asks for the one thing missing, by name"
 
 
 # --------------------------------------------------------------------------- chair payloads

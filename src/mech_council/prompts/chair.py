@@ -8,7 +8,10 @@ of your own: your job is to see which entries below are one entry reported twice
 so.
 
 - Conservative beats tidy: when unsure, keep them apart.
-- Every entry below carries an ID. Echo those IDs exactly; make none up.
+- Every entry below carries an ID. Echo those IDs exactly; make none up, and never name an entry that is
+  not listed: the listing is every entry you are judging.
+- Name the entry raised **first** as `canonical`: its claim is what the human reads, and the others are
+  recorded beside it. The ids ascend with time, so the lowest one in a group is the earliest.
 """
 
 ASK_MERGE = """\

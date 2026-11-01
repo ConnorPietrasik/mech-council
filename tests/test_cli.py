@@ -159,7 +159,7 @@ def test_a_seat_that_goes_silent_does_not_hold_the_run_open(cli, project):
     env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
     result = cli(["review"], cwd=project, env=env, timeout=120)
     assert result.returncode == 0, result.console
-    assert result.manifest.get("outcome") == "consensus", result.report()
+    assert result.manifest.get("outcome") == "unvetted", "a result the council never decided is not a consensus"
     report = result.report()
     assert "declined" in report, "the review report says which seat the run could not reach"
     assert "the cache ignores tenants" in report

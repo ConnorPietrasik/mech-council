@@ -309,8 +309,6 @@ def merge_task(mode: str, listing: str, goal: str | None = None) -> str:
             ANSWER_SHAPE,
             merge_schema(mode),
             "---",
-            "## The new items",
-            "",
             listing,
         ]
     )

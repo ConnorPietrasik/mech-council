@@ -310,6 +310,12 @@ def test_an_in_place_report_never_claims_a_sandbox():
     assert "no write journal, no namespaces, no sweep" in text, "the manifest's own description says what it cannot hold"
 
 
+def test_a_header_never_told_about_the_sinks_says_nothing_about_them():
+    """The note is the header's only claim about bytes: unset, it must not parenthesise a guess."""
+    rows = [row for row in report_review.render(build(), context()).splitlines() if "transcripts:" in row]
+    assert len(rows) == 1 and rows[0].endswith("transcripts: off"), rows
+
+
 def test_an_overlay_refusal_prints_under_sandbox_limits_not_as_evidence():
     """An overlay refusal is evidence of the *limit*, never of a finding."""
     docket = build()

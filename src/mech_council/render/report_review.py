@@ -22,6 +22,7 @@ from ..deliberation.state import (
     Item,
     Question,
 )
+from ..sandbox.journal import printable
 from .context import ReportContext
 from .text import caption, severity_key, wrap
 
@@ -240,7 +241,7 @@ def _sandbox_writes(context: ReportContext) -> list[str]:
         for kind in ("created", "modified", "deleted"):
             paths = member.get(kind) or []
             if paths:
-                out.append(f"  - {kind} ({len(paths)}): " + ", ".join(f"`{p}`" for p in paths))
+                out.append(f"  - {kind} ({len(paths)}): " + ", ".join(f"`{printable(p)}`" for p in paths))
     out.append("")
     return out
 

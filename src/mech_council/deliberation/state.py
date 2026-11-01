@@ -13,6 +13,8 @@ ASKED, ANSWERED, SKIPPED = "asked", "answered", "skipped"
 RETRACTED = "retracted"
 
 CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs_human", "stalemate", "round_limit_reached", "aborted")
+#: everyone signed off and nothing is disputed, but an open item reached no disposition: a result, not an agreement
+UNVETTED = "unvetted"
 
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
@@ -166,7 +168,6 @@ class QA:
     text: str
     round: int = 0
     answer: str = ""
-    answered_round: int = 0
 
 
 @dataclass
@@ -255,12 +256,6 @@ class Docket:
     def stance(self, item_id: str, agent: str) -> Stance | None:
         return self.stances.get(item_id, {}).get(agent)
 
-    def stated_stance(self, item_id: str, agent: str) -> str | None:
-        record = self.stance(item_id, agent)
-        if record is None or record.declined:
-            return None
-        return record.stance
-
     def effective_stance(self, item_id: str, agent: str) -> str | None:
         """A declined record and a retired or demoted asker count as abstain, not absent."""
         record = self.stance(item_id, agent)
@@ -301,6 +296,3 @@ class Docket:
 
     def questions_for_item(self, item_id: str) -> list[Question]:
         return [q for q in (self.questions[i] for i in self.question_order) if q.item_id == item_id]
-
-    def item_for_question(self, question: Question) -> Item | None:
-        return self.items.get(question.item_id) if question.item_id else None

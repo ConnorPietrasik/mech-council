@@ -84,10 +84,12 @@ with the guess it stands for — never decided silently. An unanswered
 **effective-blocking** question is a "do NOT guess": name it and stop.
 """
 MERGE_TASK = """\
-Decision points raised since the last merge are listed below. Say which ask the **same
-decision twice**; merging wording or scope is not merging, because it is the decision that
-matches, not the sentence stating it.
+New decision points are listed under **Entries to group**. The decision points still open on the docket are
+listed under **Already on the docket**: a new entry asking one of those asks the same decision twice, and it
+folds into it. Say which entries ask the **same decision twice**; merging wording or scope is not merging,
+because it is the decision that matches, not the sentence stating it.
 
+- Never fold two entries from **Already on the docket** together: those were grouped once already.
 - Two entries naming two forks that merely share a word are two decision points.
 - Each entry prints the decision, then its `the answers it admits:` line and its `evidence:`
   line. Read all three — decisions that read alike often separate on an answer one admits and

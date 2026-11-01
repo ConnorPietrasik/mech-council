@@ -174,6 +174,17 @@ def verdict():
     return json.dumps({"positions": [], "new_items": [], "answers": [], "questions": [], "human_input": [], "signoff": True})
 
 
+def prose_flag():
+    """A sound reply whose `blocking` is worded as prose: one field the lane will not read."""
+    return json.dumps(
+        {
+            "positions": [{"item": "F1", "stance": "agree"}],
+            "human_input": [{"question": "which window?", "blocking": "urgent"}],
+            "signoff": True,
+        }
+    )
+
+
 GONE = ChildGone("child stdout closed")
 """Restart-and-re-ask is *did a message arrive*: a child that says nothing takes the
 restart path, and a message that arrives and is unreadable is a rejection.  So the
@@ -315,13 +326,39 @@ def test_a_repair_that_lands_is_not_a_rejection():
     assert outcome.repairs == 1 and not outcome.rejected and outcome.data is not None
 
 
+def test_a_refused_field_never_costs_the_seat_its_whole_answer():
+    """A field the lane will not read is told, refused by name, and the rest of the reply is applied."""
+
+    async def main():
+        board, _members, console, _ = lanes(script={"seat1-one": [{"text": prose_flag()}] * (REPAIR_ASKS + 1)})
+        outcome = await board.ask_agent(
+            "Agent1",
+            "go",
+            round_=2,
+            kind="verdict",
+            parse_kw={"mode": "review", "me": "seat1-one", "known_items": {"F1"}},
+            phase="round",
+        )
+        return outcome, console
+
+    outcome, console = run(main())
+    assert outcome.repairs == REPAIR_ASKS and outcome.prompts == REPAIR_ASKS + 1, "the seat is asked to say it as a flag"
+    assert not outcome.rejected, "one unreadable field is not an unreadable message"
+    assert outcome.data.data["positions"], "the seat's stance stands"
+    refused = [record for record in console.events if record["type"] == "verdict_field_refused"]
+    assert refused and refused[-1]["field"] == "blocking" and refused[-1]["about"] == "which window?", refused
+    assert not [record for record in console.events if record["type"] == "verdict_rejected" and record.get("final")], "no final rejection"
+
+
 def test_needs_repair_distinguishes_the_repairable_from_themerely_empty():
     class Parsed:
-        def __init__(self, invalid=(), errors=()):
-            self.invalid, self.errors = list(invalid), list(errors)
+        def __init__(self, invalid=(), errors=(), refused=()):
+            self.invalid, self.errors, self.refused = list(invalid), list(errors), list(refused)
+            self.problems = [*self.errors, *(f"`{r['field']}` {r['why']}" for r in self.refused)]
 
     assert needs_repair(Parsed(errors=["no JSON object"]))
     assert needs_repair(Parsed(invalid=["bad stance"]))
+    assert needs_repair(Parsed(refused=[{"field": "signoff", "why": "must be true or false"}]))
     assert not needs_repair(Parsed())
 
 

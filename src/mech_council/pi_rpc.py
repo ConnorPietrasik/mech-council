@@ -73,7 +73,6 @@ class PiRpc:
         self._answer: Answer | None = None
         self.activity: Activity | None = None
         self.alive = True
-        self.unknown_command: str | None = None
         self._last_assistant: dict | None = None
 
     def start(self) -> None:
@@ -188,7 +187,6 @@ class PiRpc:
         if not record.get("success", False):
             error = str(record.get("error") or "")
             if _names_unknown_command(error):
-                self.unknown_command = error
                 future.set_exception(ProtocolError(f"{self.label}: pi refused a command this tool sends: {error}"))
                 return
             future.set_exception(ProtocolError(error or "command failed"))

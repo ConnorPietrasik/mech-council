@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .dispositions import derive
 from .escalations import effective_class, held_back
-from .state import ASKED, CONSENSUS, DECLINED, DISPUTED, GO, NEEDS_OUTCOME, SKIPPED, UNSEEN, Docket
+from .state import ASKED, CONSENSUS, DECLINED, DISPUTED, GO, NEEDS_OUTCOME, SKIPPED, UNHEARD, UNSEEN, UNVETTED, Docket
 
 
 def unsettled_questions(docket: Docket) -> list:
@@ -54,10 +54,18 @@ def evaluate(docket: Docket) -> tuple[str, str]:
         return NEEDS_OUTCOME, answer
     if docket.mode == "plan":
         agreed, token, reason = direction_rule(docket)
-        if agreed:
-            return CONSENSUS, f"{reason} ({token})"
-        return GO, reason
-    return CONSENSUS, "no disputed, unseen or unanswered effective-blocking work"
+        if not agreed:
+            return GO, reason
+        return _settled(states, f"{reason} ({token})")
+    return _settled(states, "no disputed, unseen or unanswered effective-blocking work")
+
+
+def _settled(states: dict[str, str], reason: str) -> tuple[str, str]:
+    """A run ends agreed only if every open item reached a disposition: `unheard` work is the council looking and deciding nothing."""
+    unheard = sorted(i for i, s in states.items() if s == UNHEARD)
+    if unheard:
+        return UNVETTED, reason + " — but no disposition on: " + ",".join(unheard)
+    return CONSENSUS, reason
 
 
 def _open_effective_blocking(docket: Docket) -> str | None:

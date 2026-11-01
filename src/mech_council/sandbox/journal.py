@@ -9,6 +9,11 @@ import stat
 from .memberns import SCRATCH_NAME
 
 
+def printable(name: str) -> str:
+    """The form to print, not the form to stat: a name whose bytes are not text carries a lone surrogate."""
+    return name.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+
+
 def listing(upper: str, *, skip: str = SCRATCH_NAME) -> dict[str, str]:
     out: dict[str, str] = {}
     if not os.path.isdir(upper):
@@ -122,11 +127,3 @@ def bytes_used(upper: str, *, skip: str = SCRATCH_NAME) -> int:
             except OSError:
                 pass
     return total
-
-
-def exists_only_in_uppers(relative: str, uppers: list[str], lower_fd: int) -> str | None:
-    if _exists_in_lower(lower_fd, relative):
-        return None
-    held = [upper for upper in uppers if upper and os.path.lexists(os.path.join(upper, relative))]
-    # with two uppers holding it, naming either is a guess
-    return held[0] if len(held) == 1 else None

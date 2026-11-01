@@ -41,10 +41,6 @@ class RunManifest:
     data: dict = field(default_factory=dict)
     members: dict[str, MemberRecord] = field(default_factory=dict)
 
-    @property
-    def members_of(self) -> dict[str, MemberRecord]:
-        return self.members
-
     def record_prompts(self, counts: dict[str, int]) -> None:
         for file_base, count in (counts or {}).items():
             record = self.members.get(file_base)
@@ -153,7 +149,8 @@ def finalize(
 def _write(manifest: RunManifest) -> None:
     # a unique tmp: the hurried exit can write while this write is mid-flight
     tmp = f"{manifest.path}.tmp-{os.getpid()}-{time.time_ns()}"
-    with open(tmp, "w", encoding="utf-8") as handle:
+    # backslashreplace: a member can name a file with bytes that are not text, which would otherwise cost the whole manifest
+    with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
         json.dump(manifest.data, handle, indent=2, ensure_ascii=False, default=str)
         handle.write("\n")
     os.replace(tmp, manifest.path)

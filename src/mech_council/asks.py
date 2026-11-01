@@ -54,7 +54,18 @@ class Outcome:
 
 
 def needs_repair(parsed: object) -> bool:
+    """Anything the seat should hear back about: an unreadable reply, or a field the extraction would rather not guess."""
+    return _unreadable(parsed) or bool(getattr(parsed, "refused", None))
+
+
+def _unreadable(parsed: object) -> bool:
+    """The reply's shape is wrong, not one field of it: only this forfeits the whole message."""
     return bool(getattr(parsed, "invalid", False) or getattr(parsed, "errors", None))
+
+
+def _problems(parsed: object) -> list[str]:
+    """What the message got wrong, as the sentences the seat is owed."""
+    return list(getattr(parsed, "problems", None) or getattr(parsed, "errors", None) or [])
 
 
 class Lanes:
@@ -152,10 +163,6 @@ class Lanes:
             )
         return rows
 
-    @property
-    def has_in_flight(self) -> bool:
-        return bool(self.in_flight)
-
     async def _mediated(
         self,
         agent_id: str,
@@ -180,8 +187,8 @@ class Lanes:
         parsed = extract(kind, text, **parse_kw)
         while needs_repair(parsed) and outcome.repairs < REPAIR_ASKS:
             outcome.repairs += 1
-            hint = "; ".join(getattr(parsed, "errors", []) or []) or "the answer did not match the schema"
-            outcome.errors = list(getattr(parsed, "errors", []) or [])
+            hint = "; ".join(_problems(parsed)) or "the answer did not match the schema"
+            outcome.errors = _problems(parsed)
             self.console.event("verdict_rejected", member=label, **round_field(round_), reason=hint, repair=outcome.repairs, phase=phase)
             self.console.say(f"{who}: answer refused ({hint}) — repair {outcome.repairs}/{REPAIR_ASKS}")
             text = await self._prompt_with_restart(
@@ -196,19 +203,24 @@ class Lanes:
             parsed = extract(kind, text, **parse_kw)
         outcome.text = text
         if needs_repair(parsed):
-            outcome.errors = list(getattr(parsed, "errors", []) or []) or ["no JSON object in the answer"]
-            outcome.rejected = True
-            self.console.event(
-                "verdict_rejected",
-                member=label,
-                **round_field(round_),
-                reason=outcome.errors[0],
-                repair=outcome.repairs,
-                final=True,
-                phase=phase,
-            )
-            self.console.say(f"{who}: message rejected after {outcome.repairs} repair re-ask(s)")
-            return outcome
+            outcome.errors = _problems(parsed) or ["no JSON object in the answer"]
+            if _unreadable(parsed):
+                outcome.rejected = True
+                self.console.event(
+                    "verdict_rejected",
+                    member=label,
+                    **round_field(round_),
+                    reason=outcome.errors[0],
+                    repair=outcome.repairs,
+                    final=True,
+                    phase=phase,
+                )
+                self.console.say(f"{who}: message rejected after {outcome.repairs} repair re-ask(s)")
+                return outcome
+            # the shape stood after every re-ask it was owed: keep the seat's work, refuse the fields it worded as prose by name
+            for entry in getattr(parsed, "refused", []):
+                self.console.event("verdict_field_refused", member=label, **round_field(round_), phase=phase, **entry)
+            self.console.say(f"{who}: kept the answer, refused: {'; '.join(_problems(parsed))}{round_note(round_)}")
         outcome.data = parsed
         return outcome
 

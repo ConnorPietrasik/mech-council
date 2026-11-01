@@ -145,6 +145,28 @@ def test_transcripts_off_writes_nothing_until_a_child_produces_stderr(cli, proje
     assert result.returncode == 0, result.console
     assert not os.path.exists(os.path.join(result.run_dir, "agents")), "`off` wrote transcripts anyway"
     assert "transcripts: none written" in result.console
+    rows = [row for row in result.report().splitlines() if "transcripts:" in row]
+    assert len(rows) == 1 and rows[0].endswith("transcripts: off"), f"nothing was written, so the header names no sink: {rows}"
+
+
+def test_the_header_names_a_stderr_only_run_for_what_it_is(cli, project):
+    """`off` still writes stderr: the counter saying so has to be one a restart does not lose."""
+    entries = json.loads(SCRIPT)
+    entries[0]["stderr"] = "a warning from the child\n"
+    result = cli(["review"], cwd=project, stdin="\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=json.dumps(entries)), timeout=200)
+    assert result.returncode == 0, result.console
+    written = sorted(os.listdir(os.path.join(result.run_dir, "agents")))
+    assert written and all(name.endswith(".stderr.txt") for name in written), "`off` wrote a sink besides stderr"
+    rows = [row for row in result.report().splitlines() if "transcripts:" in row]
+    assert len(rows) == 1 and rows[0].endswith("transcripts: off (stderr only, under `agents/`)"), rows
+
+
+def test_the_report_header_counts_the_stream_it_used_to_deny(finished):
+    """The report is what the human keeps, so it may not call the bytes under `agents/` 'stderr only'."""
+    rows = [row for row in finished.report().splitlines() if "transcripts:" in row]
+    assert len(rows) == 1, rows
+    assert "stderr only" not in rows[0], f"the header denies the verbatim stream it lists two lines later: {rows[0]}"
+    assert "bytes" in rows[0], f"the header owes the tally the console already prints: {rows[0]}"
 
 
 # ------------------------------------------------------------- The event stream console
@@ -430,3 +452,27 @@ def test_a_report_that_cannot_be_replaced_into_place_leaves_no_tmp_behind(projec
 
     assert run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "", report_at=str(target)) == ""
     assert os.listdir(holder) == ["report.md"], "only the thing that refused the report is left"
+
+
+def test_a_file_name_that_is_not_text_costs_neither_the_report_nor_the_manifest(project, tmp_path):
+    """One odd name must not cost the human the artifacts they read, and must not cost them the byte-true name either."""
+    from mech_council import run as run_mod
+    from mech_council import runjson
+    from mech_council.deliberation.state import Docket, Item
+
+    council, console, manifest, run_dir = _report_bits(project, tmp_path)
+    docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
+    journal = [{"file_base": "slot01-metic", "created": ["bad\udcffname"], "modified": [], "deleted": []}]
+    console.event("journal_line", artifact=journal[0]["created"][0])
+
+    path = run_mod._report(council, docket, console, str(run_dir), "consensus", journal, manifest, "")
+    runjson.finalize(manifest, outcome="consensus", journal=journal, survivor_pids=[], survivor_ns=[], rounds=1, report=path)
+
+    assert path and os.path.exists(path), "the report the human was promised"
+    with open(path, encoding="utf-8") as handle:
+        assert "bad\\xffname" in handle.read(), "the report names the artifact in a form a person can read"
+    raw = (run_dir / "run.json").read_bytes()
+    assert b"bad\\udcffname" in raw and raw.isascii(), "the manifest is written, and reads back as the same name"
+    assert (run_dir / "events.jsonl").read_bytes().isascii(), "the event that named it wrote too"
+    assert sorted(os.listdir(run_dir)) == ["events.jsonl", "report.md", "run.json"], "no write left a tmp behind"

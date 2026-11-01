@@ -5,10 +5,9 @@ from . import common
 
 
 class Brief:
-    def __init__(self, *, mode: str, project: str, max_items: int = 12, in_place: bool = False) -> None:
+    def __init__(self, *, mode: str, project: str, in_place: bool = False) -> None:
         self.mode = mode
         self.project = project
-        self.max_items = max_items
         self.in_place = in_place
 
     def phase0(self, *, mode: str, goal: str | None, project: str) -> str:

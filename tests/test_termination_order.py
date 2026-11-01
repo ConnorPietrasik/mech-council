@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mech_council.deliberation import escalations, termination
-from mech_council.deliberation.state import AGREE, NEEDS_HUMAN, NO_PREFERENCE, Docket, Item
+from mech_council.deliberation.state import ABSTAIN, AGREE, NEEDS_HUMAN, NO_PREFERENCE, Docket, Item
 from mech_council.deliberation.termination import CONSENSUS, GO, NEEDS_OUTCOME
 
 
@@ -23,6 +23,23 @@ def _two_seats_need_a_human(board: Docket, item: str) -> None:
     escalations.record_stance(board, item_id=item, agent="Agent3", stance=AGREE, round_=1)
     for agent in ("Agent1", "Agent2"):
         escalations.stop_for(board, qid="H1", agent=agent, round_=1)
+
+
+def test_an_item_the_council_left_unheard_is_never_reported_as_agreement() -> None:
+    """`outcome` is the word a script reads: work that reached no disposition may not hide under `consensus`."""
+    review = _docket("review", ["F1"])
+    for agent in review.roster:
+        escalations.record_stance(review, item_id="F1", agent=agent, stance=ABSTAIN, round_=1)
+    outcome, reason = termination.evaluate(review)
+    assert outcome == termination.UNVETTED and "F1" in reason, f"three abstentions ended as {outcome}: {reason}"
+
+    plan = _docket("plan", ["T1", "T2"])
+    for agent in plan.roster:
+        escalations.record_stance(plan, item_id="T1", agent=agent, stance=AGREE, round_=1)
+        escalations.record_stance(plan, item_id="T2", agent=agent, stance=ABSTAIN, round_=1)
+    plan.backing.update({"Agent1": "plan-a", "Agent2": "plan-a", "Agent3": NO_PREFERENCE})
+    outcome, reason = termination.evaluate(plan)
+    assert outcome == termination.UNVETTED and "T2" in reason, "one agreed direction does not settle a topic nobody weighed"
 
 
 def test_a_decision_one_seat_never_signed_cannot_be_reported() -> None:

@@ -10,6 +10,7 @@ import pytest
 
 from mech_council import startup
 from mech_council.cli import ConfigError
+from mech_council.run import RESULTS
 from mech_council.sandbox import mount
 
 from .conftest import FAKE_PI, no_user_config, write_project_config
@@ -197,7 +198,7 @@ def test_an_unknown_model_warns_on_stderr_and_the_run_goes_anyway(cli, project):
     result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_STARTLE=warning), timeout=150)
     assert result.returncode == 0, result.console
     assert warning in result.console, "the warning reaches the operator, once per member"
-    assert result.manifest["outcome"] in ("consensus", "needs_human", "stalemate", "round_limit_reached")
+    assert result.manifest["outcome"] in RESULTS, "the run still ends with a word that means a result was written"
     warned = [base for base, record in result.manifest["members"].items() if record.get("model_warning")]
     assert warned, "the report records the warning per seat"
 

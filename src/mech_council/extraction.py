@@ -27,7 +27,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "answers": ("answers", "replies", "responses", "qa_answers", "q_a"),
     "questions": ("questions", "agent_questions", "asks", "queries"),
     "human_input": ("human_input", "human", "needs_human", "questions_for_human", "human_questions", "escalations"),
-    "signoff": ("signoff", "sign_off", "signed_off", "approve", "approval", "done"),
+    "signoff": ("signoff", "sign_off", "signed_off", "approved", "approve", "approval", "done"),
     "summary": ("summary", "overview", "wrap_up"),
     "open_questions": ("open_questions", "questions_open", "unresolved", "queries"),
     "notes": ("notes", "note", "human_notes", "notes_for_human", "human_note", "note_to_human", "remarks", "observations"),
@@ -188,9 +188,19 @@ WATCHDOG_FIELDS = ("decisions",)
 @dataclass
 class Extraction:
     data: dict = field(default_factory=dict)
-    repaired: bool = False
-    errors: list[str] = field(default_factory=list)  # repairable problems
+    errors: list[str] = field(default_factory=list)  # the reply itself is unreadable: the whole of it owes a repair re-ask
+    refused: list[dict[str, str]] = field(default_factory=list)  # a field that will not be honored: read at its safe value, never guessed
     invalid: bool = False  # no JSON object at all
+
+    @property
+    def problems(self) -> list[str]:
+        """Every sentence the seat is owed: what to repair, and what was refused and how it was read."""
+        out = list(self.errors)
+        for r in self.refused:
+            # an ask's flag names its ask, so two refused `blocking` fields are two sentences the seat can tell apart
+            named = f"`{r['field']}`" + (f" on {r['about']!r}" if r.get("about") else "")
+            out.append(f"{named} {r['why']}, not {r['said']!r}: it counts as {r['counts']}")
+        return out
 
 
 def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str | None]:
@@ -279,6 +289,31 @@ def pick(mapping: object, canonical: str, extra: tuple[str, ...] = ()) -> object
         if candidate in forms:
             return mapping[forms[candidate]]
     return None
+
+
+#: a boolean a seat sent as a word instead of as JSON: the bare words it means by no, and by yes, in `fold`'s form
+NO_TOKENS = frozenset({"false", "no", "nope", "nah", "n", "none", "null", "nil", "off", "never", "negative", "denied", "declined", "0"})
+YES_TOKENS = frozenset({"true", "yes", "yeah", "yep", "y", "on", "ok", "okay", "affirmative", "1"})
+#: a sign-off is the flag a seat words as its verdict; a word that says nothing about `blocking` is refused there, not guessed
+SIGNOFF_YES = frozenset({"approved", "approve", "agreed", "agree", "accepted", "signedoff", "lgtm"})
+
+
+def _flag(value: object, field: str, refused: list[dict[str, str]], *, about: str = "", yes: frozenset[str] = frozenset()) -> bool:
+    """A flag is a bool, or one of those words on its own; a word about anything else counts false and is refused out loud."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (list, dict)) and not value:
+        return False  # an empty container carries no word at all: it means no, as an empty string does
+    word = fold(text_of(value)).rstrip(".!?,;:")
+    if not word or word in NO_TOKENS:
+        return False
+    if word in YES_TOKENS or word in yes:
+        return True
+    entry = {"field": field, "said": text_of(value).strip(), "why": "must be true or false", "counts": "false"}
+    if about:
+        entry["about"] = about  # which ask's flag, so the operator can find it in the docket
+    refused.append(entry)
+    return False
 
 
 def text_of(value: object) -> str:
@@ -415,14 +450,13 @@ def parse_verdict(
 
     out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"), text=("answer", "text", "reply"))
     out.data["questions"] = _entries(pick(data, "questions"), ("to",), text=("question", "text", "ask"))
-    out.data["human_input"] = _human_input(data)
+    out.data["human_input"] = _human_input(data, out.refused)
     out.data["second"] = _ids(pick(data, "second"))
     out.data["blocking_for"] = _ids(pick(data, "blocking_for"))
     out.data["retract"] = _ids(pick(data, "retract"))
     out.data["answer_question"] = _ids_entries(pick(data, "answer_question"))
     out.data["insist"] = _ids(pick(data, "insist"))
-    signoff = pick(data, "signoff")
-    out.data["signoff"] = bool(signoff) if signoff is not None else False
+    out.data["signoff"] = _flag(pick(data, "signoff"), "signoff", out.refused, yes=SIGNOFF_YES)
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
     out.data["notes"] = _notes(pick(data, "notes"))
@@ -438,8 +472,6 @@ def parse_verdict(
             if invalidated:
                 out.errors.append(f"`backing` {text_of(raw_backing)!r} is not one of AgentN / merged: <label> / no_preference")
             out.data["backing"] = token
-    if out.errors and not clean_positions:
-        out.repaired = True
     return out
 
 
@@ -568,7 +600,7 @@ def _ids_entries(value: object) -> list[dict]:
     return out
 
 
-def _human_input(data: dict) -> list[dict]:
+def _human_input(data: dict, refused: list[dict[str, str]]) -> list[dict]:
     raw = pick(data, "human_input")
     if isinstance(raw, str):
         raw = [{"question": raw}]
@@ -588,7 +620,7 @@ def _human_input(data: dict) -> list[dict]:
             {
                 "question": question,
                 "item": text_of(pick(entry, "item")).strip() or None,
-                "blocking": bool(blocking) if blocking is not None else False,
+                "blocking": _flag(blocking, "blocking", refused, about=question),
                 "context": text_of(pick(entry, "context")),
                 "options": _strings(pick(entry, "options")),
             }
@@ -655,7 +687,6 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
         }
         if not clean_stages and not out.data["plan"]["text"]:
             out.errors.append("the plan carries no stages")
-            out.repaired = True
     else:
         findings = pick(data, "new_items") or []
         if not isinstance(findings, list):
@@ -680,13 +711,12 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
         out.data["findings"] = clean
         if findings and not clean:
             out.errors.append("`findings` was present but no entry carried a claim")
-            out.repaired = True
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
     out.data["notes"] = _notes(pick(data, "notes"))
     # phase 0 mints the first notes, so no note id exists to retract: the field is still the round's shape
     out.data["retract_note"] = []
-    out.data["human_input"] = _human_input(data)
+    out.data["human_input"] = _human_input(data, out.refused)
     return out
 
 

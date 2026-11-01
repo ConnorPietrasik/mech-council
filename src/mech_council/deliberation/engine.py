@@ -115,8 +115,6 @@ class Engine:
         self.shown: dict[str, list[str]] = {}
         self.asks_used: dict[str, int] = {}
         self.answers: dict[str, str] = {}
-        self.deferred_questions: list[str] = []
-        self.merge_refusals = 0
         self._next_item = 1
         self.phase0_counts: dict[str, int] = {}
         self._phase0_summary: dict[str, str] = {}
@@ -524,8 +522,11 @@ class Engine:
             if qa is None:
                 self.emit("qa_answer_unmatched", member=agent, question=qid, round=round_)
                 continue
+            if qa.to != agent:
+                # only the seat the question was put to may answer it: any other seat would put words in its mouth
+                self.emit("qa_answer_not_addressed", member=agent, question=qa.id, asked_of=qa.to, round=round_)
+                continue
             qa.answer = entry.get("text") or entry.get("answer") or ""
-            qa.answered_round = round_
 
     def _latest_unanswered(self, *, answered_by: str, addressed_to: str):
         matches = [qa for qa in self.docket.qa.values() if qa.asker == addressed_to and qa.to == answered_by and not qa.answer]
@@ -805,17 +806,21 @@ class Engine:
 
     async def _merge_new_items(self, round_: int) -> None:
         self.phase("the chair's merge of what the round raised")
-        fresh = [i for i in self.docket.order if not self.docket.items[i].closed and self.docket.items[i].opened_round == round_]
+        open_ids = [i for i in self.docket.order if not self.docket.items[i].closed]
+        fresh = [i for i in open_ids if self.docket.items[i].opened_round == round_]
         if not fresh:
             return
-        await self._merge_pass(round_=round_, ids=fresh)
+        # the other open entries ride along, so a duplicate of one of them folds into it instead of standing twice
+        await self._merge_pass(round_=round_, ids=open_ids, new=fresh)
 
-    async def _merge_pass(self, round_: int, ids: list[str]) -> None:
-        listing = "\n".join(_merge_entry(self.docket.items[i], self.adapter.detail_label) for i in ids)
+    async def _merge_pass(self, round_: int, ids: list[str], *, new: list[str] | None = None) -> None:
+        """`new` are the entries to group; the rest of `ids` are open entries a new one folds into. All of them are the chair's scope."""
+        fresh = list(ids) if new is None else list(new)
+        fresh_set = set(fresh)
+        listing = _merge_listing(self.docket.items, self.adapter.detail_label, new=fresh, older=[i for i in ids if i not in fresh_set])
         merged = await self.port.chair_merge(listing, round_=round_)
-        applied, reason = self._apply_merge(merged.get("groups") or [])
+        applied, reason = self._apply_merge(merged.get("groups") or [], shown=set(ids), round_=round_)
         if applied is None:
-            self.merge_refusals += 1
             self.emit("merge_refused", round=round_, reason=reason, items=len(ids))
             self.emit_note(
                 f"merge plan refused ({reason}): the docket stays unmerged ({len(ids)} {self.adapter.item_noun_plural} printed as raised)"
@@ -823,28 +828,46 @@ class Engine:
             return
         self.emit("chair_merge", round=round_, groups=applied)
 
-    def _apply_merge(self, groups: list[dict]) -> tuple[int | None, str]:
+    def _apply_merge(self, groups: list[dict], *, shown: set[str], round_: int) -> tuple[int | None, str]:
         seen: set[str] = set()
         usable = []
+        raised = {i: n for n, i in enumerate(self.docket.order)}
         for group in groups:
-            canonical, duplicates = group["canonical"], group["duplicates"]
-            if canonical in seen or any(d in seen for d in duplicates):
-                return None, f"{canonical} is reused across groups"
-            seen.add(canonical)
-            seen.update(d for d in duplicates if d != canonical)
-            if canonical not in self.docket.items:
+            chair_canonical, duplicates = group["canonical"], group["duplicates"]
+            if chair_canonical in seen or any(d in seen for d in duplicates):
+                return None, f"{chair_canonical} is reused across groups"
+            seen.add(chair_canonical)
+            seen.update(d for d in duplicates if d != chair_canonical)
+            if chair_canonical not in self.docket.items:
                 continue  # unknown IDs are skipped
-            if self.docket.items[canonical].closed:
+            if self.docket.items[chair_canonical].closed:
                 continue  # a merge may not widen a claim the council settled
+            if chair_canonical not in shown:
+                # an id outside this pass's listing is one the chair made up or misremembered: it adopts nothing
+                self.emit("merge_canonical_unlisted", round=round_, canonical=chair_canonical)
+                continue
+            named = dict.fromkeys((chair_canonical, *duplicates))  # one fold per id, whatever the chair echoed twice
+            rivals = [i for i in named if i in shown and i in self.docket.items and not self.docket.items[i].closed]
+            # the entry raised first lends the group its claim, so it takes the chair's place when the chair named a
+            # later one: an early entry carries verdicts, so folding it away would land as nothing
+            canonical = min(rivals, key=lambda i: raised[i])
             keep = []
-            for duplicate in duplicates:
+            for duplicate in named:
+                if duplicate == canonical:
+                    continue  # the group's own claim folds into nothing
                 item = self.docket.items.get(duplicate)
-                if item is None or item.closed or duplicate == canonical:
+                if item is None or item.closed:
+                    continue
+                if duplicate not in shown:
+                    # the same for a duplicate outside the listing: it keeps its claim, which the chair never read
+                    self.emit("merge_duplicate_unlisted", round=round_, duplicate=duplicate, into=canonical)
                     continue
                 if self.docket.stances.get(duplicate):
                     continue  # merging would discard verdicts
                 keep.append(duplicate)
             if keep:
+                if canonical != chair_canonical:
+                    self.emit("merge_canonical_replaced", round=round_, chair_named=chair_canonical, canonical=canonical)
                 usable.append((canonical, keep))
         for canonical, duplicates in usable:
             target = self.docket.items[canonical]
@@ -1318,6 +1341,19 @@ def _answers_challenge(defense: str, question: str) -> bool:
 
 def _tokens(text: str) -> set[str]:
     return {word for word in "".join(c if c.isalnum() else " " for c in (text or "").casefold()).split() if len(word) > 3}
+
+
+#: the two sections of the merge listing, in the words the mode briefings point the chair at
+MERGE_NEW_HEADING = "## Entries to group"
+MERGE_OLDER_HEADING = "## Already on the docket: fold a new entry into one of these, never these into each other"
+
+
+def _merge_listing(items, detail_label: str, *, new: list[str], older: list[str]) -> str:
+    """The chair's whole scope: what to group, then the open entries a new one folds into."""
+    out = [MERGE_NEW_HEADING, "", "\n".join(_merge_entry(items[i], detail_label) for i in new)]
+    if older:
+        out += ["", MERGE_OLDER_HEADING, "", "\n".join(_merge_entry(items[i], detail_label) for i in older)]
+    return "\n".join(out)
 
 
 def _merge_entry(item, detail_label: str) -> str:

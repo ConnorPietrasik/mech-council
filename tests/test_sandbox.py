@@ -699,31 +699,6 @@ def _read_journal_with_whiteout(root):
         os.close(fd)
 
 
-def test_a_path_held_by_two_uppers_is_nobodys_and_one_is_the_owner(ground):
-    def probe_dir():
-        return _on_tmpfs(ground, _read_attribution)
-
-    assert in_mapped_child(probe_dir) == {"one": "mine", "two": None}
-
-
-def _read_attribution(root):
-    lower, a, b = f"{root}/l", f"{root}/a", f"{root}/b"
-    os.makedirs(lower)
-    os.makedirs(a)
-    os.makedirs(b)
-    with open(os.path.join(a, "mine"), "w", encoding="utf-8") as handle:
-        handle.write("x\n")
-    fd = os.open(lower, os.O_RDONLY)
-    try:
-        one = journal_mod.exists_only_in_uppers("mine", [a, b], fd)
-        with open(os.path.join(b, "mine"), "w", encoding="utf-8") as handle:
-            handle.write("x\n")
-        two = journal_mod.exists_only_in_uppers("mine", [a, b], fd)
-        return {"one": "mine" if one == a else str(one), "two": two}
-    finally:
-        os.close(fd)
-
-
 def _on_tmpfs(ground, read):
     work = f"{ground}/fs"
     os.makedirs(f"{work}/mnt", exist_ok=True)

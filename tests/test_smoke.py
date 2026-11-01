@@ -10,10 +10,11 @@ import sys
 
 import pytest
 
+from mech_council.run import RESULTS
+
 from .conftest import no_user_config
 
 TOY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "testdata", "toy-project")
-RESULTS = ("consensus", "needs_human", "stalemate", "round_limit_reached")
 
 #: only the token-spending case carries `slow`; every other check in this file is free.
 

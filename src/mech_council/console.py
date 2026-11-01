@@ -14,7 +14,6 @@ class Console:
         self._events: list[dict] = []
         self.lines: list[str] = []
         self.started = time.monotonic()
-        self._written = 0
 
     def say(self, text: str) -> None:
         self.lines.append(text)
@@ -28,7 +27,7 @@ class Console:
         self._events.append(record)
         self.lines.append(f"[event] {name}")
         if self.events_path:
-            with open(self.events_path, "a", encoding="utf-8") as handle:
+            with open(self.events_path, "a", encoding="utf-8", errors="backslashreplace") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def events(self) -> list[dict]:
@@ -36,14 +35,6 @@ class Console:
 
     def duration(self) -> float:
         return round(time.monotonic() - self.started, 1)
-
-    def transcript_note(self) -> str:
-        if self._written:
-            return f"{self._written} bytes of raw protocol"
-        return "stderr only, under `agents/`"
-
-    def note_bytes(self, count: int) -> None:
-        self._written += count
 
 
 class Transcripts:
@@ -56,6 +47,7 @@ class Transcripts:
         self._raw: dict[str, BinaryIO] = {}
         self._err: dict[str, BinaryIO] = {}
         self.bytes_written = 0
+        self.stderr_bytes = 0
 
     def transcript_path(self, file_base: str) -> str:
         return os.path.join(self.agents_dir, f"{file_base}.transcripts.jsonl")
@@ -63,13 +55,16 @@ class Transcripts:
     def stderr_path(self, file_base: str) -> str:
         return os.path.join(self.agents_dir, f"{file_base}.stderr.txt")
 
-    def append_raw(self, chunk: bytes, *, file_base: str | None = None) -> None:
-        raise NotImplementedError
-
     def tally(self) -> str:
         if self.level != "full":
             return "none written" if not self.bytes_written else f"{self.bytes_written} bytes"
         return f"{self.bytes_written} bytes"
+
+    def sink_claim(self) -> str:
+        """What the report header may say about these sinks: a sink that holds nothing is never named. Empty says nothing."""
+        if self.bytes_written:
+            return f"verbatim stream written: {self.tally()}, under `agents/`"
+        return "stderr only, under `agents/`" if self.stderr_bytes else ""
 
     def close(self) -> None:
         for handle in list(self._raw.values()) + list(self._err.values()):
@@ -104,3 +99,4 @@ class MemberSinks:
             handle = open(self.manager.stderr_path(self.file_base), "ab")
             self.manager._err[self.file_base] = handle
         handle.write(chunk)
+        self.manager.stderr_bytes += len(chunk)
