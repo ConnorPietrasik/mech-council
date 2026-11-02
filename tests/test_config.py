@@ -260,8 +260,8 @@ def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
 
 
 def test_flags_still_beat_the_whole_chain(tmp_path):
-    leaf = convene(tmp_path, chain(), "leaf", goal="--goal wins", rounds=1, transcripts="full")
-    assert (leaf.goal, leaf.max_rounds, leaf.transcripts) == ("--goal wins", 1, "full")
+    leaf = convene(tmp_path, chain(), "leaf", goal="--goal wins", rounds=1, verbosity="full")
+    assert (leaf.goal, leaf.max_rounds, leaf.verbosity) == ("--goal wins", 1, 4)
 
 
 # ------------------------------------------------------------- in place: the knob, and who stated it
@@ -427,7 +427,7 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
         (body().replace('goal = "g"', 'goal = "g"\nmax_rounds = "10"', 1), "wants an integer, got str"),
         (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
         (body().replace('goal = "g"', 'goal = "g"\nin_place = "yes"', 1), "wants true or false, got str"),
-        (body().replace('goal = "g"', 'goal = "g"\ntranscripts = "everything"', 1), "'off' or 'full'"),
+        (body().replace('goal = "g"', 'goal = "g"\nverbosity = "everything"', 1), "one of quiet/summary/detail/debug/full"),
         (body().replace('goal = "g"', 'goal = "g"\nhuman = "never"', 1), "'blocking', 'non_blocking' or 'none'"),
         (body().replace('goal = "g"', 'goal = "g"\nhuman = "nonblock"', 1), "did you mean 'non_blocking'"),
         (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),

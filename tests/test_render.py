@@ -334,7 +334,7 @@ def test_an_in_place_report_never_claims_a_sandbox():
     docket = build()
     entry = item(docket, "F1", "the write failed", evidence="mv: Invalid cross-device link")
     entry.markers.append("sandbox_limit")
-    text = report_review.render(docket, context(in_place=True))
+    text = report_review.render(docket, context(in_place=True, verbosity=1))
     assert "- workspace: in place" in text and "sandbox_mib" not in text, "the header names the shared tree, not a cap"
     assert "## Project writes" in text and "## Sandbox writes" not in text
     assert "git status" in text, "the report says where what the members wrote went"
@@ -345,8 +345,8 @@ def test_an_in_place_report_never_claims_a_sandbox():
 
 def test_a_header_never_told_about_the_sinks_says_nothing_about_them():
     """The note is the header's only claim about bytes: unset, it must not parenthesise a guess."""
-    rows = [row for row in report_review.render(build(), context()).splitlines() if "transcripts:" in row]
-    assert len(rows) == 1 and rows[0].endswith("transcripts: off"), rows
+    rows = [row for row in report_review.render(build(), context()).splitlines() if "verbosity:" in row]
+    assert len(rows) == 1 and rows[0].endswith("verbosity: quiet"), rows
 
 
 def test_an_overlay_refusal_prints_under_sandbox_limits_not_as_evidence():
@@ -398,11 +398,25 @@ def test_a_cut_short_run_leads_with_where_it_stopped_in_every_report():
     assert "## Cut short by SIGINT" in sparse.split("# Why nothing ran")[0], "a docket with nothing on it still says where it stood"
 
 
-def test_the_artifacts_section_names_the_real_files():
-    docket = build()
-    text = report_review.render(docket, context(), run_dir="/runs/2026-01-01-app")
-    for name in ("run.json", "report.md", "events.jsonl", "human_input.json"):
-        assert name in text
+def test_the_artifacts_section_names_only_what_the_verbosity_kept():
+    def bullets(text: str) -> list[str]:
+        return [line for line in text.splitlines() if line.startswith("- ")]
+
+    def at(verbosity: int, **sinks) -> list[str]:
+        return bullets(report_review.render(build(), context(verbosity=verbosity, **sinks), run_dir="/runs/2026-01-01-app"))
+
+    for verbosity in range(5):
+        lines = at(verbosity)
+        assert any(line.startswith("- `run.json`") for line in lines) == (verbosity >= 1)
+        assert any(line.startswith("- `human_input.json`") for line in lines) == (verbosity >= 2)
+        assert any(line.startswith("- `events.jsonl`") for line in lines) == (verbosity >= 3)
+        assert not any("agents/" in line for line in lines), "nothing was written under agents/, so no agents/ bullet"
+    assert any("verbosity `quiet`" in line for line in at(0)), "quiet says why the run directory holds no more"
+    for verbosity in range(5):
+        lines = at(verbosity, stderr_bytes=1)
+        assert any("stderr.txt" in line for line in lines), "stderr was written, so it is named"
+        assert not any("transcripts.jsonl" in line for line in lines), "no stream was written, so no stream bullet"
+        assert any("transcripts.jsonl" in line for line in at(verbosity, transcript_bytes=1, stderr_bytes=1)) == (verbosity >= 4)
 
 
 # --------------------------------------------------------------------------- Plan report

@@ -5,6 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+from . import cli
 from .config import Council
 
 
@@ -40,6 +41,8 @@ class RunManifest:
     path: str
     data: dict = field(default_factory=dict)
     members: dict[str, MemberRecord] = field(default_factory=dict)
+    #: `false` when the verbosity keeps the run directory artifact-free: the manifest lives in memory only
+    enabled: bool = True
 
     def record_prompts(self, counts: dict[str, int]) -> None:
         for file_base, count in (counts or {}).items():
@@ -61,7 +64,16 @@ class RunManifest:
             self.data.setdefault("members", {})[file_base] = record.as_dict()
 
 
-def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project: str, orchestrator_pid: int) -> RunManifest:
+def create(
+    path: str,
+    council: Council,
+    *,
+    run_dir: str,
+    runs_dir: str,
+    project: str,
+    orchestrator_pid: int,
+    enabled: bool = True,
+) -> RunManifest:
     members: dict[str, MemberRecord] = {}
     roster = []
     for slot, spec in enumerate(council.agents, 1):
@@ -102,7 +114,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
             "watchdog_sec": council.watchdog_sec,
             "chair_timeout_sec": council.chair_timeout_sec,
             "max_concurrency": council.max_concurrency,
-            "transcripts": council.transcripts,
+            "verbosity": cli.VERBOSITY_LEVELS[council.verbosity],
             "sandbox_mib": council.sandbox_mib,
             "in_place": council.in_place,
             "human": council.human,
@@ -114,7 +126,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
         "members": {base: record.as_dict() for base, record in members.items()},
         "outcome": None,
     }
-    manifest = RunManifest(path=path, data=data, members=members)
+    manifest = RunManifest(path=path, data=data, members=members, enabled=enabled)
     _write(manifest)
     return manifest
 
@@ -148,6 +160,8 @@ def finalize(
 
 
 def _write(manifest: RunManifest) -> None:
+    if not manifest.enabled:
+        return
     tmp = f"{manifest.path}.tmp-{os.getpid()}-{time.time_ns()}"
     # backslashreplace: a member can name a file with bytes that are not text
     with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:

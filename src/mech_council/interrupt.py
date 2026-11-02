@@ -55,6 +55,8 @@ class Brake:
     kill: Callable[[], None] = lambda: None
     #: what the last-resort exit writes before the process exits
     abandon: Callable[[], None] = lambda: None
+    #: what, besides the report, holds the abandoned run's record
+    held: str = "`run.json` holds the manifest"
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     at: Interrupted | None = None
     #: the signum this run is exiting on, 0 while nothing has been signalled
@@ -158,5 +160,5 @@ class Brake:
         os._exit(128 + self.first)
 
     def _notice_abandoning(self) -> None:
-        self.console.say(f"out of time: leaving the run {self.console.duration():.1f} s in — `run.json` holds what it reached")
+        self.console.say(f"out of time: leaving the run {self.console.duration():.1f} s in — {self.held}")
         self.console.event("run_abandoned", elapsed=self.console.duration(), presses=self.presses, skipped=self.skipped)

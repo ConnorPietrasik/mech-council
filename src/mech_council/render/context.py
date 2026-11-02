@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..cli import DEBUG, DETAIL, FULL, QUIET, SUMMARY, VERBOSITY_LEVELS
 from .text import caption
 
 
@@ -47,8 +48,9 @@ class ReportContext:
     member_count: int = 0
     pi_cli: str = ""
     pi_version: str = ""
-    transcripts: str = "off"
     sink_claim: str = ""  # what the sinks hold, in the bytes-counting object's words
+    transcript_bytes: int = 0  # verbatim protocol bytes written under agents/
+    stderr_bytes: int = 0  # per-member stderr bytes written under agents/
     untrusted: bool = False
     in_place: bool = False
     human: str = "blocking"  # the run's posture toward the council's questions
@@ -61,6 +63,7 @@ class ReportContext:
     report_path: str = ""
     goal: str | None = None
     aborted_reason: str = ""
+    verbosity: int = 0  # what the run directory kept beyond the report
     captions: dict[str, str] = field(default_factory=dict)
     interrupted: Interrupted | None = None
 
@@ -86,7 +89,7 @@ class ReportContext:
                 f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
                 f"- date: {self.date}",
                 where,
-                f"- project trust: {trust} · transcripts: {self.transcripts}{sinks}",
+                f"- project trust: {trust} · verbosity: {VERBOSITY_LEVELS[self.verbosity]}{sinks}",
                 f"- pi: `{self.pi_cli}` ({self.pi_version})",
             ]
             + ([f"- questions: {self.human} — {posture}"] if self.human != "blocking" else [])
@@ -135,18 +138,23 @@ class ReportContext:
         lines = [
             "## Artifacts",
             "",
-            f"- `run.json` — the machine-readable manifest ({manifest})",
-            f"- `{self.report_path or self.report_name}` — this report{' (outside the run directory)' if self.report_path else ''}",
-            "- `events.jsonl` — the run's events, one JSON object per line, append-only",
-            "- `human_input.json` — every question, answer, recommendation and skip, and every note with where it was shown",
         ]
-        if self.transcripts == "full":
+        if self.verbosity >= SUMMARY:
+            lines.append(f"- `run.json` — the machine-readable manifest ({manifest})")
+        lines.append(
+            f"- `{self.report_path or self.report_name}` — this report" + (" (outside the run directory)" if self.report_path else "")
+        )
+        if self.verbosity >= DETAIL:
+            lines.append("- `human_input.json` — every question, answer, recommendation and skip, and every note with where it was shown")
+        if self.verbosity >= DEBUG:
+            lines.append("- `events.jsonl` — the run's events, one JSON object per line, append-only")
+        if self.verbosity >= FULL and self.transcript_bytes:
             lines.append("- `agents/<file_base>.transcripts.jsonl` — the verbatim protocol stream, per member")
-            lines.append("- `agents/<file_base>.stderr.txt` — per-member stderr, untrimmed")
-        else:
-            lines.append(
-                "- `agents/<file_base>.stderr.txt` — per-member stderr, untrimmed (transcripts are `off`, so nothing else is written there)"
-            )
+        if self.stderr_bytes:
+            tail = "" if self.verbosity >= FULL else " (the verbatim transcripts are written at `full` only)"
+            lines.append(f"- `agents/<file_base>.stderr.txt` — per-member stderr, untrimmed{tail}")
+        if self.verbosity == QUIET:
+            lines.append("- nothing else: verbosity `quiet` writes no `run.json`, `human_input.json` or `events.jsonl`")
         lines += ["", f"Run directory: `{run_dir}`"]
         return lines
 

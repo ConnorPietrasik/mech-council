@@ -6,11 +6,13 @@ import sys
 import time
 from typing import BinaryIO
 
+from .cli import DEBUG
+
 
 class Console:
-    def __init__(self, *, run_dir: str | None = None, stream=None) -> None:
+    def __init__(self, *, run_dir: str | None = None, stream=None, verbosity: int = 0) -> None:
         self.stream = stream if stream is not None else sys.stdout
-        self.events_path = os.path.join(run_dir, "events.jsonl") if run_dir else ""
+        self.events_path = os.path.join(run_dir, "events.jsonl") if run_dir and verbosity >= DEBUG else ""
         self._events: list[dict] = []
         self.lines: list[str] = []
         self.started = time.monotonic()
@@ -55,15 +57,10 @@ class Transcripts:
     def stderr_path(self, file_base: str) -> str:
         return os.path.join(self.agents_dir, f"{file_base}.stderr.txt")
 
-    def tally(self) -> str:
-        if self.level != "full":
-            return "none written" if not self.bytes_written else f"{self.bytes_written} bytes"
-        return f"{self.bytes_written} bytes"
-
     def sink_claim(self) -> str:
         """What the report header may say about these sinks."""
         if self.bytes_written:
-            return f"verbatim stream written: {self.tally()}, under `agents/`"
+            return f"verbatim stream written: {self.bytes_written} bytes, under `agents/`"
         return "stderr only, under `agents/`" if self.stderr_bytes else ""
 
     def close(self) -> None:

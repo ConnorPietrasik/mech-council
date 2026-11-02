@@ -41,7 +41,7 @@ def _run(argv: list[str], cwd: str, env: dict, timeout: int) -> subprocess.Compl
 @pytest.mark.slow
 @pytest.mark.timeout(0)
 def test_a_real_council_reviews_the_toy_project_and_exits_zero(tmp_path):
-    """Planted bugs, 2 seats + a chair, 2 rounds, transcripts off → exit 0."""
+    """Planted bugs, 2 seats + a chair, 2 rounds, the default verbosity (quiet) → exit 0."""
     runs = str(tmp_path / "runs")
     env = no_user_config(COUNCIL_RUNS_DIR=runs)
     result = _run(["review", "--project", TOY, "--allow-nested", "--rounds", "2"], cwd=TOY, env=env, timeout=2400)

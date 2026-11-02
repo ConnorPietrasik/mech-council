@@ -13,6 +13,7 @@ from dataclasses import asdict
 from . import runjson
 from .asks import AskLost, AskUnusable, Lanes, Outcome
 from .chairwork import Chair, ChairUnusable
+from .cli import DEBUG, DETAIL, FULL, SUMMARY, VERBOSITY_LEVELS
 from .config import Council
 from .console import Console, Transcripts
 from .deliberation.engine import Abort, Engine
@@ -44,10 +45,36 @@ EXIT_OK, EXIT_ABORT = 0, 1
 RESULTS = (CONSENSUS, UNVETTED, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
 
 
+def _held_by(verbosity: int) -> str:
+    """What, besides the report, holds a run's record at this verbosity."""
+    if verbosity >= DEBUG:
+        return "`events.jsonl` holds the run"
+    if verbosity >= SUMMARY:
+        return "`run.json` holds the manifest"
+    return "verbosity `quiet` left nothing else to hold it"
+
+
+def _disk_line(run_dir: str, report_at: str) -> str:
+    """What the run directory kept beyond the report, in one line."""
+    skip = ""
+    if report_at and os.path.dirname(os.path.abspath(report_at)) == os.path.abspath(run_dir):
+        skip = os.path.join(run_dir, os.path.basename(report_at))
+    total = 0
+    for root, _dirs, files in os.walk(run_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            if path != skip:
+                with contextlib.suppress(OSError):
+                    total += os.path.getsize(path)
+    if total:
+        return f"disk: {total} bytes beyond the report"
+    return "disk: nothing beyond the report"
+
+
 async def orchestrate(launch, sandbox) -> int:
     council = launch.council
     run_dir, runs_dir = launch.run_dir, launch.runs_dir
-    console = Console(run_dir=run_dir)
+    console = Console(run_dir=run_dir, verbosity=council.verbosity)
     lineage = f" extends {' → '.join(council.extends)}" if council.extends else ""
     console.say(f"council `{council.name}`{lineage} · mode {council.mode} · {len(council.agents)} seat(s) + a chair")
     console.say(f"roster {_roster(council)}")
@@ -61,7 +88,9 @@ async def orchestrate(launch, sandbox) -> int:
         console.say("questions: the run never waits on them — you may answer while it works")
     elif council.human == "none":
         console.say("questions: none — the council will not be asked anything this run")
-    console.say(f"transcripts {council.transcripts} · project trust {'untrusted (no approval)' if council.untrusted else 'approve'}")
+    console.say(
+        f"verbosity {VERBOSITY_LEVELS[council.verbosity]} · project trust {'untrusted (no approval)' if council.untrusted else 'approve'}"
+    )
     console.event(
         "run_started",
         project=council.project,
@@ -78,8 +107,9 @@ async def orchestrate(launch, sandbox) -> int:
         runs_dir=runs_dir,
         project=council.project,
         orchestrator_pid=os.getpid(),
+        enabled=council.verbosity >= SUMMARY,
     )
-    transcripts = Transcripts(run_dir, council.transcripts)
+    transcripts = Transcripts(run_dir, "full" if council.verbosity >= FULL else "off")
     outcome, aborted = ABORTED, ""
     report_path = ""
     members: Members | None = None
@@ -148,6 +178,8 @@ async def orchestrate(launch, sandbox) -> int:
             brake.at,
             report_at=launch.output_path,
             sink_claim=transcripts.sink_claim(),
+            transcript_bytes=transcripts.bytes_written,
+            stderr_bytes=transcripts.stderr_bytes,
         )
 
     def abandon() -> None:
@@ -156,7 +188,7 @@ async def orchestrate(launch, sandbox) -> int:
             return
         write_run_json(lifecycle.SweepResult(), [], "", swept=False)
 
-    brake = Brake(console=console, picture=picture, kill=kill_now, abandon=abandon)
+    brake = Brake(console=console, picture=picture, kill=kill_now, abandon=abandon, held=_held_by(council.verbosity))
     brake.arm()
 
     try:
@@ -189,12 +221,13 @@ async def orchestrate(launch, sandbox) -> int:
         survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
         journal = owed(console, "the write journal", _journal, council, sandbox, baselines, console, brake) or []
         report_path = owed(console, "the report", write_report, journal) or ""
-        owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
+        if council.verbosity >= DETAIL:
+            owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
         if lanes is not None:
             owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
         owed(console, "run.json", write_run_json, survivors, journal, report_path)
         owed(console, "the transcripts", transcripts.close)
-        owed(console, "the transcript tally", console.say, f"transcripts: {transcripts.tally()}")
+        owed(console, "the disk tally", console.say, _disk_line(run_dir, report_path))
         if brake.first:
             console.say(f"exiting on signal {brake.first}")
             if brake.skipped:
@@ -494,6 +527,8 @@ def _report(
     *,
     report_at: str = "",
     sink_claim: str = "",
+    transcript_bytes: int = 0,
+    stderr_bytes: int = 0,
 ) -> str:
     from .render import report_plan, report_review
 
@@ -509,6 +544,8 @@ def _report(
             interrupted,
             report_path=report_at,
             sink_claim=sink_claim,
+            transcript_bytes=transcript_bytes,
+            stderr_bytes=stderr_bytes,
         )
         if docket is None or docket.blank:
             text = report_context.minimal_report(reason=aborted or outcome, context=context)
@@ -528,10 +565,11 @@ def _report(
             reason=str(failure),
             frames=traceback.format_exc(limit=4).strip().splitlines()[-3:],
         )
+        held = _held_by(council.verbosity)
         text = (
             f"# Council report — `{council.name}`\n\nThe run ended "
             f"({aborted or outcome or 'no outcome'}). The report renderer failed: "
-            f"{type(failure).__name__}: {failure}. `events.jsonl` holds the run.\n"
+            f"{type(failure).__name__}: {failure}. {held}\n"
         )
     tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
     try:
@@ -564,6 +602,8 @@ def _report_context(
     *,
     report_path: str = "",
     sink_claim: str = "",
+    transcript_bytes: int = 0,
+    stderr_bytes: int = 0,
 ) -> report_context.ReportContext:
     roster = []
     for agent_id, spec in zip(council.seat_ids, council.agents):
@@ -591,8 +631,10 @@ def _report_context(
         member_count=len(_file_bases(council)),
         pi_cli=council.pi_cli,
         pi_version=council.pi_version,
-        transcripts=council.transcripts,
+        verbosity=council.verbosity,
         sink_claim=sink_claim,
+        transcript_bytes=transcript_bytes,
+        stderr_bytes=stderr_bytes,
         untrusted=council.untrusted,
         in_place=council.in_place,
         human=council.human,

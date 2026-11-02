@@ -135,8 +135,8 @@ answer typed once the grace rounds are spent is recorded and reported but keeps 
 `skip` typed mid-round declines the asks open at that moment, and `explain H1` waits for that same
 boundary because it costs an ask of the seat that raised it.
 
-Only backed questions appear here. The ones no second seat wanted are in the report and in
-`human_input.json`, marked `unseconded`; an ask a seat answered in your place is marked `settled`,
+Only backed questions appear here. The ones no second seat wanted are in the report, and in
+`human_input.json` when the verbosity keeps it (`detail` or higher), marked `unseconded`; an ask a seat answered in your place is marked `settled`,
 with that answer beside it; and an ask about an item the council settled is reported `moot` — it was
 never going to be put to you.
 
@@ -148,13 +148,25 @@ One `Ctrl+C` stops the deliberation and still writes the report. A second `Ctrl+
 
 ## What you get
 
+The report is the one artifact every run writes. The rest of the run directory is a verbosity
+ladder — `quiet` (the default) keeps the report only, each level adds one more artifact, and the
+levels exist mostly for debugging:
+
+| Level | Keeps |
+|---|---|
+| `quiet` | the report (plus per-member stderr under `agents/`) |
+| `summary` | + `run.json` |
+| `detail` | + `human_input.json` |
+| `debug` | + `events.jsonl` |
+| `full` | + the verbatim protocol streams under `agents/` |
+
 | File | What's in it |
 |---|---|
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
-| `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
-| `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
-| `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
+| `run.json` (`summary`+) | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
+| `events.jsonl` (`debug`+) | The append-only event log — one JSON object per line, the whole run in order. The run never reads it back; it is there for you. |
+| `human_input.json` (`detail`+) | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
+| `agents/` | Per-member stderr, and the verbatim transcripts at `full`. |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else
 `~/.cache/council/runs`; each run is a `<timestamp>-<project>` directory inside it.
@@ -163,8 +175,9 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 
 `-o`/`--output <path>` writes the report there instead of the run directory — one file moves
 and nothing else follows it. An existing directory keeps the mode's name, so
-`-o docs/` writes `docs/plan.md`; anything else is the file itself. `run.json` stays in the run
-directory and names the path the report landed at, so nothing about a run is harder to find.
+`-o docs/` writes `docs/plan.md`; anything else is the file itself. At `summary` verbosity or
+higher, `run.json` stays in the run directory and names the path the report landed at, so
+nothing about a run is harder to find.
 
 ```sh
 mech-council review -o .                 # -> ./report.md
@@ -183,7 +196,7 @@ terminal to answer from the run refuses and says so; `--overwrite` skips the ask
 | `0` | A result was written — including `needs_human`, `unvetted` and `round_limit_reached`. |
 | `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a declined `--output` overwrite, a report that never landed, a host that cannot fork. |
 | `2` | Usage error. |
-| `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |
+| `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first when its verbosity keeps one; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |
 
 ## Configuration
 
@@ -215,7 +228,7 @@ either, so a project's file can inherit the roster your own home file keeps
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
 | `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on. |
-| `transcripts` | `off` | `off` or `full`. Full writes the verbatim protocol stream per member. |
+| `verbosity` | `quiet` | What the run directory keeps beyond the report: `quiet` < `summary` (+`run.json`) < `detail` (+`human_input.json`) < `debug` (+`events.jsonl`) < `full` (+ the verbatim protocol streams). `--verbosity` overrides. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
 Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi
@@ -283,7 +296,8 @@ scratch that never enters the write journal. Its run directory is masked, and `/
 run's own file objects to it — reading the run's `cwd`, `environ` or `exe`, or opening one of its
 `fd` links, answers `EACCES`. That clearing is best-effort.
 When the run ends, every namespace it created is swept — including tool shells a member detached
-into its own process group — and the survivors are named in `run.json` if any remain.
+into its own process group — and the survivors are named in `run.json` if any remain (at
+`summary` verbosity or higher; the console says so either way).
 
 The sandbox is only to minimize agents stepping on the toes of other agents; recommended method
 is to run this is a docker container with only the directory you want to work in mounted.
@@ -297,7 +311,7 @@ seats and the project. What changes:
   not a defect and not yours to finish.
 - The **namespace sweep cannot run**: members share this namespace, so only their own process groups
   are signalled, and a tool shell that moved to a process group of its own can outlive the run.
-  `run.json` records `"namespace_sweep": "none (in place)"`.
+  `run.json` records `"namespace_sweep": "none (in place)"` (at `summary` verbosity or higher).
 
 ## Development
 

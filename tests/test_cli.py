@@ -95,7 +95,7 @@ def test_help_and_version_exit_zero(cli, project, canary):
 
 def test_a_repeat_that_changes_value_is_noted(cli, project):
     env = runs_env(project)
-    result = cli(["review", "--rounds", "1", "--transcripts", "full", "--transcripts", "off"], cwd=project, env=env, timeout=120)
+    result = cli(["review", "--rounds", "1", "--verbosity", "full", "--verbosity", "quiet"], cwd=project, env=env, timeout=120)
     assert any("overrides" in line for line in result.console.splitlines()), result.console
 
 
@@ -337,6 +337,7 @@ ONE_COUNCIL = """\
 [defaults]
 {knob}max_rounds = 1
 watchdog_sec = 0
+verbosity = "debug"
 
 [councils.review]
 goal = "{goal}"

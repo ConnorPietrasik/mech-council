@@ -13,7 +13,7 @@ from mech_council.cli import ConfigError
 from mech_council.run import RESULTS
 from mech_council.sandbox import mount
 
-from .conftest import FAKE_PI, no_user_config, write_project_config
+from .conftest import DEFAULT_CONFIG, FAKE_PI, no_user_config, write_project_config
 
 pytestmark = [pytest.mark.timeout(180)]
 
@@ -132,6 +132,26 @@ def test_an_unusable_seat_leaves_only_the_minimal_report_and_a_finalized_manifes
     report = result.report()
     assert "aborted" in report.lower() and "429" in report, "the minimal report says why"
     assert "consensus findings" not in report.lower()
+
+
+def test_a_run_never_told_its_verbosity_writes_only_the_report(cli, project):
+    """The built-in verbosity is `quiet`: the report is the run's only artifact."""
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"\n', ""))
+    result = cli(["review"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
+    assert result.returncode == 1
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert written == ["report.md"], written
+    assert result.events == [] and result.manifest == {}
+    assert "disk: nothing beyond the report" in result.console
+
+
+def test_verbosity_debug_keeps_the_manifest_and_the_event_log(cli, project):
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"\n', ""))
+    result = cli(["review", "--verbosity", "debug"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=errored()), timeout=150)
+    assert result.returncode == 1
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert written == ["events.jsonl", "report.md", "run.json"], written
+    assert result.manifest["settings"]["verbosity"] == "debug"
 
 
 # ------------------------------------------------------------ The config loader shape 2

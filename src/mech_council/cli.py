@@ -15,6 +15,14 @@ class ConfigError(Exception):
     pass
 
 
+#: What a run's directory keeps beyond the report, lowest level first: summary adds `run.json`,
+#: detail adds `human_input.json`, debug adds `events.jsonl`, full adds the verbatim transcripts.
+VERBOSITY_LEVELS: tuple[str, ...] = ("quiet", "summary", "detail", "debug", "full")
+
+#: each level's index in VERBOSITY_LEVELS, so comparisons read as `verbosity >= SUMMARY`
+QUIET, SUMMARY, DETAIL, DEBUG, FULL = (VERBOSITY_LEVELS.index(name) for name in VERBOSITY_LEVELS)
+
+
 @dataclass(frozen=True)
 class Flag:
     long: str  # without the leading dashes
@@ -30,7 +38,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("rounds", "r", note="round limit"),
     Flag("goal", "g", note="goal"),
     Flag("output", "o", note="where the report is written"),
-    Flag("transcripts", "t", choices=("off", "full"), note="transcripts level"),
+    Flag("verbosity", None, choices=VERBOSITY_LEVELS, note="artifact level"),
     Flag("human", None, choices=("blocking", "non_blocking", "none"), note="the human's posture toward the council's questions"),
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
@@ -49,7 +57,7 @@ class Args:
     config: str | None = None
     rounds: int | None = None
     goal: str | None = None
-    transcripts: str | None = None
+    verbosity: str | None = None
     human: str | None = None
     output: str | None = None
     allow_nested: bool = False
@@ -74,13 +82,16 @@ flags:
   -c, --config <file>      the only council.toml to read (default: <project>/council.toml over $XDG_CONFIG_HOME/council/council.toml)
   -r, --rounds <N>         round limit (whole number, no cap)
   -g, --goal <text>        the goal the seats are briefed with
-  -t, --transcripts <lvl>  off (default) or full
+      --verbosity <lvl>    quiet (default) < summary < detail < debug < full: what the run directory keeps beyond
+                           the report — summary adds run.json, detail adds human_input.json, debug adds events.jsonl,
+                           full adds the verbatim transcripts under agents/
   --human <posture>        blocking (default), non_blocking or none: whether the run waits on the
                            council's questions, and whether the human answers them at all. Unstated with
                            no terminal on stdin, the run takes none
   -o, --output <path>      write the report here instead of into the run directory: an existing
                            directory keeps the mode's name (report.md / plan.md), anything else is
-                           the file itself.  Nothing else follows it there; run.json still names it
+                           the file itself.  Nothing else follows it there; run.json names it
+                           when the verbosity keeps run.json (summary or higher)
       --overwrite          replace an existing --output target without being asked first
       --allow-nested       let this invocation start inside a running council
       --untrusted          spawn members with --no-approve: ignore project-local files

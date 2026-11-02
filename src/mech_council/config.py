@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TypeIs
 
 from . import suggest
-from .cli import Args, ConfigError, UsageError, is_within
+from .cli import VERBOSITY_LEVELS, Args, ConfigError, UsageError, is_within
 
 BUILTIN_DEFAULTS: dict[str, object] = {
     "mode": "review",
@@ -19,7 +19,7 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "watchdog_sec": 600,
     "chair_timeout_sec": 300,
     "max_concurrency": 4,
-    "transcripts": "off",
+    "verbosity": "quiet",
     "pi_cli": None,
     "sandbox_mib": 32768,
     "in_place": False,
@@ -37,7 +37,7 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "max_concurrency": ("int>=1", True),
     "sandbox_mib": ("int>=1", True),
     "in_place": ("bool", True),
-    "transcripts": ("transcripts", True),
+    "verbosity": ("verbosity", True),
     "pi_cli": ("str", True),
     "mode": ("mode", False),
     "goal": ("str", False),
@@ -77,7 +77,7 @@ class Council:
     watchdog_sec: int
     chair_timeout_sec: int
     max_concurrency: int
-    transcripts: str
+    verbosity: int  # index into cli.VERBOSITY_LEVELS: what the run directory keeps beyond the report
     sandbox_mib: int
     pi_cli: str
     pi_version: str
@@ -138,9 +138,11 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
     elif kind == "bool":
         if not isinstance(value, bool):
             raise ConfigError(f"config key {where}.{key} wants true or false, got {type(value).__name__}: {value!r}")
-    elif kind == "transcripts":
-        if value not in ("off", "full"):
-            raise ConfigError(f"config key {where}.{key} is 'off' or 'full', got {value!r}")
+    elif kind == "verbosity":
+        if value not in VERBOSITY_LEVELS:
+            hint = suggest.suggest(str(value), VERBOSITY_LEVELS)
+            extra = f" (did you mean {hint!r}?)" if hint else ""
+            raise ConfigError(f"config key {where}.{key} is one of {'/'.join(VERBOSITY_LEVELS)}, got {value!r}{extra}")
     elif kind == "mode":
         hint = suggest.suggest(str(value), MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
@@ -560,7 +562,7 @@ def convene(
         watchdog_sec=int(flat["watchdog_sec"]),
         chair_timeout_sec=int(flat["chair_timeout_sec"]),
         max_concurrency=int(flat["max_concurrency"]),
-        transcripts=args.transcripts or str(flat["transcripts"]),
+        verbosity=VERBOSITY_LEVELS.index(args.verbosity or str(flat["verbosity"])),
         sandbox_mib=int(flat["sandbox_mib"]),
         pi_cli=pi_cli,
         pi_version=pi_version,

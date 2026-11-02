@@ -111,6 +111,7 @@ DEFAULT_CONFIG = """\
 pi_cli = "{pi_cli}"
 max_rounds = 2
 watchdog_sec = 0
+verbosity = "debug"
 
 [councils.review]
 goal = "Is this right?"

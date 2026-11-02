@@ -36,9 +36,7 @@ def runs_env(project: str) -> dict:
 @pytest.fixture
 def finished(cli, project):
     """One converged review run, its artifacts read once. A headless run takes `none`, so the human's lines need the posture stated."""
-    write_project_config(
-        project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace("watchdog_sec = 0", 'watchdog_sec = 0\ntranscripts = "full"')
-    )
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"', 'verbosity = "full"'))
     env = dict(runs_env(project), FAKE_PI_SCRIPT=SCRIPT)
     result = cli(["review", "--human", "blocking"], cwd=project, stdin="\n", env=env, timeout=200)
     assert result.returncode == 0, result.console
@@ -146,9 +144,11 @@ def test_transcripts_off_writes_nothing_until_a_child_produces_stderr(cli, proje
     result = cli(["review"], cwd=project, stdin="\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=SCRIPT), timeout=200)
     assert result.returncode == 0, result.console
     assert not os.path.exists(os.path.join(result.run_dir, "agents")), "`off` wrote transcripts anyway"
-    assert "transcripts: none written" in result.console
-    rows = [row for row in result.report().splitlines() if "transcripts:" in row]
-    assert len(rows) == 1 and rows[0].endswith("transcripts: off"), f"nothing was written, so the header names no sink: {rows}"
+    assert "bytes beyond the report" in result.console, "the exit line tallies what the run kept"
+    rows = [row for row in result.report().splitlines() if "verbosity:" in row]
+    assert len(rows) == 1 and rows[0].endswith("verbosity: debug"), f"nothing was written, so the header names no sink: {rows}"
+    sinks = [line for line in result.report().splitlines() if line.startswith("- `agents/")]
+    assert not sinks, f"nothing was written under agents/, so the report names no sink there: {sinks}"
 
 
 def test_the_header_names_a_stderr_only_run_for_what_it_is(cli, project):
@@ -159,16 +159,19 @@ def test_the_header_names_a_stderr_only_run_for_what_it_is(cli, project):
     assert result.returncode == 0, result.console
     written = sorted(os.listdir(os.path.join(result.run_dir, "agents")))
     assert written and all(name.endswith(".stderr.txt") for name in written), "`off` wrote a sink besides stderr"
-    rows = [row for row in result.report().splitlines() if "transcripts:" in row]
-    assert len(rows) == 1 and rows[0].endswith("transcripts: off (stderr only, under `agents/`)"), rows
+    rows = [row for row in result.report().splitlines() if "verbosity:" in row]
+    assert len(rows) == 1 and rows[0].endswith("verbosity: debug (stderr only, under `agents/`)"), rows
+    sinks = [line for line in result.report().splitlines() if line.startswith("- `agents/")]
+    assert len(sinks) == 1 and sinks[0].startswith("- `agents/<file_base>.stderr.txt`"), "the report names the one sink it kept"
+    assert "transcripts.jsonl" not in sinks[0], "no stream was written, so no stream bullet"
 
 
 def test_the_report_header_counts_the_stream_it_used_to_deny(finished):
     """The report is what the human keeps, so it may not call the bytes under `agents/` 'stderr only'."""
-    rows = [row for row in finished.report().splitlines() if "transcripts:" in row]
+    rows = [row for row in finished.report().splitlines() if "verbosity:" in row]
     assert len(rows) == 1, rows
     assert "stderr only" not in rows[0], f"the header denies the verbatim stream it lists two lines later: {rows[0]}"
-    assert "bytes" in rows[0], f"the header owes the tally the console already prints: {rows[0]}"
+    assert "bytes" in rows[0], f"the header counts what it kept under `agents/`: {rows[0]}"
 
 
 # ------------------------------------------------------------- The event stream console
@@ -177,7 +180,7 @@ def test_the_report_header_counts_the_stream_it_used_to_deny(finished):
 def test_the_console_says_what_a_member_could_touch_before_one_runs(finished):
     """Config, run dir, sandbox shape, transcript level and trust are all lines."""
     console = finished.console
-    for wanted in ("config ", "run directory ", "sandbox ", "tmpfs ", "MiB", "transcripts full", "project trust approve"):
+    for wanted in ("config ", "run directory ", "sandbox ", "tmpfs ", "MiB", "verbosity full", "project trust approve"):
         assert wanted in console, f"console line missing: {wanted!r}"
     assert "3 members" in console, "the sandbox line counts N+1, not N"
 
@@ -295,10 +298,10 @@ def test_the_write_journal_names_the_member_rather_than_its_directory(cli, proje
     assert result.manifest["write_journal"], "the record still says which `file_base` wrote"
 
 
-def test_the_run_ends_by_printing_the_termination_and_the_transcript_tally(finished):
+def test_the_run_ends_by_printing_the_termination_and_the_disk_tally(finished):
     console = finished.console
     assert "outcome: consensus" in console
-    assert "transcripts:" in console, "every run says what it wrote"
+    assert "bytes beyond the report" in console, "every run says what it kept on disk"
     assert "disposing 3 member(s)" in console
     assert "no survivors" in console, "the sweep reports itself on every run"
 
@@ -423,7 +426,7 @@ def _report_bits(project, tmp_path):
     _, launch = convene(["review", "-p", project], environ=no_user_config(COUNCIL_RUNS_DIR=str(tmp_path / "runs")))
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    console = Console(run_dir=str(run_dir))
+    console = Console(run_dir=str(run_dir), verbosity=launch.council.verbosity)
     manifest = runjson.create(
         str(run_dir / "run.json"),
         launch.council,

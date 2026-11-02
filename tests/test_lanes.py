@@ -136,7 +136,7 @@ def council(n=2, *, concurrency=2, watchdog=0):
         watchdog_sec=watchdog,
         chair_timeout_sec=60,
         max_concurrency=concurrency,
-        transcripts="off",
+        verbosity=0,
         sandbox_mib=64,
         pi_cli="pi",
         pi_version="1.4.0",
