@@ -35,11 +35,12 @@ def runs_env(project: str) -> dict:
 
 @pytest.fixture
 def finished(cli, project):
-    """One converged review run, its artifacts read once."""
+    """One converged review run, its artifacts read once. A headless run takes `none`, so the human's lines need the posture stated."""
     write_project_config(
         project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace("watchdog_sec = 0", 'watchdog_sec = 0\ntranscripts = "full"')
     )
-    result = cli(["review"], cwd=project, stdin="\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=SCRIPT), timeout=200)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=SCRIPT)
+    result = cli(["review", "--human", "blocking"], cwd=project, stdin="\n", env=env, timeout=200)
     assert result.returncode == 0, result.console
     return result
 

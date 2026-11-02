@@ -83,6 +83,27 @@ def errored(**extra) -> str:
     return json.dumps([dict({"contains": "", "stop_reason": "error", "error_message": "429 provider quota exhausted"}, **extra)])
 
 
+# ------------------------------------------------------------ The non-interactive fallback
+
+
+def test_no_terminal_on_stdin_takes_the_none_posture_unless_one_is_stated(project, monkeypatch):
+    monkeypatch.setattr(startup, "stdin_is_terminal", lambda: False)
+    notes, council = convened(["review"], project)
+    assert council.human == "none"
+    assert any("not a terminal" in note and "none" in note for note in notes), notes
+
+    assert convened(["review", "--human", "blocking"], project)[1].human == "blocking", "the flag states a posture"
+    state_the_knobs(project, 'human = "non_blocking"')
+    assert convened(["review"], project)[1].human == "non_blocking", "so does the config"
+
+
+def test_a_terminal_on_stdin_keeps_the_default_posture(project, monkeypatch):
+    monkeypatch.setattr(startup, "stdin_is_terminal", lambda: True)
+    notes, council = convened(["review"], project)
+    assert council.human == "blocking"
+    assert not any("terminal" in note for note in notes), notes
+
+
 # ------------------------------------------------------------ The config loader shape 1
 
 

@@ -20,11 +20,6 @@ class LineReader:
         except AttributeError, ValueError:
             self.tty = False
 
-    @property
-    def interactive(self) -> bool:
-        """Whether anyone is at the keyboard: `tty` is what the stream was when it opened, so closing it ends the listening."""
-        return self.tty and not self.eof
-
     def start(self) -> None:
         if self._thread is not None:
             return

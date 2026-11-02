@@ -213,10 +213,6 @@ class Reader:
         self.closed = closed
         self.asked: list[str] = []
 
-    @property
-    def interactive(self):
-        return self.tty and not self.eof
-
     async def next_line(self):
         self.asked.append("line")
         if not self.lines:
@@ -390,22 +386,12 @@ def test_a_blank_line_ends_the_checkpoint_without_answering_or_declining():
 
 
 def test_eof_declines_the_whole_ask_set_instead_of_parking_the_run():
-    """The non-interactive stdin choice: a run with no stdin must not stop for a person who is not there."""
+    """A stdin closed while the checkpoint waits: the open asks are declined, and the run moves on."""
     docket = build()
     listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
     cp, _console, _reader = make_checkpoint(docket, lines=[])
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert outcome.skipped == ["H1", "H2"]
-
-
-def test_a_non_interactive_run_declines_the_ask_set_and_says_so_once():
-    docket = build()
-    listing = questions(docket, ("a?", "Agent1", "F1", True))
-    cp, console, reader = make_checkpoint(docket, interactive=False)
-    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=2, terminal=True, waiting=True))
-    assert outcome.skipped == ["H1"]
-    assert any("not interactive" in line for line in console.lines)
-    assert reader.asked == []
 
 
 def test_an_unknown_id_is_corrected_not_swallowed():
@@ -661,7 +647,7 @@ def test_a_closed_stdin_off_cycle_keeps_its_lines_and_declines_nothing():
     outcome = asyncio.run(cp.drain())
     assert outcome.answers == {"H1": "the fixed one"} and not outcome.skipped
     assert docket.questions["H2"].state == "asked", "an ask nobody was shown is not declined for them"
-    assert reader.eof and not reader.interactive, "and nothing is asked of the keyboard after it closes"
+    assert reader.eof, "and nothing is asked of the keyboard after it closes"
 
 
 def test_the_drain_takes_no_lines_while_a_checkpoint_holds_the_reader():

@@ -25,6 +25,13 @@ class Launch:
     output_overwrite: bool = False
 
 
+def stdin_is_terminal() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except AttributeError, OSError, ValueError:
+        return False
+
+
 def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[cli.Args, Launch]:
     environ = dict(os.environ if environ is None else environ)
     args = cli.parse_args(argv)
@@ -43,6 +50,12 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     loaded = config_mod.load_layers(paths, project_layer=project_layer)
     name = config_mod.select_council(loaded, args.council)
     council = config_mod.convene(loaded, name, args, project, untrusted=args.untrusted, namespaces_available=namespaces_available)
+    # a run with no one at the keyboard takes the never-asks posture, unless a posture was stated
+    human_fallback = (
+        not stdin_is_terminal() and args.human is None and config_mod.stated_by(loaded, council.name, council.extends, "human") is None
+    )
+    if human_fallback:
+        council.human = "none"
     output_path = _output_target(args, council)
     runs_dir = cli._runs_root_from_env(environ)
     _check_runs_root(runs_dir, project)
@@ -53,6 +66,11 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     notes += _layer_notes(loaded)
     notes += _trust_notes(council, args)
     notes += _in_place_notes(loaded, council, args, plat=plat)
+    if human_fallback:
+        notes.append(
+            'stdin is not a terminal: the run takes human = "none" — the council is never asked, and its open questions '
+            "are recorded in the report (state a posture to ask anyway)"
+        )
     if output_path:
         notes.append(f"--output writes the report to {output_path} instead of into the run directory; every other artifact stays there")
         if cli.is_within(output_path, project):
@@ -103,12 +121,12 @@ def confirm_overwrite(launch: Launch) -> list[str]:
     if not launch.output_overwrite:
         sys.stderr.write(f"--output {target} already exists: overwrite it? [y/N] ")
         sys.stderr.flush()
+        terminal = stdin_is_terminal()
         try:
             # fd 0 closed before the run started leaves `sys.stdin` None
-            terminal = bool(sys.stdin.isatty())
             answer = sys.stdin.readline().strip().lower()
         except AttributeError, OSError, ValueError:
-            terminal, answer = False, ""
+            answer = ""
         if answer not in ("y", "yes"):
             if not terminal:
                 sys.stderr.write("\n")  # no typed answer echoed onto the prompt's line, so the refusal prints one

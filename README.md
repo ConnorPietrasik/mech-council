@@ -209,7 +209,7 @@ either, so a project's file can inherit the roster your own home file keeps
 | `max_rounds` | `10` | Round limit. |
 | `grace_rounds` | `1` | How many rounds past the limit an answer may buy. `0` ends the run on the limit with its questions unasked. |
 | `seconding` | `true` | A question reaches you only once a second seat backs it. `false` puts every question the council left open in front of you. |
-| `human` | `blocking` | The run's posture toward the council's questions. `blocking`: it waits where a declared stop reaches the bar. `non_blocking`: it never waits — questions are shown while it keeps working, and you may answer any of them. `none`: the council is never asked; its open questions are recorded in the report. `--human` overrides. |
+| `human` | `blocking` | The run's posture toward the council's questions. `blocking`: it waits where a declared stop reaches the bar. `non_blocking`: it never waits — questions are shown while it keeps working, and you may answer any of them. `none`: the council is never asked; its open questions are recorded in the report. `--human` overrides; a run with no terminal on stdin takes `none` unless a posture is stated, and says so in a note. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
 | `chair_timeout_sec` | `300` | Bound on a chair publication pass. |
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |

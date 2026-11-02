@@ -76,7 +76,8 @@ flags:
   -g, --goal <text>        the goal the seats are briefed with
   -t, --transcripts <lvl>  off (default) or full
   --human <posture>        blocking (default), non_blocking or none: whether the run waits on the
-                           council's questions, and whether the human answers them at all
+                           council's questions, and whether the human answers them at all. Unstated with
+                           no terminal on stdin, the run takes none
   -o, --output <path>      write the report here instead of into the run directory: an existing
                            directory keeps the mode's name (report.md / plan.md), anything else is
                            the file itself.  Nothing else follows it there; run.json still names it

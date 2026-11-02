@@ -206,10 +206,6 @@ class Checkpoint:
         if not waiting:
             # print and keep going: nothing was put to the human here, so nothing is declined
             return result
-        if not self.reader.interactive:
-            self.console.say("stdin is not interactive: every question is declined for this run, and the report lists them")
-            result.skipped = sorted({q.id for q in ask_set})
-            return result
         pending = [qid for qid in self.docket.question_order if qid in {q.id for q in ask_set}]
         declined: set[str] = set()
         result.waited = True

@@ -682,7 +682,9 @@ def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_wait
             {"contains": "# Deduplicate", "reply": {"groups": [], "human_input": []}},
         ]
     )
-    result = cli(["review"], cwd=project, stdin="H1: 30 days\n", env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
+    # the wait rule needs the blocking posture stated: unstated, a run with no terminal on stdin takes `none`
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
+    result = cli(["review", "--human", "blocking"], cwd=project, stdin="H1: 30 days\n", env=env, timeout=150)
     assert result.returncode == 0, result.console
     assert result.manifest["outcome"] == "round_limit_reached"
     asked = json.loads(result.artifact("human_input.json"))["questions"]
@@ -692,6 +694,34 @@ def test_a_question_at_the_round_limit_is_printed_unasked_and_the_run_never_wait
     assert "unasked" in result.report(), "the review report marks the question unasked"
     checkpoint = [row for row in result.events if row["event"] == "human_checkpoint"][-1]
     assert checkpoint["terminal"] and not checkpoint["waited"]
+
+
+# ------------------------------------------------ The non-interactive fallback
+
+
+def test_a_run_with_no_terminal_takes_the_none_posture_and_says_so(cli, project):
+    """No one at the keyboard and no posture stated: the run is `none`, and the manifest and the console both say so."""
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review"], cwd=project, env=env, timeout=120)
+    assert result.returncode == 0, result.console
+    assert result.manifest["settings"]["human"] == "none"
+    assert "note: stdin is not a terminal" in result.console
+    assert "questions: none" in result.console, "the banner names the posture the run actually took"
+
+
+def test_a_stated_posture_survives_the_non_interactive_fallback(cli, project):
+    """The fallback replaces only the default: the flag and the config both state a posture."""
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--human", "blocking"], cwd=project, env=env, timeout=120)
+    assert result.returncode == 0, result.console
+    assert result.manifest["settings"]["human"] == "blocking", "the flag states a posture"
+    assert "note: stdin is not a terminal" not in result.console
+    config = DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace("watchdog_sec = 0", 'watchdog_sec = 0\nhuman = "non_blocking"')
+    write_project_config(project, config)
+    result = cli(["review"], cwd=project, env=env, timeout=120)
+    assert result.returncode == 0, result.console
+    assert result.manifest["settings"]["human"] == "non_blocking", "so does the config"
+    assert "note: stdin is not a terminal" not in result.console
 
 
 # ------------------------------------------------------ Where the report lands
