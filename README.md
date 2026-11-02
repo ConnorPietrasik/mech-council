@@ -16,7 +16,8 @@ you get a report with the findings.
   directions.
 - **Linux with unprivileged user and mount namespaces**, to sandbox the members. Each member runs in its
   own namespace. On Debian/Ubuntu this needs `kernel.unprivileged_userns_clone=1`; Docker needs a seccomp
-  profile that allows `unshare(2)`. `--in-place` is the default otherwise; a host that cannot fork at all is refused.
+  profile that allows `unshare(2)`. A host without namespaces runs in place and says so in a note; a
+  Linux where `unshare(2)` fails refuses and points at `--in-place`; a host that cannot fork at all is refused.
 
 ## Install
 
@@ -62,47 +63,46 @@ printed last after a blank line.
 2. **Merge.** The chair deduplicates: two seats describing one defect produce one item with
    two reporters.
 3. **Rounds.** Every seat is shown every open item and must take a stance — `agree`,
-   `disagree`, `needs_human`, `abstain` — with evidence or a note. An item needs a majority
+   `disagree` (with cited evidence), `needs_human`, or `abstain`. An item needs a majority
    to be `agreed`; an objection with cited evidence reopens a settled one. A seat that leaves an item
    unanswered is re-asked — up to four times in the round when its reply was unusable or incomplete,
    once when it simply skipped the item — and its silence is then recorded as a *declined* abstention.
-4. **You.** A seat raises an ask, and an ask is a proposal to the *council*, not a message to you:
-   it reaches you only once a **second seat backs it** (`second`), because most of what a seat wants
-   a peer can answer from the workspace (`answer_question`) or the asker drops again (`retract`).
-   Two seats wanting one decision word it differently. Two seats holding **one item** raise one ask
-   together, and the chair **folds asks that want the same answer** into the ask raised first — the
-   askers, their declared stops and any peer answers go with it, and the wordings that did not
-   survive are recorded beside it — so the fold is a second seat without anyone claiming it. A peer's
-   answer holds an ask back from you, and only the seat that **raised** it can call that answer not
-   enough — with `insist: ["H1"]`, in a round *after* the answer lands, since a seat cannot refuse an
-   answer it was never shown. A second seat backing it cannot. And an answer holds an ask back
-   only while the seat that wrote it is not asking: a seat that backs an ask it answered, or that
-   answered one of two asks folded together, wants your word after all — what it wrote stays printed
-   beside the ask, it just stops keeping the ask from you. Nothing stops the run but a
-   **declared stop** — `blocking: true` on an ask, or `blocking_for: ["H1"]` on a peer's — and a
-   majority has to declare the same stop on the same ask for it to bite; a planning council that will
-   not converge on one direction stops the run by itself. A seat stancing `needs_human` holds its
-   *item* — reported as not fully vetted, and open to a peer's challenge — but it no longer holds the
-   run. Asks that are backed but not waited on are put to you when the run would otherwise end;
-   unbacked ones are never put to you at all, only reported. Before that report the seats get one
-   last look at those: a seat may answer one, back one, drop one, call a peer's answer to one it
-   raised not enough, stance away from an item a peer's answer settled, or unsay a **note** of its own —
-   and nothing else. Only a stance releases an item; dropping the ask raised about it never does. An ask goes the
-   other way too: letting go of an item drops the ask your `needs_human` raised on it, and so does the council
-   **settling that item** — the closure *is* the answer to a question about it — unless a majority
-   declared a stop on it, which is the one claim that outranks a closure. So a settled item reaches
-   you only as something more than one seat needed the run to wait for.
-   What a seat wants you to **know** and not decide is a `note`: no second seat, and nothing for you to answer.
-5. **Termination.** `consensus`, `needs_human`, `stalemate`, `round_limit_reached`, or `unvetted` — the last
-   when everyone signed off but an open item was left unheard. A run that would end with a question standing
-   spends a **grace round** first: it asks you, and any answer buys the seats one more round to plan against
-   it (`grace_rounds`). A question it did show you and you passed over is reported `unanswered`; only one it
-   never showed you is `unasked`.
+4. **You.** An ask is a proposal to the *council*, not a message to you: it reaches you only once a
+   **second seat backs it** (`second`), because a peer can usually answer it from the workspace
+   (`answer_question`) or the asker drops it again (`retract`). Two seats holding **one item** raise
+   one ask together, and the chair **folds asks that want the same answer** into the one raised first
+   — askers, declared stops and peer answers move with it, the wordings that did not survive are
+   recorded beside it — so two wordings of one decision count as one backed ask. A peer's answer
+   holds an ask back from you: only the seat that **raised** it can call that answer not enough
+   (`insist: ["H1"]`, in a round *after* the answer lands, since a seat cannot refuse an answer it
+   was never shown), and a seconding seat cannot. An answer stops holding the ask back once the seat
+   that wrote it is asking too — a seat that backs an ask it answered, or that answered one of two
+   asks the chair folded, wants your word after all; what it wrote stays printed beside the ask.
+   Nothing stops the run but a **declared stop** — `blocking: true` on an ask, or `blocking_for:
+   ["H1"]` on a peer's — and a majority has to declare the same stop on the same ask for it to bite.
+   A planning council that will not converge on one direction stops the run by itself. A seat stancing
+   `needs_human` holds its *item* — reported as not fully vetted, and open to a peer's challenge — but
+   not the run.
+   Backed asks the run does not wait on are put to you when the run would otherwise end; unbacked
+   ones are only reported, never asked. Before that, the seats get one last look at them: a seat may
+   answer one, back one, drop one, call a peer's answer to one it raised not enough, stance away from
+   an item a peer's answer settled, or unsay a **note** of its own — and nothing else.
+   Only a stance releases an item; dropping the ask raised about it never does. The reverse too:
+   letting go of an item drops the ask your `needs_human` raised on it, and so does the council
+   **settling that item** — the closure *is* the answer — unless a majority declared a stop on it,
+   the one claim that outranks a closure. A settled item reaches you only as a stop at the bar.
+   What a seat wants you to **know** and not decide is a `note`: no second seat, nothing to answer.
+5. **Termination.** `consensus`, `needs_human`, `stalemate`, `round_limit_reached`, or `unvetted` —
+   the last when everyone signed off but an open item reached no disposition: no majority, no
+   reasoned objection. At the round limit with a question still standing, the run asks you first
+   while grace remains: each answer buys the seats one more round to plan against it
+   (`grace_rounds`). A question the run showed you and you passed over is reported `unanswered`;
+   only one it never showed you is `unasked`.
 
 The chair never takes a stance and never gets a roster ID, so it can't move the majority bar. It
-merges findings, folds asks that want the same answer, compares, words the council's split for you,
-and judges the watchdog digest — and it asks you nothing of its own: every question comes from a
-seat.
+merges findings, folds asks that want the same answer, compares the plans in a plan run, and judges
+the watchdog digest. It puts you one question of its own — the council's split, when a plan run will
+not converge on one direction; every other question comes from a seat.
 
 ### At the checkpoint
 
@@ -125,32 +125,33 @@ work — when the named seat is idle; the chair waits out its watchdog ask rathe
 The last line you type about a question is your word on it: answering one you declined takes it
 back, and declining one you answered withdraws the answer — until the answer is applied, after which
 that id answers nothing further. From the next round on, the docket every seat is shown prints your
-answer as authoritative — but nothing settles the run but the seats' own stances, so a council that
-keeps planning against your answer ends `stalemate` or out of rounds, and the report says so.
+answer as authoritative — but only the seats' own stances settle the run, so a council that keeps
+planning around your answer ends `stalemate` or out of rounds, and the report says so.
 
-You can type any of those lines **while the seats are working**, not only when the run stops for
-you: an answer is read at the next round boundary, so it is already in the docket the seats are
-shown next, and it buys the round exactly as a checkpoint answer does — the same grace budget, so an
-answer typed once the grace rounds are spent is recorded and reported but keeps the run no longer. A
-`skip` typed mid-round declines the asks open at that moment, and `explain H1` waits for that same
-boundary because it costs an ask of the seat that raised it.
+You can type any of those lines **while the seats are working**: an answer is read at the next
+round boundary, already in the docket the seats are shown next, and it buys a round exactly as a
+checkpoint answer does — the same grace budget, so an answer typed once it is spent is recorded and
+reported, but keeps the run no longer. A `skip` typed mid-round declines the asks open at that
+moment; `explain H1` is asked at that same boundary, when no other ask is in flight.
 
-Only backed questions appear here. The ones no second seat wanted are in the report, and in
+Only backed questions appear here — unless `seconding` is off, when every open question is put to
+you. The ones no second seat wanted are in the report, and in
 `human_input.json` when the verbosity keeps it (`detail` or higher), marked `unseconded`; an ask a seat answered in your place is marked `settled`,
 with that answer beside it; and an ask about an item the council settled is reported `moot` — it was
 never going to be put to you.
 
-Notes (`N1`) print once at the next checkpoint and are listed again in the report; they exist to stop the agent from spamming pointless questions.
+Notes (`N1`) print once, at the next checkpoint, and are listed again in the report.
 
 ### Interrupting a run
 
-One `Ctrl+C` stops the deliberation and still writes the report. A second `Ctrl+C` kills it faster with no guarantee of a report.
+One `Ctrl+C` stops the deliberation and still writes the report. A second one kills the members and
+ends the run within two seconds, with no guarantee the report lands.
 
 ## What you get
 
 The report is the one artifact every run writes. The rest of the run directory is a verbosity
-ladder — `quiet` (the default) keeps the report only, each level adds one more artifact, and the
-levels exist mostly for debugging:
+ladder — `quiet` (the default) keeps the report and per-member stderr, each level adds one more
+artifact, and the levels exist mostly for debugging:
 
 | Level | Keeps |
 |---|---|
@@ -173,11 +174,10 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 
 ### `--output`: the report somewhere else
 
-`-o`/`--output <path>` writes the report there instead of the run directory — one file moves
-and nothing else follows it. An existing directory keeps the mode's name, so
-`-o docs/` writes `docs/plan.md`; anything else is the file itself. At `summary` verbosity or
-higher, `run.json` stays in the run directory and names the path the report landed at, so
-nothing about a run is harder to find.
+`-o`/`--output <path>` writes the report there instead of the run directory — one file moves,
+nothing else follows it. An existing directory keeps the mode's name, so `-o docs/` writes
+`docs/plan.md`; anything else is the file itself. At `summary` verbosity or higher, `run.json`
+stays in the run directory and names the path the report landed at.
 
 ```sh
 mech-council review -o .                 # -> ./report.md
@@ -196,7 +196,7 @@ terminal to answer from the run refuses and says so; `--overwrite` skips the ask
 | `0` | A result was written — including `needs_human`, `unvetted` and `round_limit_reached`. |
 | `1` | No result: bad config, an unusable member, an internal error, a nested-council refusal, a declined `--output` overwrite, a report that never landed, a host that cannot fork. |
 | `2` | Usage error. |
-| `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and finalizes `run.json` first when its verbosity keeps one; a press a second later stops waiting for the members and gives up the waits, and each one after that starts that two-second bound over. |
+| `130`/`143` | Interrupted. The first press reports where the run stood, disposes every child, sweeps every namespace this run created, and still writes the report (and `run.json` at `summary` or higher); a press a second later skips the waits, kills the members, and the process goes within two seconds — each press after that starts the two seconds over from there. |
 
 ## Configuration
 
@@ -213,7 +213,8 @@ either, so a project's file can inherit the roster your own home file keeps
 ([`extends`](#extends-one-roster-several-councils)).
 
 `--config` names the only file read; nothing layers under it. A project's own file may not state a
-`pi_cli` living inside that project — put that knob in the user's file.
+`pi_cli` living inside that project — put that knob in the user's file, or convene your own file
+with `--config`.
 
 | Knob | Default | Meaning |
 |---|---|---|
@@ -224,16 +225,16 @@ either, so a project's file can inherit the roster your own home file keeps
 | `seconding` | `true` | A question reaches you only once a second seat backs it. `false` puts every question the council left open in front of you. |
 | `human` | `blocking` | The run's posture toward the council's questions. `blocking`: it waits where a declared stop reaches the bar. `non_blocking`: it never waits — questions are shown while it keeps working, and you may answer any of them. `none`: the council is never asked; its open questions are recorded in the report. `--human` overrides; a run with no terminal on stdin takes `none` unless a posture is stated, and says so in a note. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
-| `chair_timeout_sec` | `300` | Bound on a chair publication pass. |
+| `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction). |
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
 | `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on. |
-| `verbosity` | `quiet` | What the run directory keeps beyond the report: `quiet` < `summary` (+`run.json`) < `detail` (+`human_input.json`) < `debug` (+`events.jsonl`) < `full` (+ the verbatim protocol streams). `--verbosity` overrides. |
+| `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json`), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
 Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi
-will not start a seat configured that way), and `persona`. An unknown model warns and falls back
-rather than failing the run.
+will not start a seat configured that way), and `persona`. An unknown model warns rather than
+failing the run.
 
 ### `extends`: one roster, several councils
 
@@ -293,14 +294,17 @@ into several councils.
 Each member sees your project through an overlay: the project is the read-only lower layer,
 its own writes land in an upper layer inside a tmpfs that is discarded, and its `$TMPDIR` is
 scratch that never enters the write journal. Its run directory is masked, and `/proc` closes the
-run's own file objects to it — reading the run's `cwd`, `environ` or `exe`, or opening one of its
-`fd` links, answers `EACCES`. That clearing is best-effort.
+run's own file objects to it — reading the run's `cwd`, `environ` or `exe`, or listing its `fd`,
+answers `EACCES`. The clearing holds while the run is unprivileged: at uid 0 or with
+`CAP_SYS_PTRACE` a seat can list the run's open descriptors; the run notes it when it runs at uid 0.
 When the run ends, every namespace it created is swept — including tool shells a member detached
 into its own process group — and the survivors are named in `run.json` if any remain (at
 `summary` verbosity or higher; the console says so either way).
 
-The sandbox is only to minimize agents stepping on the toes of other agents; recommended method
-is to run this is a docker container with only the directory you want to work in mounted.
+The sandbox keeps the members from stepping on each other and from leaving writes in your
+project. It is not a security boundary: the overlay only covers the project, and a seat reads the
+rest of the host filesystem as you do. The recommended setup is a container with only the
+directory you want reviewed mounted.
 
 ### In place
 
@@ -326,11 +330,13 @@ python -m mypy               # over src and tests
 ```
 
 The offline suite drives real orchestrator, sandbox, RPC and dispose paths against a scripted fake
-pi. The `sandbox` family is the only one with a platform requirement: its fixture lower must sit on
+pi. The `sandbox` family is the only one with a ground requirement: its fixture lower must sit on
 a plain filesystem (ext4, or a tmpfs such as a member's `$TMPDIR`); point `COUNCIL_TEST_FS` at a
-plain directory to choose it explicitly. Its one `/proc` case asserts unprivileged-only, so a suite
-run as mapped root skips that case naming the uid rule above and still asserts everything it can prove there. Everything else,
-`test_in_place.py` included, runs on any POSIX host that can fork.
+plain directory to choose it explicitly. Its one `/proc` case asserts the unprivileged half only,
+so a suite run at uid 0 (or with `CAP_SYS_PTRACE`) skips it, naming the uid rule in
+[`The sandbox`](#the-sandbox), and still asserts everything it can prove there. Everything else,
+`test_in_place.py` included, runs on any POSIX host that can fork — the namespace-sweep cases in
+`test_process.py` need the same `unshare(2)` as the sandbox.
 
 GitHub Actions runs ruff, mypy and the offline suite on every push to `master` and every pull
 request ([`ci.yml`](https://github.com/ConnorPietrasik/mech-council/blob/master/.github/workflows/ci.yml)),
