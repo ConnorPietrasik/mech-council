@@ -44,7 +44,35 @@ human what you cannot settle.
   refuting note. That is the job working, not a loss.
 """
 
-ESCALATION = """\
+
+def escalation(human: str) -> str:
+    """`Asking the human`, in the words this run's human posture makes true."""
+    closure = (
+        "The council\n"
+        "  **settling the item** answers an ask about it the same way — a declared stop is the one claim that\n"
+        "  outranks a closure — so ask over no item what the closure left open."
+        if human == "blocking"
+        else "The council **settling the item** answers an ask about it — the closure is the council's\n"
+        "  answer — so ask over no item what the closure left open."
+    )
+    stop = (
+        "- Nothing stops the run but a **declared stop**: `blocking: true` on an ask you raise, or\n"
+        '  `blocking_for: ["H1"]` on a peer\'s. A majority of the council has to want that stop before\n'
+        "  the council waits, so claim it only where you genuinely cannot do the work without the\n"
+        "  answer. A taste call, a name, a colour is not it — ask, or decide it yourself. A stop is sticky:\n"
+        "  sending `blocking: false` back releases nothing, and there is no other way to give one up than\n"
+        "  `retract` the ask or let go of the item it was declared on."
+        if human == "blocking"
+        else (
+            "- Nothing you send stops the run: it keeps working while an ask is open. Settle such an ask by\n"
+            "  assumption and keep working — the human may read it between rounds and may answer it, and the\n"
+            "  answer, when it comes, lands the next round."
+            if human == "non_blocking"
+            else "- No human is on this run: an ask is never answered by one, it is recorded for the report. The live\n"
+            "  answers are a peer's `answer_question` and your own — if neither settles it, assume and keep working."
+        )
+    )
+    return f"""\
 # Asking the human
 
 - `human_input` entries ask. Naming an item says what the ask is about; it does **not**
@@ -62,29 +90,61 @@ ESCALATION = """\
   longer need. Say so — never go quiet.
 - Dropping an ask releases nothing but itself: an item you hold with `needs_human` goes only by
   **stancing that item again** as one you now accept or abstain from. And the reverse: letting go of
-  the item drops the ask your hold raised, so re-ask it if you still need the answer. The council
-  **settling the item** answers an ask about it the same way — a declared stop is the one claim that
-  outranks a closure — so ask over no item what the closure left open.
+  the item drops the ask your hold raised, so re-ask it if you still need the answer. {closure}
 - A peer's answer holds an ask back — they are telling the council the workspace settles it. Only a
   seat that **raised** the ask can call that answer not enough, with `insist: ["H1"]` in a round
   **after** the answer lands: an answer that arrived in the round you are answering in is not one you
   have read, so it is not one you can refuse. Backing an ask another seat raised cannot un-answer it,
   and your own answer stops counting the moment you ask that ask too — what you wrote is kept, it just
   stops keeping it from the human. Insisting still takes a second seat.
-- Nothing stops the run but a **declared stop**: `blocking: true` on an ask you raise, or
-  `blocking_for: ["H1"]` on a peer's. A majority of the council has to want that stop before
-  the council waits, so claim it only where you genuinely cannot do the work without the
-  answer. A taste call, a name, a colour is not it — ask, or decide it yourself. A stop is sticky:
-  sending `blocking: false` back releases nothing, and there is no other way to give one up than
-  `retract` the ask or let go of the item it was declared on.
+{stop}
 - If a peer challenges your escalation with cited evidence, answer the challenge.
 """
 
-QUESTION_SHAPE = """\
+
+def question_shape(human: str) -> str:
+    """`Asking well`, in the words this run's human posture makes true."""
+    intro = {
+        "blocking": "accept, and the human reads them at a checkpoint while the run is stopped:",
+        "non_blocking": "accept. The run never stops for one: the human may read them between rounds and may never\n"
+        "read them, so an open ask is one you settle by assumption:",
+        "none": "accept. No human is on this run: the ask is recorded for the report, and the only\nanswers it gets are the council's own:",
+    }[human]
+    options = {
+        "blocking": (
+            "Options are your candidates, not the whole space, and they settle nothing: only the\n"
+            "human's own answer is authoritative. They are shown numbered so the human can take one\n"
+            "verbatim; answering in their own words stays open to them. If you truly cannot name an\n"
+            "acceptable answer, say why in `context` — that is a real result too."
+        ),
+        "non_blocking": (
+            "Options are your candidates, not the whole space, and they settle nothing: the human's own\n"
+            "answer, when it comes, is the only authoritative one. They are shown numbered so the human\n"
+            "can take one verbatim. If you truly cannot name an acceptable answer, say why in `context`\n"
+            "— that is a real result too."
+        ),
+        "none": (
+            "Options are your candidates, not the whole space, and in this run they settle nothing: the\n"
+            "ask goes to the report with the candidates beside it. If you truly cannot name an acceptable\n"
+            "answer, say why in `context` — that is a real result too."
+        ),
+    }[human]
+    tail = (
+        "\n\n`blocking` is a separate claim from the ask: it says the council must *wait* for the answer,\n"
+        "and it takes a majority making the same claim to mean anything."
+        if human == "blocking"
+        else ""
+    )
+    notes = (
+        "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats nothing a finding already says."
+        if human == "blocking"
+        else "`notes` tells the human what they need only *know*: it replaces an ask and repeats nothing a finding already says."
+    )
+    return f"""\
 # Asking well
 
 Every `human_input` entry carries the decision, the context, and the answers you would
-accept, and the human reads them at a checkpoint while the run is stopped:
+{intro}
 
 - `question` — the decision in one line. Not a topic and not a restatement of the item you are
   stuck on: the thing you cannot decide from the code.
@@ -93,21 +153,16 @@ accept, and the human reads them at a checkpoint while the run is stopped:
 - `options` — two to four answers **you would accept**, each phrased AS the answer
   ("keep it 30 days"), never as a subject ("retention").
 
-Options are your candidates, not the whole space, and they settle nothing: only the
-human's own answer is authoritative. They are shown numbered so the human can take one
-verbatim; answering in their own words stays open to them. If you truly cannot name an
-acceptable answer, say why in `context` — that is a real result too.
+{options}
 
 The menu is yours: when you re-ask, what you send **replaces the candidates you offered
 before**, so send the whole menu you stand behind now and never a fragment of it. A peer
 asking the same question keeps its own candidates beside yours, and asking it twice is also
-the second seat that gets the ask put to the human.
+the second seat that gets the ask put to the human.{tail}
 
-`blocking` is a separate claim from the ask: it says the council must *wait* for the answer,
-and it takes a majority making the same claim to mean anything.
-
-`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats nothing a finding already says.
+{notes}
 """
+
 
 #: phase 0 has no note to retract yet
 NOTE_RETRACTION = """\
@@ -139,7 +194,7 @@ def _workspace(in_place: bool) -> str:
     return SHARED if in_place else SANDBOX
 
 
-def phase0_briefing(*, mode: str, goal: str | None, project: str, in_place: bool = False) -> str:
+def phase0_briefing(*, mode: str, goal: str | None, project: str, in_place: bool = False, human: str = "blocking") -> str:
     text = _mode_text(mode)
     return "\n".join(
         [
@@ -150,10 +205,10 @@ def phase0_briefing(*, mode: str, goal: str | None, project: str, in_place: bool
             text.PHASE0_TASK,
             PROTOCOL,
             _workspace(in_place),
-            ESCALATION,
-            QUESTION_SHAPE,
+            escalation(human),
+            question_shape(human),
             ANSWER_SHAPE,
-            text.PHASE0_SCHEMA,
+            text.phase0_schema(human),
         ]
     )
 
@@ -167,6 +222,7 @@ def round_briefing(
     docket: str,
     phase0_summary: str,
     in_place: bool = False,
+    human: str = "blocking",
 ) -> str:
     text = _mode_text(mode)
     return "\n".join(
@@ -179,14 +235,14 @@ def round_briefing(
             "its evidence: who raised it is not part of the evidence.",
             goal_line(goal),
             phase0_summary,
-            text.ROUND_TASK,
+            text.round_task(human),
             PROTOCOL,
-            ESCALATION,
-            text.EXTRA_BRIEFING,
-            QUESTION_SHAPE + NOTE_RETRACTION,
+            escalation(human),
+            text.extra_briefing(human),
+            question_shape(human) + NOTE_RETRACTION,
             _workspace(in_place),
             ANSWER_SHAPE,
-            text.ROUND_SCHEMA,
+            text.round_schema(human),
             "---",
             "## The docket",
             "",
@@ -210,7 +266,20 @@ def gap_ask(missing: list[str], *, reason: str, deliberate: bool) -> str:
     return line + f"\n\nWhy I am asking again: {reason}\n"
 
 
-def peer_pass_task(listing: str, mode: str) -> str:
+def peer_pass_task(listing: str, mode: str, human: str = "blocking") -> str:
+    second = (
+        "- you want the human's word on it too → `second`: its id. Only a peer can back an ask, so `second` is not yours\n"
+        "  on one you raised; `blocking_for`: its id is the claim that the council should wait for the answer, and that\n"
+        "  one you may declare on an ask of your own — it takes a majority declaring the same stop for it to bite;"
+        if human == "blocking"
+        else "- you want it backed → `second`: its id. Only a peer can back an ask, so `second` is not yours on one you raised;"
+    )
+    moot = (
+        "An ask mooted by a settled item comes back only on a declared stop at the bar: the closure is the council's\n"
+        "answer about that item."
+        if human == "blocking"
+        else "An ask mooted by a settled item is moot: the closure is the council's answer about that item."
+    )
     return "\n".join(
         [
             "# Before the council ends: the asks that will not reach the human",
@@ -220,15 +289,12 @@ def peer_pass_task(listing: str, mode: str) -> str:
             "For each one, do whichever is true:",
             "",
             "- you can settle it from the workspace → `answer_question`: its id and your answer;",
-            "- you want the human's word on it too → `second`: its id. Only a peer can back an ask, so `second` is not yours",
-            "  on one you raised; `blocking_for`: its id is the claim that the council should wait for the answer, and that",
-            "  one you may declare on an ask of your own — it takes a majority declaring the same stop for it to bite;",
+            second,
             "- you raised it, a seat answered it, and that answer misses the point → `insist`: its id — the only way an",
             "  answered ask comes back to the human;",
             "- you raised it and no longer need it → `retract`: its id.",
             "",
-            "An ask mooted by a settled item comes back only on a declared stop at the bar: the closure is the council's",
-            "answer about that item.",
+            moot,
             "",
             "This pass lets go and calls one answer not enough. Findings, sign-offs, new asks and `human_input` belong to",
             "a round and are read by nobody here; `notes` and `retract_note` are read; `positions` are read for one thing —",
@@ -237,7 +303,7 @@ def peer_pass_task(listing: str, mode: str) -> str:
             "nothing about an ask you have nothing on.",
             "",
             ANSWER_SHAPE,
-            schema_hint(mode, phase="round"),
+            schema_hint(mode, phase="round", human=human),
             "---",
             "## The asks",
             "",
@@ -246,14 +312,14 @@ def peer_pass_task(listing: str, mode: str) -> str:
     )
 
 
-def repair_ask(mode: str, phase: str, error: str, previous: str) -> str:
+def repair_ask(mode: str, phase: str, error: str, previous: str, human: str = "blocking") -> str:
     return "\n".join(
         [
             "Your last answer could not be read as structured output.",
             f"The problem: {error}",
             "",
             "Reply again with the same task's JSON shape, nothing else changed:",
-            schema_hint(mode, phase=phase),
+            schema_hint(mode, phase=phase, human=human),
             "Your previous answer, truncated:",
             (previous or "")[:4000],
         ]
@@ -273,11 +339,11 @@ def merge_schema(mode: str) -> str:
 SEAT_PHASES = ("round", "gap", "defense", "seconding")
 
 
-def schema_hint(mode: str, *, phase: str) -> str:
+def schema_hint(mode: str, *, phase: str, human: str = "blocking") -> str:
     if phase == "phase0":
-        return _mode_text(mode).PHASE0_SCHEMA
+        return _mode_text(mode).phase0_schema(human)
     if phase in SEAT_PHASES:
-        return _mode_text(mode).ROUND_SCHEMA
+        return _mode_text(mode).round_schema(human)
     if phase == "merge":
         return merge_schema(mode)
     if phase == "asks":
@@ -291,7 +357,7 @@ def schema_hint(mode: str, *, phase: str) -> str:
     if phase == "direction":
         from . import plan as plan_text
 
-        return plan_text.DIRECTION_SCHEMA
+        return plan_text.direction_schema(human)
     from . import chair
 
     return chair.WATCHDOG_SCHEMA
@@ -313,13 +379,13 @@ def merge_task(mode: str, listing: str, goal: str | None = None) -> str:
     )
 
 
-def ask_merge_task(listing: str) -> str:
+def ask_merge_task(listing: str, human: str = "blocking") -> str:
     """The chair's ask fold: ids are `H1`-shaped in every mode, so no id prefix goes in."""
     from . import chair
 
     return "\n".join(
         [
-            chair.ASK_MERGE,
+            chair.ask_merge(human),
             ANSWER_SHAPE,
             chair.ASK_MERGE_SCHEMA,
             "---",
@@ -330,13 +396,13 @@ def ask_merge_task(listing: str) -> str:
     )
 
 
-def comparison_task(listing: str, goal: str | None = None) -> str:
+def comparison_task(listing: str, goal: str | None = None, human: str = "blocking") -> str:
     """Plan mode's comparison pass, in plan's own prose."""
     from . import plan as plan_text
 
     return "\n".join(
         [
-            plan_text.COMPARE,
+            plan_text.compare(human),
             goal_line(goal),
             plan_text.COMPARISON_TASK,
             ANSWER_SHAPE,
@@ -349,16 +415,16 @@ def comparison_task(listing: str, goal: str | None = None) -> str:
     )
 
 
-def direction_task(listing: str, goal: str | None = None) -> str:
+def direction_task(listing: str, goal: str | None = None, human: str = "blocking") -> str:
     """Plan mode's one chair-worded ask."""
     from . import plan as plan_text
 
     return "\n".join(
         [
-            plan_text.DIRECTION,
+            plan_text.direction(human),
             goal_line(goal),
             ANSWER_SHAPE,
-            plan_text.DIRECTION_SCHEMA,
+            plan_text.direction_schema(human),
             "---",
             "## The directions still standing",
             "",

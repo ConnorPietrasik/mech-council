@@ -193,7 +193,7 @@ class Lanes:
             self.console.say(f"{who}: answer refused ({hint}) — repair {outcome.repairs}/{REPAIR_ASKS}")
             text = await self._prompt_with_restart(
                 file_base,
-                common.repair_ask(self.council.mode, phase, hint, text),
+                common.repair_ask(self.council.mode, phase, hint, text, self.council.human),
                 label=label,
                 round_=round_,
                 timeout=timeout,

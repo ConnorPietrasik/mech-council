@@ -105,6 +105,7 @@ def create(path: str, council: Council, *, run_dir: str, runs_dir: str, project:
             "transcripts": council.transcripts,
             "sandbox_mib": council.sandbox_mib,
             "in_place": council.in_place,
+            "human": council.human,
             "project_trust": "no-approve" if council.untrusted else "approve",
         },
         "pi_cli": council.pi_cli,

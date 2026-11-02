@@ -57,6 +57,10 @@ async def orchestrate(launch, sandbox) -> int:
         console.say(f"in place · members share {council.project} · scratch {sandbox.sandbox_dir}/<seat> · no write journal")
     else:
         console.say(f"sandbox {sandbox.sandbox_dir} · tmpfs {council.sandbox_mib} MiB shared by {len(council.agents) + 1} members")
+    if council.human == "non_blocking":
+        console.say("questions: the run never waits on them — you may answer while it works")
+    elif council.human == "none":
+        console.say("questions: none — the council will not be asked anything this run")
     console.say(f"transcripts {council.transcripts} · project trust {'untrusted (no approval)' if council.untrusted else 'approve'}")
     console.event(
         "run_started",
@@ -65,6 +69,7 @@ async def orchestrate(launch, sandbox) -> int:
         council=council.name,
         sandbox_dir=sandbox.sandbox_dir,
         in_place=council.in_place,
+        human=council.human,
     )
     manifest = runjson.create(
         os.path.join(run_dir, "run.json"),
@@ -209,6 +214,7 @@ def _docket(council: Council) -> Docket:
         roster=council.seat_ids,
         chair_name=council.chair.name,
         seconding=council.seconding,
+        human=council.human,
     )
 
 
@@ -227,7 +233,7 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
     from .humanio import LineReader
 
     names = council.roster_names
-    brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place)
+    brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place, human=council.human)
     chair = Chair(council, lanes, console, brief)
     reader = LineReader()
     reader.start()
@@ -245,7 +251,7 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
         max_rounds=council.max_rounds,
         grace_rounds=council.grace_rounds,
         names=names,
-        emit=_emitter(console, names),
+        emit=_emitter(console, names, council.human),
     )
     watchdog = Watchdog(council=council, lanes=lanes, chair=chair, console=console)
     watchdog.start()
@@ -303,19 +309,19 @@ def _messenger(lanes: Lanes):
     return send
 
 
-def _emitter(console: Console, names: dict[str, str]):
+def _emitter(console: Console, names: dict[str, str], human: str):
 
     def emit(name: str, **fields) -> None:
         fields = {key: value for key, value in fields.items() if not callable(value)}
         console.event(name, **fields)
-        line = _summary_line(name, fields, names)
+        line = _summary_line(name, fields, names, human=human)
         if line:
             console.say(line)
 
     return emit
 
 
-def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
+def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "blocking") -> str:
     from .render.text import direction_label, name_of
 
     if name == "phase0_done":
@@ -326,7 +332,12 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         return f"chair comparison: {fields['agreed']} agreed point(s), {fields['conflicts']} conflict(s), {fields['uncovered']} uncovered"
     if name == "direction_ask":
         held = ", ".join(direction_label(token, names) for token in fields["directions"])
-        return f"the seats will not converge ({held}) — asking the human to choose"
+        tail = {
+            "blocking": "asking the human to choose",
+            "non_blocking": "the human may choose while the run keeps working",
+            "none": "the split is recorded for the report; no human is on the run to choose",
+        }[human]
+        return f"the seats will not converge ({held}) — {tail}"
     if name == "chair_direction_unreadable":
         return "the chair could not word the split — the run asks in its own words"
     if name == "chair_ask_merge_refused":
@@ -368,15 +379,23 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
             "and the round limit still closes the run"
         )
     if name == "peer_pass_start":
-        return f"the seats get one last look at {', '.join(fields['asks'])} before the council asks you"
+        before = "the council asks you" if human == "blocking" else "the run ends"
+        return f"the seats get one last look at {', '.join(fields['asks'])} before {before}"
     if name == "question_seconded":
-        return f"{name_of(fields['seat'], names)} backed {fields['id']} — the human is asked ({_seats(fields['askers'], names)})"
+        said = {
+            "blocking": "the human is asked",
+            "non_blocking": "the human is shown it while the run keeps working",
+            "none": "it is recorded for the report",
+        }[human]
+        return f"{name_of(fields['seat'], names)} backed {fields['id']} — {said} ({_seats(fields['askers'], names)})"
     if name == "question_seconded_but_held_back":
         backed = f"{name_of(fields['seat'], names)} backed {fields['id']}"
         if fields["held"] == SETTLED:
             return f"{backed}, but {_seats(fields['answered_by'], names)} answered it: only a seat that raised it can call that not enough"
         if fields["held"] == MOOT:
-            return f"{backed}, but its item is settled: only a majority declaring the stop for it puts it to the human"
+            if human == "blocking":
+                return f"{backed}, but its item is settled: only a majority declaring the stop for it puts it to the human"
+            return f"{backed}, but its item is settled: the closure is the council's answer about it"
         return f"{backed}, and the human is not asked ({fields['held']})"
     if name == "question_stop_requested":
         return f"{name_of(fields['seat'], names)} wants the run to wait on {fields['id']} ({_seats(fields['holders'], names)})"
@@ -397,7 +416,8 @@ def _summary_line(name: str, fields: dict, names: dict[str, str]) -> str:
         who = name_of(fields["seat"], names)
         return f"{who} let go of {fields['item']} ({fields['stance']}): the council settles it, the human is not asked"
     if name == "question_answered_by_seat":
-        return f"{name_of(fields['seat'], names)} answered {fields['id']} in the human's place"
+        said = "in the human's place" if human != "none" else "from the workspace: it is settled, never asked"
+        return f"{name_of(fields['seat'], names)} answered {fields['id']} {said}"
     if name == "question_unseconded":
         return f"{fields['id']} has no second seat: it is reported, never asked"
     if name == "verdict_ask_refused":
@@ -575,6 +595,7 @@ def _report_context(
         sink_claim=sink_claim,
         untrusted=council.untrusted,
         in_place=council.in_place,
+        human=council.human,
         roster=roster,
         chair_name=council.chair.name,
         chair_model=council.chair.model or "pi default",
@@ -615,7 +636,7 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
                 "answer_option": q.answer_option,
                 "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
-                "markers": list(q.markers),  # unasked / unanswered / settled / unseconded / moot / merged / skipped: the report's words
+                "markers": list(q.markers),  # unasked / unanswered / settled / unseconded / moot / merged / skipped / no_human
                 "merged_into": q.merged_into,
                 "direction_ask": q.direction_ask,
                 "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == RETIRED],

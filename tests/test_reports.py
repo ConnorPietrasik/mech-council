@@ -245,6 +245,33 @@ def test_the_console_says_what_a_second_that_bought_nothing_was_up_against():
     assert "stop" in moot
 
 
+def test_the_console_lines_know_the_run_s_human_posture():
+    """`non_blocking` never says the run waits or stops, and `none` never says the human is asked at all."""
+    from mech_council.run import _summary_line
+
+    names = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
+    seconded = {"id": "H1", "seat": "Agent2", "askers": ["Agent1", "Agent2"], "round": 2}
+    moot = {"id": "H1", "seat": "Agent3", "askers": ["Agent1", "Agent3"], "held": "moot", "answered_by": [], "round": 2}
+    answered = {"id": "H1", "seat": "Agent2", "round": 2}
+
+    def line(event, fields, human):
+        return _summary_line(event, fields, names, human=human)
+
+    assert "the human is asked" in line("question_seconded", seconded, "blocking"), "the default still puts the ask to the human"
+    assert "stop" in line("question_seconded_but_held_back", moot, "blocking")
+    assert "in the human's place" in line("question_answered_by_seat", answered, "blocking")
+    for human in ("non_blocking", "none"):
+        assert "the human is asked" not in line("question_seconded", seconded, human), human
+        assert "asking the human" not in line("direction_ask", {"directions": ["Agent1"]}, human), human
+        assert "stop" not in line("question_seconded_but_held_back", moot, human), "no stop machinery to name"
+        assert "before the council asks you" not in line("peer_pass_start", {"asks": ["H1"]}, human), human
+    assert "keeps working" in line("question_seconded", seconded, "non_blocking")
+    assert "keeps working" in line("direction_ask", {"directions": ["Agent1"]}, "non_blocking")
+    assert "recorded" in line("question_seconded", seconded, "none")
+    assert "no human" in line("direction_ask", {"directions": ["Agent1"]}, "none")
+    assert "in the human's place" not in line("question_answered_by_seat", answered, "none")
+
+
 def test_the_console_names_the_ask_whose_words_survive_a_fold_the_chair_misnamed():
     from mech_council.run import _summary_line
 

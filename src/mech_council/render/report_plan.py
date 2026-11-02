@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import HELD_BACK, effective_class, held_back
+from ..deliberation.escalations import HELD_BACK, NO_HUMAN, effective_class, held_back
 from ..deliberation.notes import report_notes
 from ..deliberation.state import (
     ANSWERED,
@@ -63,8 +63,13 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
             out.append(f"- `declined` — {_names(never, context)}")
         ask = docket.direction_ask()
         if ask is not None:
-            out.append(f"- the human was asked ({ask.id}): {ask.text}")
-            out.append(f"  - answer: {ask.answer}" if ask.answer else f"  - {'declined' if ask.state == SKIPPED else 'never answered'}")
+            if context.human == "none":
+                out.append(f"- the council's split was recorded, with no human on the run to choose ({ask.id}): {ask.text}")
+                if ask.answer:
+                    out.append(f"  - answer: {ask.answer}")
+            else:
+                out.append(f"- the human was asked ({ask.id}): {ask.text}")
+                out.append(f"  - answer: {ask.answer}" if ask.answer else f"  - {'declined' if ask.state == SKIPPED else 'never answered'}")
         out.append("")
         out.append("No direction is printed for you to follow: nobody chose one.")
         return out + [""]
@@ -159,6 +164,8 @@ def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
 def _assumption_kind(docket: Docket, question: Question) -> str:
     """Why this ask became an assumption, as the docket phrases it."""
     held = held_back(docket, question) if question.state == ASKED else next((m for m in question.markers if m in HELD_BACK), "")
+    if NO_HUMAN in question.markers:
+        return "no human on this run"
     if "unasked" in question.markers:
         return "unasked"
     if "unanswered" in question.markers:

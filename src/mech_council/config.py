@@ -23,10 +23,12 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "pi_cli": None,
     "sandbox_mib": 32768,
     "in_place": False,
+    "human": "blocking",
 }
 
 #: name → (type, `[defaults]`-allowed)
 SCALAR_KEYS: dict[str, tuple[str, bool]] = {
+    "human": ("human", True),
     "max_rounds": ("int>=1", True),
     "grace_rounds": ("int>=0", True),
     "seconding": ("bool", True),
@@ -79,6 +81,7 @@ class Council:
     sandbox_mib: int
     pi_cli: str
     pi_version: str
+    human: str = "blocking"
     #: The councils whose tables merged into this one, nearest first.
     extends: list[str] = field(default_factory=list)
     config_path: str = ""
@@ -142,11 +145,20 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
         hint = suggest.suggest(str(value), MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
         raise ConfigError(f"config key {where}.mode is 'review' or 'plan', got {value!r}{extra}")
+    elif kind == "human":
+        if value in HUMAN_MODES:
+            return value
+        hint = suggest.suggest(str(value), HUMAN_MODES)
+        extra = f" (did you mean {hint!r}?)" if hint else ""
+        raise ConfigError(f"config key {where}.human is 'blocking', 'non_blocking' or 'none', got {value!r}{extra}")
     return value
 
 
 #: The mode names config validation accepts.
 MODES: tuple[str, ...] = ("review", "plan")
+
+#: The human's posture toward the council's questions: the run waits at the bar, never waits, or never asks.
+HUMAN_MODES: tuple[str, ...] = ("blocking", "non_blocking", "none")
 
 
 def _reject_unknown(table: dict, allowed: set[str] | dict, where: str) -> None:
@@ -552,6 +564,7 @@ def convene(
         sandbox_mib=int(flat["sandbox_mib"]),
         pi_cli=pi_cli,
         pi_version=pi_version,
+        human=args.human or str(flat["human"]),
         extends=chain,
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),

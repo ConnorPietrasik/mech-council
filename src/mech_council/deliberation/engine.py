@@ -9,6 +9,7 @@ from .dispositions import closure_pass, derive
 from .escalations import (
     HELD_BACK,
     MOOT,
+    NO_HUMAN,
     SETTLED,
     UNBACKED,
     answer_by_seat,
@@ -433,13 +434,14 @@ class Engine:
                 round=round_,
             )
         for qid in data.get("blocking_for") or []:
-            question, reason = stop_for(self.docket, qid=qid, agent=agent, round_=round_)
+            question, reason, stopped = stop_for(self.docket, qid=qid, agent=agent, round_=round_)
             if question is None or reason:
                 self.emit(
                     "verdict_ask_refused", member=agent, id=qid, field="blocking_for", round=round_, reason=reason or "no such question"
                 )
                 continue
-            self.emit("question_stop_requested", id=question.id, seat=agent, holders=list(question.blocked_by), round=round_)
+            if stopped:
+                self.emit("question_stop_requested", id=question.id, seat=agent, holders=list(question.blocked_by), round=round_)
             self._recheck_class(question, round_)
         for entry in data.get("answer_question") or []:
             question, reason = answer_by_seat(self.docket, qid=entry["id"], agent=agent, text=entry["text"], round_=round_)
@@ -1084,8 +1086,8 @@ class Engine:
 
         never_asked = []
         for question in unsettled_questions(self.docket):
-            # a held-back marker already says why the human never saw it
-            if question.state != ASKED or any(marker in question.markers for marker in HELD_BACK):
+            # a held-back marker already says why the human never saw it; so does no-human
+            if question.state != ASKED or any(marker in question.markers for marker in HELD_BACK) or NO_HUMAN in question.markers:
                 continue
             # a waiting checkpoint showed it; a different marker from never asking
             marker = "unanswered" if question.id in self._asked_of_human else "unasked"
@@ -1100,14 +1102,23 @@ class Engine:
         from .termination import unsettled_questions
 
         open_asks = unsettled_questions(self.docket)
-        ask = [q for q in open_asks if showable(self.docket, q)]
+        asked = [q for q in open_asks if showable(self.docket, q)]
         if terminal:
-            self._mark_held_back([q for q in open_asks if q not in ask], round_)
+            self._mark_held_back([q for q in open_asks if q not in asked], round_)
+        if self.docket.human == "none":
+            # no human is on this run: the asks are the report's, not a checkpoint's
+            for question in asked:
+                if NO_HUMAN not in question.markers:
+                    question.markers.append(NO_HUMAN)
+            asked = []
+        ask = asked
         listing = ask
         pending_notes = unshown(self.docket)
         if not listing:
-            if terminal and len(open_asks) > len(ask):
-                self.emit_note(_held_back_note(self.docket, open_asks))
+            # no_human is not a held-back reason: the note names only the asks the council actually kept back
+            held = [q for q in open_asks if held_back(self.docket, q)]
+            if terminal and held:
+                self.emit_note(_held_back_note(self.docket, held))
             if pending_notes:
                 # no asks to show; the notes are the reason for the checkpoint
                 self.phase("the notes for you")
@@ -1127,7 +1138,12 @@ class Engine:
         at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
         # the ceiling asks too, on the grace budget — or when an off-cycle answer has already bought one more round
-        waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
+        waiting = (
+            self.docket.human == "blocking" and (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
+        )
+        if self.docket.human == "non_blocking":
+            # shown is asked: the checkpoint puts the asks in front of the human without holding the run
+            self._asked_of_human.update(q.id for q in ask)
         if terminal and not waiting:
             self._mark_unasked()
         self.phase(WAITING if waiting else "showing you the asks")

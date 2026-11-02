@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import SETTLED, UNBACKED, effective_class, held_back, stop_holders
+from ..deliberation.escalations import NO_HUMAN, SETTLED, UNBACKED, effective_class, held_back, stop_holders
 from ..deliberation.notes import report_notes
 from ..deliberation.state import (
     ABSTAIN,
@@ -94,10 +94,12 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
         if abstainers:
             out.append(f"- not vetted by: {_names(abstainers, context)}")
         out.append(f"- closed: {item.disposition} in round {item.closed_round}")
-        for question in _questions_on(docket, item, (SKIPPED, "unasked", "unanswered")):
+        for question in _questions_on(docket, item, (SKIPPED, "unasked", "unanswered", NO_HUMAN)):
             said = (
                 "**skipped** by the human"
                 if question.state == SKIPPED
+                else "raised, but this run had no human to answer it"
+                if NO_HUMAN in question.markers
                 else "asked and left **unanswered**"
                 if "unanswered" in question.markers
                 else "left **unasked**"
@@ -272,7 +274,8 @@ def _notes(docket: Docket, context: ReportContext) -> list[str]:
 
 def _open_questions(docket: Docket, context: ReportContext) -> list[str]:
     questions = [docket.questions[i] for i in docket.question_order]
-    out = [f"## Open questions for the human ({len(questions)})", ""]
+    title = "Open questions for the human" if context.human == "blocking" else "Questions the council raised"
+    out = [f"## {title} ({len(questions)})", ""]
     if not questions:
         return out + ["The council needed nothing from you.", ""]
     for question in questions:

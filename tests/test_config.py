@@ -267,6 +267,13 @@ def test_flags_still_beat_the_whole_chain(tmp_path):
 # ------------------------------------------------------------- in place: the knob, and who stated it
 
 
+def test_human_is_a_knob_of_its_own(tmp_path):
+    assert convene(tmp_path, body()).human == "blocking", "the built-in default waits at the bar"
+    assert convene(tmp_path, body().replace("[defaults]\n", '[defaults]\nhuman = "none"\n')).human == "none", "[defaults] may ask"
+    assert convene(tmp_path, body().replace('goal = "g"', 'goal = "g"\nhuman = "non_blocking"')).human == "non_blocking", "so may a council"
+    assert convene(tmp_path, body(), human="none").human == "none", "the flag beats the file"
+
+
 def test_in_place_is_a_knob_of_its_own(tmp_path):
     assert convene(tmp_path, body()).in_place is False, "the built-in default is the sandbox"
     assert convene(tmp_path, body().replace("[defaults]\n", "[defaults]\nin_place = true\n")).in_place is True, "[defaults] may ask"
@@ -421,6 +428,8 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
         (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
         (body().replace('goal = "g"', 'goal = "g"\nin_place = "yes"', 1), "wants true or false, got str"),
         (body().replace('goal = "g"', 'goal = "g"\ntranscripts = "everything"', 1), "'off' or 'full'"),
+        (body().replace('goal = "g"', 'goal = "g"\nhuman = "never"', 1), "'blocking', 'non_blocking' or 'none'"),
+        (body().replace('goal = "g"', 'goal = "g"\nhuman = "nonblock"', 1), "did you mean 'non_blocking'"),
         (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),
         (body().replace('name = "A"', 'name = "A"\nprovider = "p"', 1), "states 'provider' without 'model'"),
         (body().replace('name = "A"', 'name = ""', 1), "needs a non-empty 'name'"),

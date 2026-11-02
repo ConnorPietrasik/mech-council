@@ -277,6 +277,41 @@ def test_a_human_answer_is_attributed_to_the_human_never_to_a_seat():
     assert "the e2e suite" in text.split("## Open questions for the human")[1], "it is reported under the human's own section"
 
 
+def test_a_no_human_ask_is_reported_as_recorded_never_asked():
+    """`human = none`: the ask reaches the report with its own marker, and the section is not addressed to a human."""
+    docket = build()
+    docket.human = "none"
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    docket.questions["H1"].markers.append(escalations.NO_HUMAN)
+    text = report_review.render(docket, context(human="none", outcome="consensus"))
+    assert "## Questions the council raised" in text, "the run has no human to address"
+    assert "no_human" in ledger(text, "H1")
+    assert "unasked" not in ledger(text, "H1") and "unanswered" not in ledger(text, "H1")
+    assert "asked to stop the run" not in text, "the stop machinery never existed on this run"
+
+
+def test_the_report_header_names_the_posture_that_never_waits_or_never_asks():
+    for human, wanted in (("non_blocking", "the run never waited"), ("none", "the council was never asked")):
+        docket = build()
+        text = report_review.render(docket, context(human=human))
+        assert f"- questions: {human}" in text and wanted in text, human
+    plain = report_review.render(build(), context())
+    assert "- questions:" not in plain, "the default posture says nothing new"
+
+
+def test_a_consensus_item_with_a_no_human_ask_carries_the_caveat():
+    docket = build()
+    item(docket, "F1", "a call")
+    for agent in docket.roster:
+        stance(docket, "F1", agent, state.AGREE)
+    escalations.raise_question(docket, text="which tenant?", asker="Agent1", item_id="F1", round_=1)
+    docket.questions["H1"].markers.append(escalations.NO_HUMAN)
+    dispositions.closure_pass(docket, 1)
+    text = report_review.render(docket, context(human="none", outcome="consensus"))
+    assert "no human to answer it" in section(text, "Consensus findings")
+
+
 def test_the_sandbox_journal_is_rendered_per_member_with_its_markers():
     docket = build()
     item(docket, "F1", "a finding from an artifact")
@@ -425,6 +460,20 @@ def test_the_plan_report_carries_no_review_only_sections():
     text = report_plan.render(docket, context(mode="plan"))
     assert "## Consensus findings" not in text
     assert "Decision points" in text
+
+
+def test_the_plan_report_does_not_ask_a_human_that_is_not_on_the_run():
+    """`human = none`: the split is recorded, not asked — the report says so, and never says the human was asked."""
+    docket = build(mode="plan", n=3)
+    docket.human = "none"
+    docket.backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "no_preference"}
+    escalations.raise_direction_ask(
+        docket, text="which plan do you want?", context="two seats, two orders of work", options=["Agent1: a", "Agent2: b"], round_=2
+    )
+    text = report_plan.render(docket, context(mode="plan", outcome="round_limit_reached", human="none"))
+    chosen = text.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
+    assert "no human" in chosen, "the run's posture is the report's premise"
+    assert "the human was asked" not in text
 
 
 # --------------------------------------------------------------------------- the digest's one-line preview

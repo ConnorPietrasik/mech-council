@@ -51,6 +51,7 @@ class ReportContext:
     sink_claim: str = ""  # what the sinks hold, in the bytes-counting object's words
     untrusted: bool = False
     in_place: bool = False
+    human: str = "blocking"  # the run's posture toward the council's questions
     roster: list[RosterRow] = field(default_factory=list)
     chair_name: str = "Chair"
     chair_model: str = ""
@@ -75,17 +76,22 @@ class ReportContext:
             )
         )
         sinks = f" ({self.sink_claim})" if self.sink_claim else ""
-        return [
-            f"# {title}",
-            "",
-            f"- project: `{self.project}`",
-            f"- config: `{self.config_path}` · council `{self.council}`{lineage}",
-            f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
-            f"- date: {self.date}",
-            where,
-            f"- project trust: {trust} · transcripts: {self.transcripts}{sinks}",
-            f"- pi: `{self.pi_cli}` ({self.pi_version})",
-        ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
+        posture = "the run never waited on the council's questions" if self.human == "non_blocking" else "the council was never asked"
+        return (
+            [
+                f"# {title}",
+                "",
+                f"- project: `{self.project}`",
+                f"- config: `{self.config_path}` · council `{self.council}`{lineage}",
+                f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
+                f"- date: {self.date}",
+                where,
+                f"- project trust: {trust} · transcripts: {self.transcripts}{sinks}",
+                f"- pi: `{self.pi_cli}` ({self.pi_version})",
+            ]
+            + ([f"- questions: {self.human} — {posture}"] if self.human != "blocking" else [])
+            + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
+        )
 
     def interrupted_block(self) -> list[str]:
         cut = self.interrupted

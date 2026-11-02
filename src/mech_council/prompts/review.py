@@ -11,7 +11,11 @@ Investigate the project, then report what you would fix or improve according to 
   (worth doing), `trivial` (a nit).
 """
 
-PHASE0_SCHEMA = """\
+
+def phase0_schema(human: str) -> str:
+    stop = ', "blocking": false' if human == "blocking" else ""
+    return (
+        """\
 ```json
 {
   "summary": "one paragraph: what you looked at and what you concluded",
@@ -21,15 +25,21 @@ PHASE0_SCHEMA = """\
      "severity": "blocker|major|minor|trivial"}
   ],
   "open_questions": ["a question only the human can answer"],
-  "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
+  "human_input": [{"question": "the decision, one line", "item": null"""
+        + stop
+        + """,
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
   "notes": ["what the human should know and need not answer"]
 }
 ```
 """
+    )
 
-ROUND_TASK = """\
+
+def round_task(human: str) -> str:
+    """Review's round task: it does not vary with the human's posture."""
+    return """\
 ## Your task
 
 For **every open item** in the docket: verify it against the code yourself, then stance
@@ -41,7 +51,12 @@ your own, raise a question for the human. Sign off (`"signoff": true`) only when
 would build what this council has agreed.
 """
 
-ROUND_SCHEMA = """\
+
+def round_schema(human: str) -> str:
+    stop = '", "blocking": true,' if human == "blocking" else '",'
+    claim = ' "blocking_for": ["H4"],' if human == "blocking" else ""
+    return (
+        """\
 ```json
 {
   "summary": "what you did this round",
@@ -50,10 +65,14 @@ ROUND_SCHEMA = """\
   "new_items": [{"claim": "…", "detail": "…", "evidence": "…", "severity": "minor"}],
   "questions": [{"to": "Agent2", "question": "…"}],
   "answers": [{"to": "Agent3", "question": "Q2", "answer": "…"}],
-  "human_input": [{"question": "the decision, one line", "item": "F1", "blocking": true,
+  "human_input": [{"question": "the decision, one line", "item": "F1"""
+        + stop
+        + """
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
-  "second": ["H1"], "blocking_for": ["H4"], "retract": ["H2"], "insist": ["H3"],
+  "second": ["H1"],"""
+        + claim
+        + """ "retract": ["H2"], "insist": ["H3"],
   "answer_question": [{"id": "H3", "answer": "what the workspace shows, so the human is not asked"}],
   "open_questions": ["…"],
   "notes": ["what the human should know and need not answer"],
@@ -62,9 +81,14 @@ ROUND_SCHEMA = """\
 }
 ```
 """
+    )
+
 
 # the `common.round_briefing` slot; review adds nothing.
-EXTRA_BRIEFING = ""
+def extra_briefing(human: str) -> str:
+    return ""
+
+
 MERGE_TASK = """\
 New findings are listed under **Entries to group**. The findings still open on the docket are listed under
 **Already on the docket**: a new finding that reports one of those is that finding reported twice, and it

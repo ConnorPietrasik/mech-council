@@ -20,6 +20,8 @@ from .state import (
 
 def effective_class(docket: Docket, question: Question) -> str:
     # blocking means the run actually waits: a split needs a second direction, a stop needs the bar
+    if docket.human != "blocking":
+        return "deferred"
     if question.direction_ask:
         return "blocking" if len(docket.directions()) > 1 else "deferred"
     if not showable(docket, question):
@@ -61,6 +63,8 @@ def moot(docket: Docket, question: Question) -> bool:
 #: why an ask is kept from the human, as the reports print it
 SETTLED, UNBACKED, MOOT = "settled", "unseconded", "moot"
 HELD_BACK = (SETTLED, UNBACKED, MOOT)
+#: the run has no human: the ask is the report's, not a checkpoint's
+NO_HUMAN = "no_human"
 
 
 def held_back(docket: Docket, question: Question) -> str:
@@ -138,23 +142,26 @@ def second(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Questi
 
 
 def ask_to_stop(docket: Docket, question: Question, agent: str) -> bool:
-    """Record that this seat wants the run to wait on the ask. True when that is new."""
+    """Record that this seat wants the run to wait on the ask. True when that is new.
+    A run that never waits has no stop to declare."""
+    if docket.human != "blocking":
+        return False
     if question.direction_ask or agent not in question.askers or agent in question.blocked_by:
         return False
     question.blocked_by.append(agent)
     return True
 
 
-def stop_for(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Question | None, str]:
-    """Back an ask *and* declare that the run waits for the answer."""
+def stop_for(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Question | None, str, bool]:
+    """Back an ask *and* declare that the run waits for the answer. True when the stop is new:
+    a restated one is not a new stop, and a run that never waits has none to declare."""
     question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
-        return question, reason
+        return question, reason, False
     if agent not in question.askers:
         question.askers.append(agent)
         question.updated_round = round_
-    ask_to_stop(docket, question, agent)
-    return question, ""
+    return question, "", ask_to_stop(docket, question, agent)
 
 
 def answer_by_seat(docket: Docket, *, qid: str, agent: str, text: str, round_: int = 0) -> tuple[Question | None, str]:

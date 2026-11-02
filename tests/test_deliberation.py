@@ -283,12 +283,32 @@ def test_a_declared_stop_needs_the_bar_and_letting_go_releases_it():
     assert escalations.effective_class(docket, docket.questions["H1"]) == "deferred"
 
 
+def test_a_run_that_never_waits_has_no_declared_stops():
+    """`human` is the run's posture: when it never waits, the stop machinery is inert, whatever the seats send."""
+    for human in ("non_blocking", "none"):
+        docket = docket_with(3)
+        docket.human = human
+        question, _ = escalations.raise_question(
+            docket, text="which tenant owns the key?", asker="Agent1", item_id=None, round_=1, blocking=True
+        )
+        escalations.second(docket, qid=question.id, agent="Agent2", round_=1)
+        for agent in docket.roster:
+            escalations.stop_for(docket, qid=question.id, agent=agent, round_=1)
+        assert question.blocked_by == [], f"{human}: the seats declared the stop into the void"
+        assert escalations.effective_class(docket, question) == "deferred", f"{human}: the bar is never reached"
+        assert termination.blocking_questions(docket) == [], f"{human}: nothing holds the run"
+        # the one claim that outranked a closure is not on the table: the closure settles the ask
+        question.item_id = "F1"
+        docket.items["F1"].disposition = AGREED
+        assert escalations.moot(docket, question), f"{human}: the closure is the answer about the item"
+
+
 def test_no_seat_backs_drops_or_answers_the_split_ask():
     """The camps are what the split ask reports, so no seat's `second`, `retract` or `answer_question` reaches it."""
     plan = docket_with(3, mode="plan", items=0)
     split = escalations.raise_direction_ask(plan, text="which order?", context="", options=["a", "b"], round_=1)
     for refuse in (escalations.second, escalations.retract, escalations.stop_for):
-        question, reason = refuse(plan, qid=split.id, agent="Agent1", round_=1)
+        question, reason, *_ = refuse(plan, qid=split.id, agent="Agent1", round_=1)
         assert question is split and reason, "a seat has no claim on the camps' ask"
     answered, reason = escalations.answer_by_seat(plan, qid=split.id, agent="Agent1", text="one tenant, decided")
     assert answered is split and reason and split.peer_answers == {}, "answering the camps from the workspace is no claim either"

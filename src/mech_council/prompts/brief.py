@@ -5,13 +5,16 @@ from . import common
 
 
 class Brief:
-    def __init__(self, *, mode: str, project: str, in_place: bool = False) -> None:
+    def __init__(self, *, mode: str, project: str, in_place: bool = False, human: str = "blocking") -> None:
         self.mode = mode
         self.project = project
         self.in_place = in_place
+        self.human = human
 
     def phase0(self, *, mode: str, goal: str | None, project: str) -> str:
-        return common.phase0_briefing(mode=mode or self.mode, goal=goal, project=project or self.project, in_place=self.in_place)
+        return common.phase0_briefing(
+            mode=mode or self.mode, goal=goal, project=project or self.project, in_place=self.in_place, human=self.human
+        )
 
     def round(self, *, mode: str, goal: str | None, project: str, me: str, docket: str, phase0_summary: str) -> str:
         summary = f"## Your phase 0 summary\n\n{phase0_summary}\n" if phase0_summary else ""
@@ -23,6 +26,7 @@ class Brief:
             docket=docket,
             phase0_summary=summary,
             in_place=self.in_place,
+            human=self.human,
         )
 
     def docket(self, docket, viewer: str) -> str:
@@ -35,19 +39,19 @@ class Brief:
         return common.defense_ask(item_id, challenge, question)
 
     def peer_pass(self, listing: str) -> str:
-        return common.peer_pass_task(listing, self.mode)
+        return common.peer_pass_task(listing, self.mode, self.human)
 
     def merge(self, *, mode: str, listing: str, goal: str | None = None) -> str:
         return common.merge_task(mode or self.mode, listing, goal)
 
     def ask_merge(self, listing: str) -> str:
-        return common.ask_merge_task(listing)
+        return common.ask_merge_task(listing, self.human)
 
     def comparison(self, *, listing: str, goal: str | None = None) -> str:
-        return common.comparison_task(listing, goal)
+        return common.comparison_task(listing, goal, self.human)
 
     def direction(self, *, listing: str, goal: str | None = None) -> str:
-        return common.direction_task(listing, goal)
+        return common.direction_task(listing, goal, self.human)
 
     def watchdog(self, rows: list[dict], *, mode: str = "") -> str:
         return common.watchdog_task(render_digest(rows))

@@ -229,6 +229,8 @@ class Docket:
     backing: dict[str, str] = field(default_factory=dict)  # plan
     #: an ask reaches the human only once a second seat backs it
     seconding: bool = True
+    #: the human's posture: the run waits at the bar, never waits, or never asks
+    human: str = "blocking"
     round: int = 0
     #: the pass the engine had reached, for the report of a run that was cut short
     phase: str = ""

@@ -31,6 +31,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("goal", "g", note="goal"),
     Flag("output", "o", note="where the report is written"),
     Flag("transcripts", "t", choices=("off", "full"), note="transcripts level"),
+    Flag("human", None, choices=("blocking", "non_blocking", "none"), note="the human's posture toward the council's questions"),
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
     Flag("in-place", None, takes_value=False),
@@ -49,6 +50,7 @@ class Args:
     rounds: int | None = None
     goal: str | None = None
     transcripts: str | None = None
+    human: str | None = None
     output: str | None = None
     allow_nested: bool = False
     untrusted: bool = False
@@ -73,6 +75,8 @@ flags:
   -r, --rounds <N>         round limit (whole number, no cap)
   -g, --goal <text>        the goal the seats are briefed with
   -t, --transcripts <lvl>  off (default) or full
+  --human <posture>        blocking (default), non_blocking or none: whether the run waits on the
+                           council's questions, and whether the human answers them at all
   -o, --output <path>      write the report here instead of into the run directory: an existing
                            directory keeps the mode's name (report.md / plan.md), anything else is
                            the file itself.  Nothing else follows it there; run.json still names it

@@ -14,12 +14,15 @@ so.
   recorded beside it. The ids ascend with time, so the lowest one in a group is the earliest.
 """
 
-ASK_MERGE = """\
+
+def ask_merge(human: str) -> str:
+    once = "the human is asked once" if human != "none" else "one ask stands for the decision"
+    return f"""\
 # Fold the asks that want the same decision
 
 You are the council's chair. Below are the open asks seats have raised for the human. Two seats
 often want one decision and word it differently; your job is to say which asks are one ask, so
-the human is asked once and a second seat counting toward it is visible.
+{once} and a second seat counting toward it is visible.
 
 - Conservative beats tidy: when unsure, keep them apart.
 - Asks listed on the same item (`H2 (on F1)`) are the likeliest to be one ask: an item is one
@@ -30,6 +33,7 @@ the human is asked once and a second seat counting toward it is visible.
 - You answer nothing here, and you raise nothing of your own: an ask you cannot trace to a seat
   does not exist.
 """
+
 
 WATCHDOG = """\
 # Watchdog

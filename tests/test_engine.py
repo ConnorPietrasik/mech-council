@@ -24,13 +24,14 @@ def engine(
     max_rounds=4,
     grace_rounds=1,
     seconding=True,
+    human="blocking",
     reply=None,
     answers=None,
     skip=None,
     selections=None,
     off_cycle=None,
 ):
-    docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)], seconding=seconding)
+    docket = Docket(mode=mode, goal="g", roster=[f"Agent{i}" for i in range(1, n + 1)], seconding=seconding, human=human)
     port = ScriptPort(docket, reply, answers=answers or {}, skip=skip or [], selections=selections or {}, off_cycle=off_cycle or {})
     records, emit = events_collector()
     built = Engine(
@@ -38,7 +39,7 @@ def engine(
         port,
         goal="g",
         project="/project",
-        brief=Brief(mode=mode, project="/project"),
+        brief=Brief(mode=mode, project="/project", human=human),
         max_rounds=max_rounds,
         grace_rounds=grace_rounds,
         names=NAMES,
@@ -122,13 +123,40 @@ def test_a_mode_s_extra_briefing_reaches_the_seats_it_was_written_for():
         mode: Brief(mode=mode, project="/project").round(mode=mode, goal="g", project="/project", me="Agent1", docket="", phase0_summary="")
         for mode in ("review", "plan")
     }
-    assert plan_text.EXTRA_BRIEFING.strip() in briefs["plan"], "plan declares prose and never briefs it"
-    assert plan_text.EXTRA_BRIEFING.strip() not in briefs["review"], "a review seat reads planning prose"
+    assert plan_text.extra_briefing("blocking").strip() in briefs["plan"], "plan declares prose and never briefs it"
+    assert plan_text.extra_briefing("blocking").strip() not in briefs["review"], "a review seat reads planning prose"
 
 
 def test_the_merge_schema_stamps_the_ids_the_mode_s_docket_hands_out():
     assert '"canonical": "F1"' in common.merge_task("review", "- F1: the claim", "g")
     assert '"canonical": "T1"' in common.merge_task("plan", "- T1: the claim", "g")
+
+
+def test_every_schema_the_seats_are_shown_is_json_they_can_echo():
+    """Shape hints are spliced on the human's posture, so every fenced block must parse as the seats will echo it."""
+    import json
+
+    for mode in ("review", "plan"):
+        for human in ("blocking", "non_blocking", "none"):
+            brief = Brief(mode=mode, project="/project", human=human)
+            texts = [
+                common.schema_hint(mode, phase=phase, human=human)
+                for phase in ("phase0", "round", "merge", "asks", "defense", "direction", "watchdog")
+            ]
+            texts += [
+                brief.phase0(mode=mode, goal="g", project="/project"),
+                brief.round(mode=mode, goal="g", project="/project", me="Agent1", docket="", phase0_summary=""),
+                brief.peer_pass("### H1 (on F1)\nwhich tenant wins?\nasked by: Agent1"),
+                common.repair_ask(mode, "round", "bad", "{}", human),
+            ]
+            for text in texts:
+                blocks = re.findall(r"```json\n(.*?)```", text, re.S)
+                assert blocks, f"{mode} {human}: a brief with no fenced example"
+                for block in blocks:
+                    try:
+                        json.loads(block)
+                    except json.JSONDecodeError as error:
+                        pytest.fail(f"{mode} {human}: the seats are shown an unparseable schema: {error}\n{block}")
 
 
 def test_no_chair_schema_offers_it_a_question_to_raise():
@@ -1252,6 +1280,31 @@ def test_an_ask_a_peer_answered_cannot_hold_the_run_even_at_the_bar():
     assert question.answer == "", "the human was never asked, so the human has not spoken"
     flips = [(r["prior"], r["effective"]) for r in records if r["event"] == "question_effective_class"]
     assert flips == [("deferred", "blocking"), ("blocking", "deferred")], "the answer that released the run is on the feed too"
+
+
+def test_a_restated_stop_is_not_announced_twice():
+    """A stop is sticky, so the seat that declared it resends `blocking_for`; the event names the stop, not the restatement."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", human_input=[{"question": "which tenant owns the cache key?"}])
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", blocking_for=["H1"], **({"second": ["H1"]} if ask.round == 1 else {}))
+        return stance_all(ask, "disagree" if ask.round == 1 else "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2)
+        return await built.run(), records
+
+    outcome, records = asyncio.run(main())
+    assert outcome == "consensus"
+    stops = [r for r in records if r["event"] == "question_stop_requested"]
+    assert [(r["id"], r["seat"]) for r in stops] == [("H1", "Agent2")], "the second round restates the stop, it does not declare one"
 
 
 def test_a_council_that_settles_on_the_last_pass_does_not_end_needs_human():
@@ -2690,3 +2743,216 @@ def test_the_last_pass_reaches_the_human_because_the_asking_follows_it():
     notes = built.docket.human_notes
     assert notes["N1"].state == RETRACTED and notes["N1"].retract_reason == "config holds it after all"
     assert notes["N2"].shown_round is not None, "and the fresh note is not left in the report alone"
+
+
+# ------------------------------------------------------------ The human's posture
+
+
+def test_the_non_blocking_run_never_waits_but_still_puts_the_asks_in_front_of_the_human():
+    """Two seats declare the stop anyway: the run keeps working, and the ledger says the human was shown the ask and never answered it."""
+    import asyncio
+
+    from mech_council.deliberation.escalations import effective_class
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who in ("Agent1", "Agent2"):
+            return needs_human(ask)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, human="non_blocking")
+        outcome = await built.run()
+        return outcome, built, port
+
+    outcome, built, port = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert outcome == "consensus", "an ask that cannot stop the run does not end the run needs_human"
+    assert question.blocked_by == [] and effective_class(built.docket, question) == "deferred", "the stop was declared into the void"
+    assert question.state == "asked", "nothing answered it, so it is still open"
+    assert "unanswered" in question.markers and "unasked" not in question.markers, "the ledger says the human was shown it"
+    assert port.checkpoints, "the terminal checkpoint still runs"
+    assert all(not c["waiting"] for c in port.checkpoints), "the run never waited"
+    assert all(c["parked_on"] == [] for c in port.checkpoints), "and nothing is parked: a checkpoint that waits on nothing"
+    terminal = [c for c in port.checkpoints if c["terminal"]]
+    assert terminal and terminal[-1]["ask_set"] == ["H1"], "the asks are still shown, at the terminal"
+
+
+def test_the_non_blocking_run_still_hears_answers_typed_while_it_works():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1" and ask.round == 1:
+            return stance_all(ask, "agree", human_input=[{"question": "which tenant owns the cache key?"}])
+        if ask.who == "Agent2" and ask.round == 1:
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, human="non_blocking", off_cycle={"H1": "the tenant is fixed by contract"})
+        outcome = await built.run()
+        return outcome, built, records
+
+    outcome, built, records = asyncio.run(main())
+    question = built.docket.questions["H1"]
+    assert (question.state, question.answer) == ("answered", "the tenant is fixed by contract")
+    assert [r["answered"] for r in records if r["event"] == "human_answer_off_cycle"] == [["H1"]]
+    assert outcome == "consensus", "the answer took the question off the table"
+
+
+def test_the_non_blocking_terminal_ask_is_asked_on_the_way_out_never_parked():
+    """The ceiling in non_blocking is not a stop: the asks are shown, nothing waits, and the run ends on its own reading."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["what is the retention policy?"],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2":
+            return stance_all(ask, "disagree")
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, human="non_blocking", max_rounds=1, seconding=False)
+        outcome = await built.run()
+        return outcome, built, port
+
+    outcome, built, port = asyncio.run(main())
+    assert outcome == "round_limit_reached"
+    question = built.docket.questions["H1"]
+    assert "unanswered" in question.markers and "unasked" not in question.markers, "shown at the ceiling, never parked"
+    assert all(not c["waiting"] for c in port.checkpoints)
+
+
+def test_the_none_run_asks_nothing_and_marks_the_asks_for_the_report():
+    """No human on the run: the asks are never shown, notes still are, and the ledger says `no_human`, never `unasked`."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["which tenant owns the key?"] if ask.who == "Agent1" else [],
+                notes=["the key lives in env"] if ask.who == "Agent1" else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2" and ask.round == 1:
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, human="none")
+        outcome = await built.run()
+        return outcome, built, port, records
+
+    outcome, built, port, _records = asyncio.run(main())
+    assert outcome == "consensus"
+    question = built.docket.questions["H1"]
+    assert question.state == "asked" and "no_human" in question.markers, "the ask is recorded for the report"
+    assert "unasked" not in question.markers, "`unasked` is for a human who was never shown it"
+    assert all(c["ask_set"] == [] and c["listing"] == [] for c in port.checkpoints), "nothing is ever put in front of the human"
+    assert any(c["notes"] == ["N1:note"] for c in port.checkpoints), "the notes are still shown"
+
+
+def test_the_none_run_marks_every_ask_it_never_showed_even_without_a_terminal():
+    """A mid-run showable ask is already the report's, not a future checkpoint's."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent1":
+            return stance_all(ask, "agree", human_input=[{"question": "which tenant owns the cache key?"}], second=[])
+        if ask.who == "Agent2":
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, human="none", max_rounds=2)
+        await built.run()
+        return built
+
+    built = asyncio.run(main())
+    assert "no_human" in built.docket.questions["H1"].markers
+
+
+def test_the_new_postures_teach_no_stop_machinery_and_the_blocking_one_does():
+    """When the run cannot wait, the seats are never handed a stop button — and never told one exists."""
+    briefs = {human: Brief(mode="review", project="/project", human=human) for human in ("blocking", "non_blocking", "none")}
+    for human, brief in briefs.items():
+        texts = (
+            brief.phase0(mode="review", goal="g", project="/project"),
+            brief.round(mode="review", goal="g", project="/project", me="Agent1", docket="", phase0_summary=""),
+            brief.peer_pass("### H1 (on F1)\nwhich tenant wins?\nasked by: Agent1"),
+        )
+        joined = "\n".join(texts)
+        if human == "blocking":
+            assert "blocking_for" in joined and "declared stop" in joined, "the default still teaches the stop"
+        else:
+            for needle in ("blocking_for", "declared stop", "`blocking`"):
+                assert needle not in joined, f"{human} teaches {needle!r}"
+        # the posture itself is the contract each run states
+        assert ("No human is on this run" in joined) == (human == "none")
+        assert ("The run never stops for one" in joined) == (human == "non_blocking")
+
+
+def test_the_non_blocking_plan_split_is_asked_and_the_run_ends_on_its_own_budget():
+    """A split that would end the run needs_human instead goes to the human between rounds; no answer, no convergence: the limit ends it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.kind == "direction":
+            return payload(question="which plan do you want?", context="two seats, two orders of work")
+        return split_council()(ask)
+
+    async def main():
+        built, port, records = engine(reply=reply, mode="plan", max_rounds=6, human="non_blocking")
+        outcome = await built.run()
+        return outcome, built, port
+
+    outcome, built, port = asyncio.run(main())
+    ask = built.docket.direction_ask()
+    assert ask is not None and ask.state == "asked"
+    assert "unanswered" in ask.markers and "unasked" not in ask.markers, "the split was shown, and never answered"
+    assert all(not c["waiting"] for c in port.checkpoints), "the split does not hold the run"
+    assert outcome in ("round_limit_reached", "stalemate"), outcome
+
+
+def test_the_none_run_ends_on_open_asks_without_a_note_to_a_human_that_is_not_there():
+    """`no_human` is not a held-back reason: the terminal note names only the asks the council actually kept back."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[{"claim": "a bug"}] if ask.who == "Agent1" else [],
+                open_questions=["which tenant owns the key?"] if ask.who == "Agent1" else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.who == "Agent2" and ask.round == 1:
+            return stance_all(ask, "agree", second=["H1"])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(reply=reply, human="none")
+        outcome = await built.run()
+        return outcome, records
+
+    outcome, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert [r for r in records if r["event"] == "console_note"] == [], "the held-back note names a human that is not on the run"

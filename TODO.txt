@@ -1,3 +1,1 @@
-A no-questions mode so that the agents know the human won't respond to questions instead of all being declined
-A non-blocking mode so that it can ask questions and I can answer them if I feel like it
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever
