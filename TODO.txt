@@ -1,2 +1,1 @@
-mech-council init to put a basic council using default pi stuff in home
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever

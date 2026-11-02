@@ -76,6 +76,7 @@ something you convene.
 
 positional arguments:
   <council>          a [councils.<name>] to convene; omit it when the file holds exactly one
+  init               write the starter user council.toml — it convenes no council; `mech-council init --help`
 
 flags:
   -p, --project <path>     project directory (default: the invoking cwd)
@@ -273,6 +274,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv[:1] == ["--setup-seat"]:
         return launcher.setup_seat_main(argv[1:])
+    if argv[:1] == ["init"]:
+        from . import init_config
+
+        return init_config.main(argv[1:])
     from . import startup
 
     try:

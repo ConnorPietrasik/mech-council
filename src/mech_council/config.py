@@ -415,6 +415,8 @@ def _read(path: str, *, require_councils: bool) -> ConfigFile:
     for key, table in councils_raw.items():
         if not str(key).strip():
             raise ConfigError(f"{path}: a council name (its table key) must not be empty")
+        if str(key) == "init":
+            raise ConfigError(f"{path}: the council name 'init' is reserved for the mech-council init subcommand")
         if not isinstance(table, dict):
             raise ConfigError(f"council {key!r} must be a table")
     return ConfigFile(path=path, defaults=defaults, councils=councils_raw, paths=[path], raw={path: raw})

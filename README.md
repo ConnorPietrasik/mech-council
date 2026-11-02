@@ -28,9 +28,24 @@ mech-council --help
 
 ## Quick start
 
-Put the smallest council in `<project>/council.toml` — or once in `~/.config/council/council.toml`, for
-every project. Two seats and a chair; `provider` and `model` are optional, and without them a seat takes
-whatever pi is configured with.
+```sh
+mech-council init              # writes your user council.toml: $COUNCIL_CONFIG, else $XDG_CONFIG_HOME/council/council.toml,
+                               # else ~/.config/council/council.toml — one config that serves every project
+```
+
+The starter is a `review` and a `plan` council, each a chair and four seats. No seat states a
+`provider` or a `model`, so every seat takes whatever pi is configured with — state them per seat
+to point one somewhere else. `init` refuses to replace a file that is already there;
+`mech-council init --overwrite` replaces it.
+
+```sh
+mech-council review            # from any project; or: mech-council -g "focus on the parser" review
+mech-council plan
+```
+
+Prefer a council of your own? Put the smallest one in `<project>/council.toml` — two seats and a
+chair; `provider` and `model` are optional, and without them a seat takes whatever pi is configured
+with.
 
 ```toml
 [councils.review]
@@ -207,7 +222,9 @@ the flags.
 ### Which files are read
 
 Two files: the user's — `$COUNCIL_CONFIG`, else `$XDG_CONFIG_HOME/council/council.toml`, else
-`~/.config/council/council.toml` — and `<project>/council.toml`. The project's file replaces any
+`~/.config/council/council.toml` — and `<project>/council.toml`. `mech-council init` writes the
+user's file, refusing to replace one that is already there (`--overwrite` replaces it). The
+project's file replaces any
 council of the same name and patches `[defaults]` key by key, and `extends` reaches a parent stated in
 either, so a project's file can inherit the roster your own home file keeps
 ([`extends`](#extends-one-roster-several-councils)).
