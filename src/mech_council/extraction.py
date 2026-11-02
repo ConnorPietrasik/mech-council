@@ -368,17 +368,12 @@ def parse_verdict(
     *,
     mode: str,
     me: str,
-    extra_synonyms: dict | None = None,
     known_items: set[str] | None = None,
     closed_items: set[str] | None = None,
 ) -> Extraction:
     data, error = find_json(payload, VERDICT_FIELDS)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
-    if extra_synonyms:
-        for key, words in extra_synonyms.items():
-            SYNONYMS.setdefault(key, ())
-            SYNONYMS[key] = tuple(dict.fromkeys(tuple(SYNONYMS[key]) + tuple(words)))
     out: Extraction = Extraction(data={})
     known = known_items or set()
     closed = closed_items or set()
@@ -640,10 +635,10 @@ def _revised_plan(value: object) -> dict | None:
                         "exceptions": _strings(pick(stage, "exceptions")),
                     }
                 )
-    return {"name": text_of(pick(value, "name")), "text": text_of(pick(value, "claim")) or text_of(value)[:0], "stages": clean}
+    return {"name": text_of(pick(value, "name")), "text": text_of(pick(value, "claim", extra=("text",))), "stages": clean}
 
 
-def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None) -> Extraction:
+def parse_phase0(payload: str, *, mode: str) -> Extraction:
     data, error = find_json(payload, PHASE0_FIELDS)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])

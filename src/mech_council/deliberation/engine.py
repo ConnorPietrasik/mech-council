@@ -35,7 +35,7 @@ from .escalations import (
     stop_for,
 )
 from .notes import mark_shown, raise_note, retract_note, unshown
-from .stalemate import signature
+from .stalemate import signature, stalemate
 from .state import (
     ABSTAIN,
     ANSWERED,
@@ -375,7 +375,7 @@ class Engine:
         self._closure(round_)
         self._summarize(round_)
         current = signature(self.docket)
-        self._stale = current == self.previous_signature and round_ > 1
+        self._stale = stalemate(self.docket, current, self.previous_signature, False)
         self.previous_signature = current
 
     def _apply_verdict(self, agent: str, text: str, round_: int) -> None:
@@ -940,7 +940,7 @@ class Engine:
         await self._listen(round_)
         await self._direction_ask(round_)
         provisional, _ = evaluate(self.docket)
-        stale = getattr(self, "_stale", False) and not self.checkpoint_moved
+        stale = self._stale and not self.checkpoint_moved
         terminal = provisional != GO or stale or round_ >= self._ceiling
         if terminal:
             settled = signature(self.docket)
@@ -949,7 +949,7 @@ class Engine:
                 self.previous_signature = moved
                 stale = False
             provisional, _ = evaluate(self.docket)
-        outcome = await self._checkpoint(round_=round_, terminal=terminal, provisional=provisional, stale=stale)
+        outcome = await self._checkpoint(round_=round_, terminal=terminal, provisional=provisional)
         if outcome is not None:
             return outcome
         if self.checkpoint_moved:
@@ -1097,7 +1097,7 @@ class Engine:
                 never_asked.append(question.id)
         return never_asked
 
-    async def _checkpoint(self, round_: int, *, terminal: bool, provisional: str = "", stale: bool = False):
+    async def _checkpoint(self, round_: int, *, terminal: bool, provisional: str = ""):
         from .escalations import effective_class
         from .termination import unsettled_questions
 
@@ -1332,8 +1332,9 @@ def _stage_states(artifact: dict) -> list[str]:
 
 
 def _partial(docket: Docket, agent: str, round_: int) -> bool:
-    answered = sum(1 for item_id in [i for i in docket.order] if (r := docket.stance(item_id, agent)) and r.round == round_)
-    return 0 < answered < len(docket.open_items())
+    open_ids = [i for i in docket.order if not docket.items[i].closed]
+    answered = sum(1 for i in open_ids if (r := docket.stance(i, agent)) and r.round == round_)
+    return 0 < answered < len(open_ids)
 
 
 def _answers_challenge(defense: str, question: str) -> bool:

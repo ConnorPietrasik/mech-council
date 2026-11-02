@@ -93,8 +93,9 @@ def round_schema(human: str) -> str:
   "new_items": [{"claim": "the decision", "detail": "the answers it admits",
                  "evidence": "…"}],
   "backing": "Agent2",
-  "revised_plan": {"name": "my-label", "stages": [{"state": "…", "gate": "…",
-                                                  "scope": "…", "exceptions": []}]},
+  "revised_plan": {"name": "my-label", "text": "the revised plan, in a few lines",
+                   "stages": [{"state": "…", "gate": "…",
+                               "scope": "…", "exceptions": []}]},
   "questions": [{"to": "Agent2", "question": "…"}],
   "answers": [{"to": "Agent3", "question": "Q1", "answer": "…"}],
   "human_input": [{"question": "the decision, one line", "item": "T1"""

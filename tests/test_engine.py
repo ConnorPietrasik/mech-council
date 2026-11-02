@@ -7,7 +7,7 @@ import re
 import pytest
 
 from mech_council.deliberation.engine import Abort, Engine
-from mech_council.deliberation.state import DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket
+from mech_council.deliberation.state import AGREE, AGREED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
 from mech_council.prompts.brief import Brief
@@ -1716,6 +1716,19 @@ def test_a_deliberate_gap_gets_one_ask_not_four():
 
     port = asyncio.run(main())
     assert port.count(who="Agent2", phase="gap") == 1, "deliberate: one ask, then declined"
+
+
+def test_a_stance_on_a_closed_item_does_not_make_the_verdict_whole():
+    """A seat that re-voices a settled item and leaves one of two open items silent is still partial: mechanical, not deliberate."""
+    from mech_council.deliberation.engine import _partial
+
+    docket = Docket(mode="review", roster=["Agent1", "Agent2"])
+    docket.add_item(Item(id="F1", claim="open one", raised_by=["Agent1"]))
+    docket.add_item(Item(id="F2", claim="open two", raised_by=["Agent1"]))
+    docket.add_item(Item(id="F3", claim="settled", raised_by=["Agent1"], disposition=AGREED, closed_round=1))
+    docket.stances["F2"]["Agent1"] = Stance(stance=AGREE, round=2)
+    docket.stances["F3"]["Agent1"] = Stance(stance=AGREE, round=2)
+    assert _partial(docket, "Agent1", 2), "a re-stance of a closed item is not an answer to an open one"
 
 
 def gap_items(text: str) -> list[str]:

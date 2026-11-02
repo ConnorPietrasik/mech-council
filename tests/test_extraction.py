@@ -267,6 +267,19 @@ def test_backing_that_maps_to_nothing_invalidates_only_backing():
         assert map_backing(word, "Agent1") == (None, True), word
 
 
+def test_a_revised_plan_carries_its_text_whatever_the_seat_named_the_key():
+    for key in ("text", "claim"):
+        out = parse_verdict(
+            verdict(revised_plan={"name": "gated", key: "draw the gate first, then the ship"}),
+            mode="plan",
+            me="Agent1",
+            known_items=set(KNOWN),
+        )
+        assert out.data["revised_plan"]["text"] == "draw the gate first, then the ship", key
+    out = parse_verdict(verdict(revised_plan={"name": "gated"}), mode="plan", me="Agent1", known_items=set(KNOWN))
+    assert out.data["revised_plan"]["text"] == ""
+
+
 # --------------------------------------------------------------------------- human_input, Q&A
 
 

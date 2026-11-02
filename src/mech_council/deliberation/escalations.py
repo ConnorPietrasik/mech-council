@@ -528,7 +528,7 @@ def record_stance(
         new = Escalation(item_id=item_id, asker=agent, raised_round=round_)
         docket.escalations[(item_id, agent)] = new
         item = docket.items.get(item_id)
-        text = (note or "").strip() or (f"{item.claim} — is a human decision needed here?" if item else ").")
+        text = (note or "").strip() or (f"{item.claim} — is a human decision needed here?" if item else "is a human decision needed here?")
         question, _ = _raise_or_merge(
             docket, text=text, asker=agent, item_id=item_id, round_=round_, context=(item.claim if item else ""), options=None, hold=True
         )

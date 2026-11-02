@@ -1,5 +1,5 @@
-from .base import REGISTRY, BaseAdapter, adapter_for, modes, register
+from .base import REGISTRY, BaseAdapter, adapter_for, register
 from .plan import PLAN
 from .review import REVIEW
 
-__all__ = ["PLAN", "REGISTRY", "REVIEW", "BaseAdapter", "adapter_for", "modes", "register"]
+__all__ = ["PLAN", "REGISTRY", "REVIEW", "BaseAdapter", "adapter_for", "register"]
