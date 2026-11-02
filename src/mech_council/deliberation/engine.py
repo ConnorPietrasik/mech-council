@@ -872,10 +872,8 @@ class Engine:
                 source = self.docket.items.pop(duplicate)
                 self.docket.order.remove(duplicate)
                 self.docket.stances.pop(duplicate, None)
-                for agent in source.raised_by:
-                    if agent not in target.raised_by:
-                        target.raised_by.append(agent)
-                    if agent not in target.also_reported_by:
+                for agent in source.raised_by + source.also_reported_by:
+                    if agent not in target.raised_by and agent not in target.also_reported_by:
                         target.also_reported_by.append(agent)
                 for escalation_key in [k for k in self.docket.escalations if k[0] == duplicate]:
                     del self.docket.escalations[escalation_key]

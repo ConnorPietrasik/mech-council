@@ -265,6 +265,48 @@ def test_a_round_merge_is_shown_the_open_docket_so_a_re_reported_claim_folds_onc
     assert "F1: the cache ignores tenants" in listing.split("Already on the docket")[1], "what to fold into is listed too"
 
 
+def test_a_folded_duplicate_is_a_co_reporter_not_a_co_claimant():
+    """Folding a duplicate credits its raiser as a co-reporter; the claim stays the original raiser's."""
+    import asyncio
+
+    from mech_council.deliberation.state import Item
+
+    async def main():
+        built, _port, _records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0, raised_by=["Agent1"]))
+        built.docket.add_item(Item(id="F2", claim="the cache ignores tenants", severity="major", opened_round=1, raised_by=["Agent2"]))
+        await built._merge_new_items(round_=1)
+        return built
+
+    item = asyncio.run(main()).docket.items["F1"]
+    assert item.raised_by == ["Agent1"], "the fold widened the claim to the duplicate's raiser"
+    assert item.also_reported_by == ["Agent2"], "the duplicate's raiser is only a co-reporter"
+
+
+def test_a_fold_of_an_already_folded_item_keeps_its_earlier_co_reporters():
+    """A fold carries the duplicate's own co-reporters, so a second fold loses nobody."""
+    import asyncio
+
+    from mech_council.deliberation.state import Item
+
+    def reply(ask):
+        if ask.round == 0:
+            return payload(groups=[{"canonical": "F2", "duplicates": ["F3"]}])
+        return payload(groups=[{"canonical": "F1", "duplicates": ["F2", "F4"]}])
+
+    async def main():
+        built, _port, _records = engine(reply=reply)
+        for item_id, round_, raiser in (("F1", 0, "Agent1"), ("F2", 0, "Agent2"), ("F3", 0, "Agent3"), ("F4", 1, "Agent4")):
+            built.docket.add_item(Item(id=item_id, claim="the same claim", severity="major", opened_round=round_, raised_by=[raiser]))
+        await built._merge_pass(round_=0, ids=["F1", "F2", "F3"])
+        await built._merge_pass(round_=1, ids=["F1", "F2", "F4"], new=["F4"])
+        return built
+
+    item = asyncio.run(main()).docket.items["F1"]
+    assert item.raised_by == ["Agent1"], "a fold widened the claim to a duplicate's raiser"
+    assert item.also_reported_by == ["Agent2", "Agent3", "Agent4"], "the second fold lost the first fold's co-reporter"
+
+
 def test_a_merge_of_an_id_the_chair_was_never_shown_retires_nothing():
     """The listing is the chair's whole scope: an id outside it retires nothing, on either side of the group."""
     import asyncio

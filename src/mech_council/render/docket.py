@@ -20,7 +20,7 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
         out.append("(none)")
     for item in open_items:
         state = derive(docket, item.id)
-        yours = " [yours]" if viewer in item.raised_by else ""
+        yours = " [yours]" if viewer in item.raised_by or viewer in item.also_reported_by else ""
         out.append(f"### {item.id} [{state}]{yours} {item.claim}")
         if item.detail:
             out.append(f"    {item.detail}")

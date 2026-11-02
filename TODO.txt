@@ -1,3 +1,2 @@
-Fix the "Raised By" and "also reported by" having the same people aside from the first. Probably just delete the "also reported by" section entirely
 A way to message agents?
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever

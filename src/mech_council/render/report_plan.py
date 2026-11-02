@@ -193,7 +193,10 @@ def _decision_points(docket: Docket, context: ReportContext) -> list[str]:
         out.append(f"### {item.id} `[{state}]` {item.claim}")
         if item.closed:
             out.append(f"- closed {item.disposition} in round {item.closed_round}")
-        out.append(f"- raised by: {_names(item.raised_by, context)}")
+        out.append(
+            f"- raised by: {_names(item.raised_by, context)}"
+            + (f" (also reported by {_names(item.also_reported_by, context)})" if item.also_reported_by else "")
+        )
         if item.detail.strip():  # an empty detail must not print a stray line
             out += [f"  {line}" for line in wrap(item.detail)]
         for agent in docket.roster:
