@@ -29,7 +29,7 @@ def setup_member_namespace(*, project: str, runs_dir: str, slot_dir: str, mask_t
         step = f"mount --bind {scratch}"
         m.rbind(scratch, f"{view}/{SCRATCH_NAME}")
         step = f"mount --bind {view} {project}"
-        m.rbind(view, project)  # the view is mounted at the project path
+        m.rbind(view, project)
         step = f"mask {runs_dir}"
         for path, read_only in ((f"{runs_dir}/sandbox", True), (runs_dir, True)):
             m.tmpfs(path, size_mib=m.MASK_MIB, read_only=read_only)
@@ -48,7 +48,7 @@ def setup_member_namespace(*, project: str, runs_dir: str, slot_dir: str, mask_t
 
 
 def _labelled(step: str, syscall: str) -> str:
-    """Which step failed, for the launcher's report: the syscall text alone would be a bare `mount(2)` repr."""
+    """Which step failed, for the launcher's report."""
     return syscall if step.partition("(")[0] == syscall.partition("(")[0] else f"{step}: {syscall}"
 
 

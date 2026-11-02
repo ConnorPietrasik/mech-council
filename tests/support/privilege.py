@@ -1,4 +1,4 @@
-"""The one question about the host the sandbox family's `/proc` case has to ask before it can judge anything.
+"""The one question about the host the `/proc` case asks before asserting.
 
 Clearing dumpability re-owns `/proc/<pid>/{environ,fd,cwd,exe,mem}` to uid 0, and the check that hides them is a
 comparison against uid 0 — so it holds only while the run's uid is not the uid a member's mapped root resolves to.

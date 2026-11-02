@@ -286,9 +286,9 @@ def test_a_pid_in_another_namespace_is_left_alone(tmp_path):
 
 
 def test_in_place_names_no_namespace_and_therefore_sweeps_nothing(tmp_path):
-    """`own_namespace=None` is in place.  The scope it would have keyed on is the orchestrator's own namespace,
-    which holds every process of the session — so a stray sharing it, the very thing the sweep exists to kill,
-    has to survive."""
+    """`own_namespace=None` is in place: its scope would be the orchestrator's own namespace, which holds every
+    process of the session, so a stray sharing it survives the sweep.
+    """
     marker = str(tmp_path / "pid")
     stray = spawn_stray(marker, keep_alive=True)
     try:

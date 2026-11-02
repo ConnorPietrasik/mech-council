@@ -91,7 +91,7 @@ def establish(
     in_place: bool = False,
 ) -> Seat:
     root = sandbox_dir or f"{runs_dir}/sandbox"
-    if scratch_cwd:  # a stray relative write lands here, not in the user's tree
+    if scratch_cwd:
         os.chdir(scratch_cwd)
     if in_place:
         box = InPlace(project=project, runs_dir=runs_dir, sandbox_dir=root, sandbox_mib=sandbox_mib)

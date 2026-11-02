@@ -13,7 +13,7 @@ from .pi_rpc import Answer, ChildGone, ProtocolError
 from .prompts import common
 
 REPAIR_ASKS = 2
-#: All members drop their queues at once, under one budget: a wedged one costs the exit one timeout, not N.
+#: All members drop their queues at once, under one budget.
 ABORT_ALL_BUDGET_S = 10.0
 
 
@@ -54,17 +54,17 @@ class Outcome:
 
 
 def needs_repair(parsed: object) -> bool:
-    """Anything the seat should hear back about: an unreadable reply, or a field the extraction would rather not guess."""
+    """An unreadable reply, or a field the extraction would rather not guess."""
     return _unreadable(parsed) or bool(getattr(parsed, "refused", None))
 
 
 def _unreadable(parsed: object) -> bool:
-    """The reply's shape is wrong, not one field of it: only this forfeits the whole message."""
+    """The whole reply's shape is wrong: the only case that forfeits the message."""
     return bool(getattr(parsed, "invalid", False) or getattr(parsed, "errors", None))
 
 
 def _problems(parsed: object) -> list[str]:
-    """What the message got wrong, as the sentences the seat is owed."""
+    """What the message got wrong, as sentences for the seat."""
     return list(getattr(parsed, "problems", None) or getattr(parsed, "errors", None) or [])
 
 
@@ -217,7 +217,6 @@ class Lanes:
                 )
                 self.console.say(f"{who}: message rejected after {outcome.repairs} repair re-ask(s)")
                 return outcome
-            # the shape stood after every re-ask it was owed: keep the seat's work, refuse the fields it worded as prose by name
             for entry in getattr(parsed, "refused", []):
                 self.console.event("verdict_field_refused", member=label, **round_field(round_), phase=phase, **entry)
             self.console.say(f"{who}: kept the answer, refused: {'; '.join(_problems(parsed))}{round_note(round_)}")

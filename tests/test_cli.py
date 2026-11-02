@@ -272,8 +272,7 @@ MACOS = "import sys\nsys.platform = 'darwin'\nfrom mech_council.cli import main\
 
 
 def elsewhere(child_env, cwd, args, *, timeout=60, env=None, harness=MACOS):
-    """The real entry point under a replaced world: `harness` patches what it patches before `main` runs, so the
-    whole child lives inside it.  The members it spawns are separate processes, which never look."""
+    """The real entry point under a replaced world: `harness` patches what it patches before `main` runs."""
     return subprocess.run(
         [sys.executable, "-c", harness, *args],
         check=False,
@@ -292,8 +291,7 @@ def manifest_of(console: str) -> dict:
 
 
 def test_a_host_with_no_namespaces_convenes_in_place(child_env, project):
-    """Off Linux the council runs instead of refusing, in a sentence that names the cost — and nothing said
-    afterwards claims an overlay, a cap or a namespace that was never set up."""
+    """Off Linux the council runs instead of refusing and names the cost; nothing after claims an overlay, cap or namespace."""
     result = elsewhere(child_env, project, ["review"], timeout=150)
     console = result.stdout + result.stderr
     assert result.returncode == 0, console
@@ -318,8 +316,7 @@ REFUSE_UNSHARE = (
 
 
 def test_a_linux_kernel_that_refuses_unshare_names_the_way_out(child_env, project):
-    """Linux never drops the sandbox on its own: a kernel that will not cooperate is a refusal that says what to
-    pass to run without one — the one place where `--in-place` must not be chosen for the operator."""
+    """A kernel that refuses `unshare` is a refusal that names the flag to run without the sandbox."""
     result = elsewhere(child_env, project, ["review"], env=runs_env(project), harness=REFUSE_UNSHARE)
     console = result.stdout + result.stderr
     assert result.returncode == 1, console
@@ -356,7 +353,7 @@ name = "Senior"
 
 
 def one_council(goal: str, pi: str | None = FAKE_PI) -> str:
-    """A convenable `review` council that reports its own goal, in either layer's voice."""
+    """A convenable `review` council that reports its own goal, from either layer."""
     return ONE_COUNCIL.format(goal=goal, knob=f'pi_cli = "{pi}"\n' if pi else "")
 
 
@@ -450,7 +447,7 @@ def home_layer(ground: str) -> str:
 
 
 def test_the_home_default_convenes_a_project_that_has_none(cli, ground):
-    """The README's promise, with nothing set but `$HOME` — the case no `COUNCIL_CONFIG` or `XDG_CONFIG_HOME` test reaches."""
+    """The README's promise, with nothing set but `$HOME`."""
     home = home_layer(ground)
     result = cli(["review"], cwd=bare(ground), env={"HOME": home}, extra_scrub=("XDG_CONFIG_HOME", "COUNCIL_CONFIG"), timeout=150)
     assert result.returncode == 0, result.console
@@ -459,8 +456,7 @@ def test_the_home_default_convenes_a_project_that_has_none(cli, ground):
 
 
 def test_an_invalid_xdg_config_home_is_ignored_and_the_home_default_still_convenes(cli, ground):
-    """`XDG_CONFIG_HOME=.config` is invalid, so it is ignored rather than fatal: the home default stays the user layer
-    instead of the run refusing over a project file that was never the one at fault."""
+    """`XDG_CONFIG_HOME=.config` is invalid: it is ignored, not fatal, and the home default stays the user layer."""
     home = home_layer(ground)
     result = cli(["review"], cwd=bare(ground), env={"HOME": home, "XDG_CONFIG_HOME": ".config"}, timeout=150)
     assert result.returncode == 0, result.console
@@ -598,7 +594,7 @@ PLAN_SCRIPT = json.dumps(
 
 
 def test_a_plan_council_writes_plan_md_and_says_plainly_when_no_direction_was_chosen(cli, project):
-    """plan mode offline: the same protocol, over plan-mode data — and an unsettled direction is said, not glossed."""
+    """plan mode offline: the same protocol over plan-mode data; an unsettled direction is reported."""
     env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
     result = cli(["plan"], cwd=project, env=env, timeout=150)
     assert result.returncode == 0, result.console

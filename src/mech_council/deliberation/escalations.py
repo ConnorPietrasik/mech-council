@@ -19,11 +19,10 @@ from .state import (
 
 
 def effective_class(docket: Docket, question: Question) -> str:
-    # Nothing stops the run but a declared stop, and a declared stop needs a majority behind it.
+    # blocking means the run actually waits: a split needs a second direction, a stop needs the bar
     if question.direction_ask:
         return "blocking" if len(docket.directions()) > 1 else "deferred"
     if not showable(docket, question):
-        # an ask the human is never shown cannot be the thing the run is waiting on
         return "deferred"
     return "blocking" if len(stop_holders(docket, question)) >= docket.bar() else "deferred"
 
@@ -34,9 +33,8 @@ def stop_holders(docket: Docket, question: Question) -> list[str]:
 
 
 def showable(docket: Docket, question: Question) -> bool:
-    """Whether an ask has earned the human's keystrokes: the decision it asks about is still open, a second seat
-    backs it, and no peer answer holds it back unless a seat that raised the ask itself insisted that answer was not
-    enough.
+    """Whether an ask is shown to the human: the decision it asks about is still open, a second seat
+    backs it, and no peer answer holds it back unless a seat that raised the ask itself insisted.
     """
     if moot(docket, question):
         return False
@@ -48,27 +46,19 @@ def showable(docket: Docket, question: Question) -> bool:
 
 
 def settlements(question: Question) -> dict[str, str]:
-    """The peer answers that hold an ask back: a seat asking the thing is no answer to it.
-
-    A fold makes the seat that answered one of the asks it absorbs an asker of the survivor; the answer stays on the
-    record either way, it only stops being a reason to keep the ask from the human.
-    """
+    """The peer answers that hold an ask back; the asker's own is not one."""
     return {seat: answer for seat, answer in question.peer_answers.items() if seat not in question.askers}
 
 
 def moot(docket: Docket, question: Question) -> bool:
-    """Whether the council has settled the very item this ask asks about — unless seats are declared to stop for it.
-
-    The closure is the council's answer, so the ask is moot; a declared stop at the bar is the one claim that
-    outranks a closure, because a majority saying the run cannot go on without the human is not settled by a vote.
-    """
+    """Whether the council has settled the very item this ask asks about — unless seats are declared to stop for it."""
     if question.item_id is None or question.direction_ask:
         return False
     item = docket.items.get(question.item_id)
     return item is not None and item.closed and len(stop_holders(docket, question)) < docket.bar()
 
 
-#: why an ask is kept from the human, in the word the ledger and the reports print
+#: why an ask is kept from the human, as the reports print it
 SETTLED, UNBACKED, MOOT = "settled", "unseconded", "moot"
 HELD_BACK = (SETTLED, UNBACKED, MOOT)
 
@@ -118,7 +108,7 @@ def _open_ask(docket: Docket, qid: str, agent: str) -> tuple[Question | None, st
 
 
 def item_ask(docket: Docket, item_id: str) -> Question | None:
-    """The open ask that already stands for this item, if one does: one item, one decision, one ask."""
+    """The open ask that already stands for this item, if one does."""
     for question in docket.questions_for_item(item_id):
         if question.state == ASKED and not question.direction_ask:
             return question
@@ -131,7 +121,7 @@ def _their_words(question: Question, asker: str) -> bool:
 
 
 def _note_wording(question: Question, asker: str, text: str) -> None:
-    """Record the words a seat asked with when another seat's wording is the one the human reads."""
+    """Record a seat's own wording when the human reads a peer's."""
     question.also_asked.setdefault(asker, text)
 
 
@@ -182,10 +172,8 @@ def answer_by_seat(docket: Docket, *, qid: str, agent: str, text: str, round_: i
 
 
 def insist(docket: Docket, *, qid: str, agent: str, round_: int, seen: int) -> tuple[Question | None, str]:
-    """Say a peer's answer was not enough, for a seat that raised the ask.
-
-    `seen` is the latest round of peer answers this pass shows the seat: an insistence rebuts those and nothing later,
-    so an answer that landed in the round a verdict was written in is not one that verdict can have read.
+    """Say a peer's answer was not enough, for a seat that raised the ask. `seen` is the latest round of peer
+    answers this pass shows the seat; an insistence rebuts only those.
     """
     question, reason = _open_ask(docket, qid, agent)
     if question is None or reason:
@@ -203,7 +191,7 @@ def insist(docket: Docket, *, qid: str, agent: str, round_: int, seen: int) -> t
 
 
 def retract(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Question | None, str]:
-    """Drop one asker: the ask survives until the last one walks away. An answered one goes moot, never void."""
+    """Drop one asker: the ask survives until the last asker walks away. An answered one goes moot, never void."""
     question = docket.questions.get(qid)
     if question is None:
         return None, _other_ledger(docket, qid, agent) or "no open question with that id"
@@ -235,9 +223,8 @@ def _foldable(question: Question | None) -> TypeGuard[Question]:
 
 def merge_asks(docket: Docket, *, groups: list[dict], round_: int) -> tuple[list[tuple[str, dict]], str]:
     """Fold the asks the chair says are one ask: askers, declared stops, peer answers and menus all move.
-
-    The ask raised first survives whichever one the chair names. A group naming one ask twice, or one ask in two
-    groups, is a plan that says nothing at all: nothing folds.
+    The ask raised first survives whichever one the chair names; a group naming one ask twice, or one ask in two
+    groups, folds nothing.
     """
     claimed: set[str] = set()
     usable: list[tuple[Question, list[Question], str]] = []
@@ -269,7 +256,7 @@ def merge_asks(docket: Docket, *, groups: list[dict], round_: int) -> tuple[list
 
 
 def _fold_ask(docket: Docket, canonical: Question, duplicate: Question, round_: int) -> None:
-    """One ask absorbs another: the seats behind it now stand behind the one that survives."""
+    """One ask absorbs another: its askers back the survivor."""
     for agent in duplicate.askers:
         if agent not in canonical.askers:
             canonical.askers.append(agent)
@@ -340,7 +327,7 @@ def _raise_or_merge(
     for qid in docket.question_order:
         existing = docket.questions[qid]
         if existing.state != ASKED:
-            # Only an open question is the same question: filing onto an answered entry would hide the new ask.
+            # an answered entry is not the same question: joining it would hide the new ask
             continue
         if existing is standing or existing.key == normalize_text(text):
             return _join_ask(existing, asker=asker, text=text, item_id=item_id, options=options, round_=round_)
@@ -364,7 +351,7 @@ def _raise_or_merge(
 def _join_ask(
     existing: Question, *, asker: str, text: str, item_id: str | None, options: list[str] | None, round_: int
 ) -> tuple[Question, bool]:
-    """Stand behind an ask that is already open: its words survive, and a seat asking fresh words raised it too."""
+    """Back an ask that is already open: its words survive; a seat with fresh words counts as a raiser too."""
     offer_options(existing, asker, options, replace=asker in existing.askers)
     if item_id is not None and existing.item_id is None:
         existing.item_id = item_id
@@ -421,7 +408,6 @@ def refresh_question(
             question.context = context
             changed = True
     elif text and question.text != text:
-        # a seat that shares the ask does not take the words out of the other seat's mouth
         before = dict(question.also_asked)
         _note_wording(question, asker, text)
         changed = changed or question.also_asked != before
@@ -502,7 +488,7 @@ def moot_item_asks(docket: Docket, *, item_id: str, disposition: str, round_: in
         if question.state != ASKED or not moot(docket, question):
             continue
         question.state, question.moot_with, question.retracted_round = WITHDRAWN, item_id, round_
-        question.blocked_by = []  # a stop dies with the ask it was declared on
+        question.blocked_by = []
         if "moot" not in question.markers:
             question.markers.append("moot")
         events.append(
@@ -534,7 +520,6 @@ def record_stance(
     if stance == NEEDS_HUMAN and (escalation is None or escalation.state != STANDING):
         new = Escalation(item_id=item_id, asker=agent, raised_round=round_)
         docket.escalations[(item_id, agent)] = new
-        # An escalation raises its own question, so it reaches the checkpoint and the report.
         item = docket.items.get(item_id)
         text = (note or "").strip() or (f"{item.claim} — is a human decision needed here?" if item else ").")
         question, _ = _raise_or_merge(

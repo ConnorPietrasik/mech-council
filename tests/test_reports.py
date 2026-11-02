@@ -228,9 +228,7 @@ def test_the_console_tells_a_dropped_ask_from_the_last_asker_walking_away():
 
 
 def test_the_console_says_what_a_second_that_bought_nothing_was_up_against():
-    """A second that leaves an ask from the human has two reasons and one event: naming an answer that never came
-    tells the run's reader about a settlement that does not exist.
-    """
+    """The one event names the answer that actually held the ask back; a moot ask must not be told it was answered."""
     from mech_council.run import _summary_line
 
     names = {"Agent1": "Metic", "Agent2": "Senior", "Agent3": "Coworker"}
@@ -339,7 +337,7 @@ def test_an_item_naming_a_file_only_a_member_wrote_is_marked_as_an_artifact(tmp_
 
 
 def test_an_item_naming_a_file_the_seat_edited_is_project_evidence(tmp_path):
-    """The bug this case exists to keep dead: `modified` is not `created`."""
+    """`modified` is not `created`: the journal shows the file as modified, not created."""
     from mech_council.sandbox.journal import mark_sandbox_items
 
     project = tmp_path / "proj"
@@ -455,7 +453,7 @@ def test_a_report_that_cannot_be_replaced_into_place_leaves_no_tmp_behind(projec
 
 
 def test_a_file_name_that_is_not_text_costs_neither_the_report_nor_the_manifest(project, tmp_path):
-    """One odd name must not cost the human the artifacts they read, and must not cost them the byte-true name either."""
+    """One odd name must not lose the human the artifacts, nor the byte-true name."""
     from mech_council import run as run_mod
     from mech_council import runjson
     from mech_council.deliberation.state import Docket, Item

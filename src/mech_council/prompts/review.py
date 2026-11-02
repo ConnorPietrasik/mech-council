@@ -63,7 +63,7 @@ ROUND_SCHEMA = """\
 ```
 """
 
-# `common.round_briefing`'s per-mode slot: review needs nothing extra.
+# the `common.round_briefing` slot; review adds nothing.
 EXTRA_BRIEFING = ""
 MERGE_TASK = """\
 New findings are listed under **Entries to group**. The findings still open on the docket are listed under

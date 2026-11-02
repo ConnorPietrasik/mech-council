@@ -103,7 +103,7 @@ class Question:
     also_asked: dict[str, str] = field(default_factory=dict)
     #: seats that asked the council to wait on this ask
     blocked_by: list[str] = field(default_factory=list)
-    #: the council's own split: the one ask that blocks with nobody holding it
+    #: the council's own split: a blocking ask with no seat holding it
     direction_ask: bool = False
     raised_round: int = 0
     updated_round: int = 0
@@ -233,7 +233,7 @@ class Docket:
 
     @property
     def blank(self) -> bool:
-        """Nothing was ever said: there is no state to report, only a reason."""
+        """True when nothing was recorded: there is no state to report, only a reason."""
         return not (self.round or self.order or self.questions or self.human_notes or self.approaches or self.rounds)
 
     def bar(self) -> int:

@@ -188,7 +188,7 @@ async def _read_report(read_fd: int, proc: asyncio.subprocess.Process) -> tuple[
         except TimeoutError:
             return (NS_REPORT_FAIL, "the launcher never reported (ns report timeout)")
     finally:
-        # the caller closes the fd: a watcher left on a reused fd number answers the next file that inherits it
+        # the caller closes the fd; a watcher left behind answers the next file that reuses the number
         loop.remove_reader(read_fd)
     text = (data or b"").decode("utf-8", "replace").strip()
     if text.startswith(NS_REPORT_OK):

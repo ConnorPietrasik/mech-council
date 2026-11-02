@@ -283,8 +283,7 @@ def test_the_flag_turns_in_place_on_when_no_file_asks(tmp_path):
 
 
 def test_stated_by_names_the_layer_that_asked_for_in_place(tmp_path):
-    """The note that lets an operator see a repo asking to be reviewed unsandboxed reads this, so it answers with
-    the file — the highest-precedence one that states the key, `[defaults]` included."""
+    """The in-place note answers with the file that stated the key — the highest-precedence one, `[defaults]` included."""
     user = layer(tmp_path, "user", body().replace("[defaults]\n", "[defaults]\nin_place = true\n"))
     project = layer(tmp_path, "proj", body())
     loaded = config_mod.load_layers([user, project], project_layer=project)
@@ -343,7 +342,7 @@ def test_a_patch_states_each_seat_once(tmp_path):
 
 
 def test_a_drop_that_retires_nothing_is_still_stripped(tmp_path):
-    """The `drop` verb never survives the merge, so `drop = false` costs nothing wherever it is written."""
+    """The `drop` verb never survives the merge: `drop = false` is a no-op wherever it is written."""
     text = chain().replace('name = "A"\npersona = "pa"', 'name = "A"\npersona = "pa"\ndrop = false')
     for name in ("mid", "leaf"):
         assert [a.name for a in convene(tmp_path, text, name).agents] == ["A", "B"], name

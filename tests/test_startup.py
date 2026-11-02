@@ -180,8 +180,7 @@ def test_a_template_is_not_a_council_you_name(cli, project):
 
 
 def test_a_file_of_nothing_but_templates_names_no_council_to_convene(cli, project):
-    """Selection offers only convenable councils, so a file of templates is refused outright rather
-    than with an offer list of nothing."""
+    """Selection offers only convenable councils: a file of templates is refused outright, with no offer list."""
     write_project_config(project, '[councils._bench]\n\n[[councils._bench.agents]]\nname = "Metic"\n')
     result = cli([], cwd=project, env=runs_env(project))
     assert result.returncode == 2, result.console
@@ -239,9 +238,7 @@ def test_a_consent_question_with_no_stdin_at_all_refuses_rather_than_crashes(pro
 
 
 def test_an_inherited_run_marker_never_reaches_a_convene_built_by_the_harness(project, monkeypatch):
-    """Every seat's own env carries the run markers, and an inherited one makes a convene refuse to start: run the
-    suite from inside a running council without the scrub and two report cases fail as if the project had.
-    """
+    """Every seat's own env carries the run markers, and an inherited one makes a convene refuse to start."""
     monkeypatch.setenv("COUNCIL_RUN_DIR", "20261101T000000-parent")
     monkeypatch.setenv("COUNCIL_RUN_PATH", "/nowhere/this-suite-never-made-this-run")
     env = no_user_config(**runs_env(project))

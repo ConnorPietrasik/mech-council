@@ -15,7 +15,7 @@ _EXPLAIN = re.compile(r"^\s*(?:explain|ask)\s+(h\d+)\s*(?:[:=]\s*(.*))?$", re.DO
 _SKIP_ALL = re.compile(r"^\s*(skip(?:\s+all)?|none)\s*$", re.IGNORECASE)
 #: `skip H1`, `skip h1 h2`: the whole line has to be ids
 _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.IGNORECASE)
-#: `N1:` reads like `H1:`, and would answer whichever ask happens to be open
+#: `N1:` reads like `H1:`
 _NOTE_LINE = re.compile(r"^\s*(?:note\s+)?n\d+\s*[:=]", re.IGNORECASE)
 #: an answer that is only a number takes that option, and only when the question offered that many
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
@@ -41,9 +41,7 @@ class Line:
 
 def parse_line(text: str) -> Line:
     """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
-
-    Every line names the question it answers: a bare sentence or a bare number is refused, because whichever ask
-    happens to be open first is not ours to guess at, off-cycle least of all.
+    Every line names the question it answers: a bare sentence or a bare number is refused.
     """
     if not (text or "").strip():
         return Line("end")
@@ -123,9 +121,8 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
 
 
 def _folded(notes: Sequence[tuple[Note, str]]) -> list[tuple[str, list[Note]]]:
-    """Seats that noted one sentence say it to the human once, under both names.
-
-    The ledger keeps each seat its own entry: fold only here, where a note is read aloud.
+    """Identical notes from several seats print once, under each seat's name.
+    The ledger keeps one entry per seat; this folds only where a note is read aloud.
     """
     out: dict[tuple[str, str], tuple[str, list[Note]]] = {}
     for note, kind in notes:
@@ -165,9 +162,7 @@ def take_selection(text: str, question: Question) -> tuple[str, int]:
 
 class Checkpoint:
     """The human's side of the run: what prints, what a line means, and where a disposition lands.
-
-    The only consumer of the reader — `run` for the lines typed while the run waits, `drain` for the ones
-    typed while it worked — so nothing else decides what a line was answering.
+    The only consumer of the reader: `run` takes the lines typed while the run waits, `drain` the ones typed while it worked.
     """
 
     def __init__(self, docket: Docket, reader, *, console, names: dict[str, str], ask_seat=None) -> None:
@@ -191,7 +186,6 @@ class Checkpoint:
     ) -> CheckpointOutcome:
         result = CheckpointOutcome(waited=False)
         if notes:
-            # above the questions: the human reads this before deciding what to type
             self.console.say(render_notes(notes, names=self.names))
         self.console.say(render_ask_set(self.docket, listing, names=self.names, waiting=waiting))
         if not listing and not ask_set:
@@ -347,7 +341,6 @@ class Checkpoint:
         if failure := getattr(outcome, "failure", None):
             self.console.say(f"{failure} — {qid} is still yours to answer or skip")
             return None
-        # one line, because the recommendation rides one docket line and one report bullet
         text = " ".join(line.strip() for line in (getattr(outcome, "text", "") or "").splitlines() if line.strip())
         if not text:
             self.console.say(f"{who} sent nothing for {qid}")

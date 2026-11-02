@@ -193,9 +193,7 @@ def test_the_docket_tells_an_asker_which_peer_answered_it():
 
 
 def test_the_docket_shows_an_answer_the_fold_stopped_counting():
-    """The seat that answered a peer's ask from the workspace now asks it too: the ask comes to the human with the
-    answer it was built on still printed, not quietly dropped.
-    """
+    """The seat that answered a peer's ask from the workspace now asks it too: the answer stays printed."""
     docket = build()
     escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
     escalations.raise_question(docket, text="which colour file?", asker="Agent2", item_id=None, round_=1)
@@ -249,7 +247,7 @@ def test_the_report_tells_the_human_which_ask_no_seat_backed():
 
 
 def test_an_ask_a_seat_answered_is_not_reported_as_short_a_second_seat():
-    """Two seats asked and a third settled it: telling the human nobody backed it is a lie about the council."""
+    """Two seats asked and a third settled it: reporting nobody backed it would be wrong."""
     docket = build()
     escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
     escalations.second(docket, qid="H1", agent="Agent2", round_=1)

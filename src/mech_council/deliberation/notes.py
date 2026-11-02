@@ -9,7 +9,7 @@ NOTE_MAX_PER_REPLY = 6
 def raise_note(docket: Docket, *, by: str, text: str, item_id: str | None, round_: int) -> tuple[Note, bool]:
     """Record what a seat wants the human to know.
 
-    A seat repeating itself updates its note; one it retracted is unsaid, so saying it again is a fresh claim and id.
+    A seat repeating itself updates its note; one it retracted is a fresh claim and id.
     """
     key = note_key(text)
     for nid in docket.note_order:
@@ -45,10 +45,7 @@ def retract_note(docket: Docket, *, nid: str, agent: str, round_: int, reason: s
 
 
 def unshown(docket: Docket) -> list[tuple[Note, str]]:
-    """What the next checkpoint tells the human: each note once, each retraction once.
-
-    A note retracted before it was printed is never printed.
-    """
+    """What the next checkpoint tells the human: each note once, each retraction once."""
     out: list[tuple[Note, str]] = []
     for nid in docket.note_order:
         note = docket.human_notes[nid]

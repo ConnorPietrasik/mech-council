@@ -61,7 +61,7 @@ def evaluate(docket: Docket) -> tuple[str, str]:
 
 
 def _settled(states: dict[str, str], reason: str) -> tuple[str, str]:
-    """A run ends agreed only if every open item reached a disposition: `unheard` work is the council looking and deciding nothing."""
+    """A run ends agreed only if every open item reached a disposition."""
     unheard = sorted(i for i, s in states.items() if s == UNHEARD)
     if unheard:
         return UNVETTED, reason + " — but no disposition on: " + ",".join(unheard)

@@ -364,7 +364,7 @@ PROBE(tmpdir=os.environ.get('TMPDIR', ''), mktemp=here,
 
 def test_a_member_cannot_read_the_orchestrators_run_state(tree):
     """Dumpability is cleared so `/proc` closes the run's own file objects; the half that holds at any uid is asserted
-    first, so a run that cannot judge the other half still says what it proved."""
+    first, so a run that cannot judge the other half still reports what it proved."""
 
     def plan(box, tell):
         orchestrator = os.getpid()
@@ -408,9 +408,9 @@ PROBE(closed=closed, readable=readable)
 
 
 def test_the_sweep_kills_a_stray_left_running_in_a_namespace_this_run_created(tree):
-    """Two strays that ignore `SIGTERM` and leave their process group, one per member namespace: the sweep's own scope
-    — a descriptor the run holds — kills one, and the unguarded scan by reported number kills the other.  Each scan
-    gets a target nothing has touched yet, and a live stray in a namespace the other scan is not pointed at."""
+    """Two strays that ignore `SIGTERM` and leave their process group, one per member namespace: each scan gets a
+    target nothing else has touched, and a live stray in a namespace the other scan is not pointed at.
+    """
 
     def plan(box, tell):
         def stray(file_base) -> tuple[int, int, int]:
@@ -441,9 +441,7 @@ def test_the_sweep_kills_a_stray_left_running_in_a_namespace_this_run_created(tr
             return pid, ns_fd, inode
 
         def gone(pid: int) -> bool:
-            """Wait for the kill to land and reap: a zombie still answers `kill(pid, 0)`, so looking without reaping
-            is a 15 s poll, and inside this namespace the stray is our own child.
-            """
+            """Wait for the kill to land and reap: a zombie still answers `kill(pid, 0)`."""
             deadline = time.monotonic() + 15
             while pid and _alive(pid) and time.monotonic() < deadline:
                 try:

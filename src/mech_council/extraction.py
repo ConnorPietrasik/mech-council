@@ -140,10 +140,8 @@ BACKING_WORDS = {fold(word): value for word, value in BACKING_WORDS.items()}
 SEVERITIES = ("blocker", "major", "minor", "trivial")
 
 
-#: The fields each pass is told it may send (the `prompts/*_SCHEMA` blocks).  An object carrying none of them is a
-#: `{…}` quoted in the prose around the answer, and must never be read as a verdict that says nothing.
-#: `approach` belongs to phase 0 alone, but `Port.ask_seats` extracts every seat pass — phase 0 included —
-#: with the verdict parser, so a plan seat's answer has to be legible to it.
+#: The fields each pass is told it may send (the `prompts/*_SCHEMA` blocks); an object carrying none of them is
+#: prose, not the answer.
 VERDICT_FIELDS = (
     "summary",
     "positions",
@@ -188,16 +186,15 @@ WATCHDOG_FIELDS = ("decisions",)
 @dataclass
 class Extraction:
     data: dict = field(default_factory=dict)
-    errors: list[str] = field(default_factory=list)  # the reply itself is unreadable: the whole of it owes a repair re-ask
+    errors: list[str] = field(default_factory=list)  # the reply itself is unreadable: the whole message goes through a repair re-ask
     refused: list[dict[str, str]] = field(default_factory=list)  # a field that will not be honored: read at its safe value, never guessed
     invalid: bool = False  # no JSON object at all
 
     @property
     def problems(self) -> list[str]:
-        """Every sentence the seat is owed: what to repair, and what was refused and how it was read."""
+        """Every sentence for the seat: what to repair, and what was refused and how it was read."""
         out = list(self.errors)
         for r in self.refused:
-            # an ask's flag names its ask, so two refused `blocking` fields are two sentences the seat can tell apart
             named = f"`{r['field']}`" + (f" on {r['about']!r}" if r.get("about") else "")
             out.append(f"{named} {r['why']}, not {r['said']!r}: it counts as {r['counts']}")
         return out
@@ -205,10 +202,7 @@ class Extraction:
 
 def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str | None]:
     """The reply's answer object: the first complete object that carries one of `fields`, ignoring prose's own.
-
-    A seat may quote `{…}` anywhere in its prose, and the first balanced object is not then the answer: `fields`
-    names what only the answer carries.  A reply whose objects carry none of them is refused for a repair re-ask
-    rather than read as a verdict that says nothing.  With no `fields`, the first object still wins.
+    With no `fields`, the first object still wins.
     """
     if not text:
         return None, "empty answer"
@@ -236,8 +230,7 @@ def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str
             continue
         if not fields or _carries(value, fields):
             return value, None
-        unrelated = True
-        # the whole object is prose, so anything nested in it is prose too
+        unrelated = True  # a quoted object's contents are quoted too: a nested object is not the answer
         start = cleaned.find("{", end + 1)
     if unrelated:
         return None, "no answer object in the reply: its JSON carries none of the fields the schema names"
@@ -294,16 +287,16 @@ def pick(mapping: object, canonical: str, extra: tuple[str, ...] = ()) -> object
 #: a boolean a seat sent as a word instead of as JSON: the bare words it means by no, and by yes, in `fold`'s form
 NO_TOKENS = frozenset({"false", "no", "nope", "nah", "n", "none", "null", "nil", "off", "never", "negative", "denied", "declined", "0"})
 YES_TOKENS = frozenset({"true", "yes", "yeah", "yep", "y", "on", "ok", "okay", "affirmative", "1"})
-#: a sign-off is the flag a seat words as its verdict; a word that says nothing about `blocking` is refused there, not guessed
+#: a sign-off is the flag a seat words as its verdict
 SIGNOFF_YES = frozenset({"approved", "approve", "agreed", "agree", "accepted", "signedoff", "lgtm"})
 
 
 def _flag(value: object, field: str, refused: list[dict[str, str]], *, about: str = "", yes: frozenset[str] = frozenset()) -> bool:
-    """A flag is a bool, or one of those words on its own; a word about anything else counts false and is refused out loud."""
+    """A flag is a bool, or one of those words on its own; a word about anything else counts false and is refused."""
     if isinstance(value, bool):
         return value
     if isinstance(value, (list, dict)) and not value:
-        return False  # an empty container carries no word at all: it means no, as an empty string does
+        return False  # an empty container carries no word at all: it means no
     word = fold(text_of(value)).rstrip(".!?,;:")
     if not word or word in NO_TOKENS:
         return False
@@ -311,7 +304,7 @@ def _flag(value: object, field: str, refused: list[dict[str, str]], *, about: st
         return True
     entry = {"field": field, "said": text_of(value).strip(), "why": "must be true or false", "counts": "false"}
     if about:
-        entry["about"] = about  # which ask's flag, so the operator can find it in the docket
+        entry["about"] = about
     refused.append(entry)
     return False
 
@@ -503,10 +496,7 @@ def _strings(value: object) -> list[str]:
 
 
 def _notes(value: object) -> list[dict]:
-    """`notes` lines, written as strings or as `{"note": …, "item": "F2"}` objects.
-
-    Junk is dropped, never an error: a bad note must not send the whole verdict through the repair loop.
-    """
+    """`notes` lines, written as strings or as `{"note": …, "item": "F2"}` objects. Junk is dropped, never an error."""
     raw = [value] if isinstance(value, (dict, str)) else value if isinstance(value, list) else []
     out: list[dict] = []
     for entry in raw:
@@ -572,7 +562,7 @@ _NOTE_ID = re.compile(r"N\d+")
 
 
 def _ids(value: object) -> list[str]:
-    """Docket ids as a seat typed them: `h1`, `#H1` and ` H1 ` all name H1. Near misses survive to be refused."""
+    """Docket ids as a seat typed them: `h1`, `#H1` and ` H1 ` all name H1."""
     out = []
     for entry in _strings(value):
         token = entry.strip().lstrip("#").upper().replace(" ", "")[:12]
@@ -593,7 +583,7 @@ def _ids_entries(value: object) -> list[dict]:
         token = _ids(pick(entry, "id", ("question_id", "qid", "h")))
         answer = text_of(pick(entry, "answer")) or text_of(pick(entry, "text"))
         if not token and answer:
-            # only an id names an ask: a sentence in `question` names none
+            # only an id names an ask
             token = [one for one in _ids(pick(entry, "question")) if _ASK_ID.fullmatch(one)]
         if token:
             out.append({"id": token[0], "text": answer})
@@ -714,7 +704,6 @@ def parse_phase0(payload: str, *, mode: str, extra_synonyms: dict | None = None)
     out.data["summary"] = text_of(pick(data, "summary"))
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
     out.data["notes"] = _notes(pick(data, "notes"))
-    # phase 0 mints the first notes, so no note id exists to retract: the field is still the round's shape
     out.data["retract_note"] = []
     out.data["human_input"] = _human_input(data, out.refused)
     return out
@@ -864,6 +853,6 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
         decisions, errors = parse_watchdog(text)
         return Extraction(data={"decisions": decisions}, invalid=not decisions, errors=errors)
     if kind == "prose":
-        # an `explain` reply: prose is the shape the ask asked for, so nothing here is repairable, and `Outcome.text` is the whole answer
+        # an `explain` reply: prose is the shape, so nothing here is repairable
         return Extraction()
     raise KeyError(kind)

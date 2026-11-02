@@ -230,9 +230,7 @@ def downgrade_hint() -> str:
 
 
 def proc_clearing_note(in_place: bool) -> str:
-    """Which side of the uid line the run is on: `supervisor._write_map` maps the member's root to the run's own uid, so
-    at uid 0 a member resolves to the owner of the `/proc` objects the dumpability clearing re-owns to root.
-    """
+    """Which side of the uid line the run is on."""
     if in_place or os.getuid() != 0:
         return ""
     return (

@@ -1,8 +1,7 @@
 """The one fork/unshare/map handshake, in one place.
 
-It lives here rather than in `test_sandbox.py` so a family that needs only a *namespace* — the sweep in
-`test_process.py` — still runs when the sandbox family's overlay ground is unusable: importing the helper
-from a module that skips at import time would skip the importer's whole family with it.
+It lives here rather than in `test_sandbox.py` so the sweep in `test_process.py` still runs when the sandbox family's
+overlay ground is unusable: a skip at that module's import time would skip the importer's family with it.
 """
 
 from __future__ import annotations

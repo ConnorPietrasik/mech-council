@@ -335,7 +335,7 @@ class ConfigFile:
 
     @property
     def where(self) -> str:
-        """The files councils were read from, for the messages raised before one is chosen."""
+        """The files councils were read from."""
         return " and ".join(self.paths or [self.path])
 
     def supplied_by(self, name: str) -> str:
@@ -347,7 +347,7 @@ class ConfigFile:
 
 
 def load_config(path: str) -> ConfigFile:
-    """One file, whole: it must state councils."""
+    """Load a single file; it must state councils."""
     return _read(path, require_councils=True)
 
 

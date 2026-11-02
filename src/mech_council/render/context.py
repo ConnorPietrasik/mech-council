@@ -48,7 +48,7 @@ class ReportContext:
     pi_cli: str = ""
     pi_version: str = ""
     transcripts: str = "off"
-    sink_claim: str = ""  # what the sinks hold, in the words of the object that counts their bytes; empty says nothing
+    sink_claim: str = ""  # what the sinks hold, in the bytes-counting object's words
     untrusted: bool = False
     in_place: bool = False
     roster: list[RosterRow] = field(default_factory=list)
@@ -56,7 +56,7 @@ class ReportContext:
     chair_model: str = ""
     journal: list[dict] = field(default_factory=list)  # per member, from run.json
     report_name: str = "report.md"
-    #: The report's own path when it sits outside the run directory (`--output`).
+    #: The report's path when `--output` puts it outside the run directory.
     report_path: str = ""
     goal: str | None = None
     aborted_reason: str = ""
@@ -88,7 +88,6 @@ class ReportContext:
         ] + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
 
     def interrupted_block(self) -> list[str]:
-        """The cut short leads the report, so nothing below it reads as settled."""
         cut = self.interrupted
         if cut is None:
             return []

@@ -136,9 +136,8 @@ def prctl(option: int, value: int) -> int:
 
 
 def set_not_dumpable() -> None:
-    """Close the run's file objects to every member through `/proc`: best-effort, since it re-owns them to uid 0 and a
-    member's mapped root is the run's own uid, which is uid 0 for a run started as root.
-    """
+    """Close the run's file objects to every member through `/proc`; at uid 0 the member's mapped root owns them, so
+    the hiding does not hold."""
     prctl(PR_SET_DUMPABLE, 0)
 
 

@@ -79,9 +79,8 @@ async def orchestrate(launch, sandbox) -> int:
     report_path = ""
     members: Members | None = None
     lanes: Lanes | None = None
-    # the docket is made here, so an aborted run still has its state to report
     docket = _docket(council)
-    # whether this run's own `run.json` write has started, so the last-resort exit does not replace it
+    # whether this run's own `run.json` write has started
     manifest_claimed = False
     baselines: dict[str, dict[str, str]] = {}
 
@@ -117,7 +116,7 @@ async def orchestrate(launch, sandbox) -> int:
 
     def write_run_json(survivors: lifecycle.SweepResult, journal: list[dict], report: str, *, swept: bool = True) -> None:
         nonlocal manifest_claimed
-        # claimed before the write: an exit landing mid-write must leave this manifest, not replace it
+        # claimed before the write: an exit landing mid-write must not replace the manifest being written
         manifest_claimed = True
         runjson.finalize(
             manifest,
@@ -199,7 +198,6 @@ async def orchestrate(launch, sandbox) -> int:
             console.say(f"outcome: {outcome}")
         if report_path:
             owed(console, "the report's console copy", _print_report, report_path)
-        # the hurried exit's clock outlasts every wait in this block: the wedged step can be a write
         brake.disarm()
     return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS and report_path else EXIT_ABORT)
 
@@ -287,16 +285,12 @@ def _interruption(brake: Brake) -> str:
 
 
 def _explainer(lanes: Lanes):
-    """The `explain H1` lane: the seat answers in prose for the human, so nothing is parsed out of it.
-
-    A seat that will not answer is the human's news, not a reason to end the run they are still working.
-    """
+    """The `explain H1` lane: the seat answers in prose for the human, so nothing is parsed out of it."""
 
     async def explain(agent: str, message: str, *, round_: int, phase: str):
         try:
             return await lanes.ask_agent(agent, message, round_=round_, phase=phase, kind="prose", parse_kw={})
         except (AskUnusable, AskLost) as failure:
-            # no `text`: an error string is not a recommendation, and the blank reply has its own line
             return Outcome(text="", failure=str(failure))
 
     return explain
@@ -512,8 +506,6 @@ def _report(
             f"({aborted or outcome or 'no outcome'}). The report renderer failed: "
             f"{type(failure).__name__}: {failure}. `events.jsonl` holds the run.\n"
         )
-    # a unique tmp, replaced into place: the hurried exit can abandon the run mid-write, and half a report
-    # reads as a whole one
     tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
     try:
         with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:

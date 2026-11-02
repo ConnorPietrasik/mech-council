@@ -9,15 +9,14 @@ from .sandbox import mount
 
 
 def _die_with_the_supervisor() -> None:
-    """SIGTERM here when the supervisor dies: the run takes its own exit path instead of orphaning members."""
+    """SIGTERM here when the supervisor dies."""
     with contextlib.suppress(Exception):
         mount.prctl(mount.PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
 def _write_map(pid: int) -> None:
-    """The row is `0 <uid> 1`, not `<uid> <uid> 1`: the latter maps the caller's own uid, so the child's
-    numeric root owns nothing in the tree and its first `mount(2)` is `EPERM`.
-    """
+    """The row is `0 <uid> 1`, not `<uid> <uid> 1`: the latter leaves the child's numeric root owning nothing in
+    the tree, so its first `mount(2)` is `EPERM`."""
     uid, gid = os.getuid(), os.getgid()
     with open(f"/proc/{pid}/setgroups", "w", encoding="utf-8") as handle:
         handle.write("deny")
@@ -29,7 +28,7 @@ def _write_map(pid: int) -> None:
 def spawn_orchestrator(body, *, name: str = "orchestrator", in_place: bool = False) -> int:
     ack_read, ack_write = os.pipe()  # child → parent: "I am inside"
     go_read, go_write = os.pipe()  # parent → child: "you are mapped"
-    # a fork copies unflushed buffers, and both processes would write what the parent left in them
+    # a fork copies unflushed buffers; both processes would write the parent's
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(Exception):
             stream.flush()
@@ -61,7 +60,7 @@ def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
     if released != b"m":
         sys.stderr.write("released without a uid/gid map\n")
         return 1
-    _die_with_the_supervisor()  # after the credential changes, which clear it
+    _die_with_the_supervisor()  # the uid map clears PR_SET_PDEATHSIG, so it is armed only now
     try:
         return int(body())
     except KeyboardInterrupt:  # pragma: no cover — the handler path owns this
@@ -69,7 +68,6 @@ def _child(ack_write: int, go_read: int, body, *, in_place: bool) -> int:
 
 
 def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: bool = False) -> int:
-    # forward signals rather than dying here and orphaning the orchestrator with its mounts
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda number, _frame: _relay(pid, number))
     if os.read(ack_read, 1) != b"r":
@@ -104,8 +102,7 @@ def _supervisor(pid: int, ack_read: int, go_write: int, name: str, *, in_place: 
 
 
 def _relay(pid: int, signum: int = signal.SIGTERM) -> None:
-    # a keystroke reaches the orchestrator twice, from the terminal and from here, and `interrupt.Brake`
-    # counts presses inside one second as the one press it is
+    # a keystroke reaches the orchestrator twice, from the terminal and from here: `interrupt.Brake` coalesces it
     try:
         os.kill(pid, signum)
     except ProcessLookupError:

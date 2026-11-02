@@ -1,4 +1,4 @@
-"""The two-speed interrupt: what the first press owes, what the next ones skip, and what bounds them."""
+"""The two-speed interrupt: what the first press does, what the next ones skip, and what bounds them."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def test_a_second_press_arms_the_clock_the_kill_runs_on(monkeypatch):
 
 
 def test_a_press_once_the_clock_is_gone_bring_the_bound_back(monkeypatch):
-    """Nothing but a press bounds the exit path, so no press may find the way out already out of time."""
+    """Nothing but a press bounds the exit path: a press must not find the bound already spent."""
     armed: list[float] = []
     said = io.StringIO()
     brake = _brake(monkeypatch, armed=armed, stream=said)
@@ -76,9 +76,7 @@ def test_a_press_once_the_clock_is_gone_bring_the_bound_back(monkeypatch):
 
 
 def test_a_press_after_the_kill_still_buys_the_whole_bound(monkeypatch):
-    """A press means the same two seconds however far the hurried exit had got; leaving it the wreckage of
-    the last bound would take away the very time the press was made to buy.
-    """
+    """A press buys the whole bound however far the hurried exit had got."""
     armed: list[float] = []
     killed: list[int] = []
     exits: list[int] = []

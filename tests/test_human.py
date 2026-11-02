@@ -60,10 +60,7 @@ def test_the_line_grammar(text, kind, qid, body, ids):
     ],
 )
 def test_a_line_that_is_not_the_grammar_is_never_an_answer(text):
-    """Neither a near miss nor a line naming no question may answer whichever ask happens to be open.
-
-    `H1:` names an ask and answers nothing, and an empty answer was the one reading the checkpoint took.
-    """
+    """Neither a near miss nor a line naming no question may answer whichever ask happens to be open."""
     line = parse_line(text)
     assert line.kind == "error" and "`skip H1` declines one" in line.text
 
@@ -121,9 +118,7 @@ def test_a_number_with_any_word_after_it_stays_the_human_s_own_words():
 
 
 def test_an_id_and_a_colon_answer_nothing_and_leave_the_ask_open():
-    """`H1:` used to mark the ask answered with an empty string: the hold behind it retired, a round was bought,
-    and the question vanished from every seat's docket — a typo the run could not undo.
-    """
+    """`H1:` with nothing after answers nothing and leaves the ask open."""
     docket = build()
     question = offered(docket, "one", "two")
     cp, console, _reader = make_checkpoint(docket, lines=["H1:", "H1: 30 days"])
@@ -196,10 +191,7 @@ def test_an_empty_checkpoint_says_so_and_waits_for_nothing():
 
 
 class Reader:
-    """A scripted stdin: lines, then EOF; `interactive` is the tty question.
-
-    `read_nowait` is the off-cycle shape: a line if one arrived, None if nothing has, EOF when `closed`.
-    """
+    """A scripted stdin: lines, then EOF; `read_nowait` gives a line if one arrived, None if nothing has, EOF when `closed`."""
 
     def __init__(self, lines=(), interactive=True, closed=False):
         self.lines = list(lines)
@@ -316,7 +308,7 @@ def test_answering_a_question_after_declining_it_takes_it_back():
 
 
 def test_declining_a_question_after_answering_it_takes_the_answer_back():
-    """The rule runs both ways, or `skip H1` after an answer is the same trap wearing the other coat."""
+    """The rule runs both ways: `skip H1` after an answer takes the answer back."""
     docket = build()
     listing = questions(docket, ("a?", "Agent1", "F1", True), ("b?", "Agent2", "F1", True))
     cp, console, _reader = make_checkpoint(docket, lines=["H1: keep it", "skip H1", "H2: later"])

@@ -1,4 +1,4 @@
-"""The row order of `termination.evaluate`, held by what a reordered row would cost."""
+"""The row order of `termination.evaluate`: each order asserted by what a reorder would change."""
 
 from __future__ import annotations
 

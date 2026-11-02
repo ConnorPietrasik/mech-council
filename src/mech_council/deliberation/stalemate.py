@@ -32,7 +32,7 @@ def signature(docket: Docket) -> tuple:
     )
     answered_qa = sum(1 for qid in docket.qa_order if docket.qa[qid].answer)
     answered_human = sum(1 for qid in docket.question_order if docket.questions[qid].state == ANSWERED)
-    # Who signed, not when: a seat restates its sign-off every round.
+    # Who signed, not when.
     parts = [tuple(items), tuple(sorted(docket.signoffs)), escalations, answered_qa, answered_human]
     if docket.mode == "plan":
         parts.append(tuple(sorted(docket.backing.items())))

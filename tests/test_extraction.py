@@ -1,4 +1,4 @@
-"""The extraction suite — the leniency owed to model prose, and the cases where it must stop."""
+"""The extraction suite: how far leniency with model prose goes, and where it stops."""
 
 from __future__ import annotations
 
@@ -61,29 +61,26 @@ def test_a_brace_left_open_in_the_prose_does_not_doom_the_object_after_it():
 
 
 def test_an_answer_cut_off_mid_object_owes_a_repair_and_never_becomes_the_object_nested_in_it():
-    """A truncated reply leaves a complete position nested in it, which parses as "nothing to say" — the one reading
-    that must never be taken, because the member's whole verdict is gone and the round would carry on without it."""
+    """A truncated reply leaves a complete position nested in it; that position must never be taken as the answer."""
     out = parse(json.dumps(positions(("F1", "agree"), ("F2", "disagree")))[:-1])
     assert out.invalid and out.errors
 
 
 def test_an_object_quoted_in_the_prose_never_swallows_the_answer_after_it():
-    """The same lost-verdict reading, from a reply that was never cut off: one complete `{…}` in the preamble used
-    to be the answer, and nothing was refused, so the repair re-ask never ran.
-    """
+    """An object quoted in the prose is never the answer: the one after it is read."""
     text = 'The registry call `{"ok": true}` is the bug.\n\n' + json.dumps(positions(("F1", "disagree")))
     out = parse(text)
     assert not out.invalid and out.data["positions"][0]["item"] == "F1"
 
 
 def test_an_object_that_carries_none_of_the_answer_s_fields_owes_a_repair():
-    """A reply whose only JSON is not the shape the pass asked for is a fragment of prose, not an answer of nothing."""
+    """A reply whose only JSON is not the shape the pass asked for is prose, not an empty answer."""
     out = parse('{"severity": "blocker"}')
     assert out.invalid and out.errors, "the seat owes a repair re-ask, not a silent blank verdict"
 
 
 def test_phase_0_finds_its_object_past_one_quoted_in_the_prose():
-    """Phase 0 owes a report, and a `{…}` the seat quoted while making it is not that report."""
+    """Phase 0 is a report; a `{…}` the seat quoted while making it is not that report."""
     findings = json.dumps({"findings": [{"claim": "it drops the error", "evidence": "a.py:1"}]})
     out = parse_phase0(f'A call like `{{"ok": true}}` is never checked.\n\n{findings}', mode="review")
     assert not out.invalid and not out.errors
@@ -91,9 +88,7 @@ def test_phase_0_finds_its_object_past_one_quoted_in_the_prose():
 
 
 def test_a_plan_seat_s_phase_0_answer_is_legible_to_the_verdict_parser():
-    """`Port.ask_seats` extracts every seat pass — phase 0 included — with the verdict parser, so a plan seat's
-    first report has to be an object that parser can see: drop `approach` and every plan run's phase 0 is refused.
-    """
+    """`approach` must be a verdict field: phase 0 runs through the verdict parser, and dropping it refuses every plan run's phase 0."""
     approach = json.dumps({"approach": {"claim": "retry it", "stages": [{"state": "write it", "gate": "the tests"}]}})
     assert not parse(approach, mode="plan").invalid
 
@@ -418,7 +413,7 @@ def test_phase0_findings_carry_severity_evidence_and_detail():
 
 
 def test_phase_0_reads_human_input_with_its_context_and_options():
-    """The phase-0 brief asks the seat for the human's menu; extraction is what keeps that brief from being a lie."""
+    """The phase-0 brief asks the seat for the human's menu; extraction keeps the brief honest."""
     payload = json.dumps(
         {
             "findings": [],

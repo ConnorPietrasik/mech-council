@@ -401,7 +401,7 @@ class Engine:
         self._answers(data.get("answers") or [], agent, round_)
         self._questions(data.get("questions") or [], agent, round_)
         self._human_input(data.get("human_input") or [], agent, round_)
-        # before the raises: a retraction cannot name an id this same reply is minting
+        # before the raises: a retraction cannot name an id this reply creates
         self._retract_notes(data.get("retract_note") or [], agent, round_)
         self._notes(data.get("notes") or [], agent, round_)
         self._apply_asks(agent, data, round_)
@@ -413,7 +413,7 @@ class Engine:
             self.docket.signoffs[agent] = round_
 
     def _apply_asks(self, agent: str, data: dict, round_: int) -> None:
-        """What a verdict says about the council's asks for the human: back one, answer one, drop one."""
+        """A verdict's dispositions of the asks: back one, answer one, drop one."""
         for qid in data.get("second") or []:
             question, reason = second(self.docket, qid=qid, agent=agent, round_=round_)
             if question is None or reason:
@@ -474,9 +474,8 @@ class Engine:
     def _read_insists(self, *, seen: int) -> None:
         """Read the insists a pass queued, once every answer it carries is on the docket.
 
-        Draining here rather than where the verdict was applied keeps the order the engine applied the seats from
-        deciding what an insistence was aimed at. `seen` is the latest round of peer answers those seats were shown:
-        the last pass shows them the answers it carries, a round does not show them its own.
+        `seen` is the latest round of peer answers those seats were shown: the last pass shows them the answers
+        it carries, a round does not show them its own.
         """
         pending, self._insists = self._insists, []
         for agent, qid, round_ in pending:
@@ -523,7 +522,7 @@ class Engine:
                 self.emit("qa_answer_unmatched", member=agent, question=qid, round=round_)
                 continue
             if qa.to != agent:
-                # only the seat the question was put to may answer it: any other seat would put words in its mouth
+                # only the seat the question was put to may answer it
                 self.emit("qa_answer_not_addressed", member=agent, question=qa.id, asked_of=qa.to, round=round_)
                 continue
             qa.answer = entry.get("text") or entry.get("answer") or ""
@@ -546,7 +545,7 @@ class Engine:
             self.docket.qa_order.append(qa.id)
 
     def _notes(self, entries: list[dict], asker: str, round_: int) -> None:
-        """An unknown item costs the link, never the note."""
+        """An unknown item drops the link, keeps the note."""
         for entry in entries:
             item_id = entry.get("item")
             if item_id and item_id not in self.docket.items:
@@ -580,7 +579,6 @@ class Engine:
                 )
                 item_id = None
             if item_id and self.docket.items[item_id].closed:
-                # the closure is the council's answer about that item; a question left over is a question of its own
                 self.emit(
                     "verdict_ask_refused",
                     member=asker,
@@ -641,7 +639,7 @@ class Engine:
             self.emit("question_effective_class", id=question.id, prior=before, effective=now, round=round_)
 
     async def _gap_ladder(self, round_: int, rejected: list[str]) -> None:
-        """Ask each seat for what it owes until its cause's budget runs out, then record the rest as declined."""
+        """Ask each seat for its missing items until its cause's budget runs out, then record the rest as declined."""
         pending: dict[str, tuple[list[str], str]] = {}
         for agent in self.docket.roster:
             missing = self._still_missing(agent)
@@ -680,20 +678,20 @@ class Engine:
                 if not still:
                     del pending[agent]
                 else:
-                    # an answer that landed, or one that never parsed, is a seat still trying: its cause holds
+                    # a landed or unparsed answer is the seat still trying: keep its cause
                     pending[agent] = (still, cause if landed or result.rejected else gap_rules.DELIBERATE)
         for agent, (missing, _cause) in pending.items():
             self._decline(agent, missing, round_)
 
     def _still_missing(self, agent: str) -> list[str]:
-        """What this seat owes: no stance on an item it was shown, and in plan mode no backing."""
+        """What counts as missing: no stance on a shown item, and in plan mode no backing."""
         missing = gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
         if gap_rules.missing_backing(self.docket, agent):
             missing.append("backing")
         return missing
 
     def _apply_gap(self, agent: str, chunk: list[str], result: RawAsk, round_: int) -> int:
-        """Record what the gap answer said, and return how much of it landed."""
+        """Record the gap answer's contents; return how much applied."""
         if result.rejected:
             return 0
         data = parse_verdict(
@@ -794,7 +792,7 @@ class Engine:
             if entry.get("item") == item_id and entry.get("question"):
                 question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
-                # only a standing hold owns an ask: a defense that released the item must not adopt the ask it just raised
+                # only a standing hold owns an ask; a defense that released the item does not adopt its ask
                 if escalation is not None and escalation.state == STANDING:
                     escalation.question_id = question.id
                 if updated:
@@ -810,7 +808,7 @@ class Engine:
         fresh = [i for i in open_ids if self.docket.items[i].opened_round == round_]
         if not fresh:
             return
-        # the other open entries ride along, so a duplicate of one of them folds into it instead of standing twice
+        # the other open entries are listed too, so a duplicate of one folds into it
         await self._merge_pass(round_=round_, ids=open_ids, new=fresh)
 
     async def _merge_pass(self, round_: int, ids: list[str], *, new: list[str] | None = None) -> None:
@@ -843,13 +841,12 @@ class Engine:
             if self.docket.items[chair_canonical].closed:
                 continue  # a merge may not widen a claim the council settled
             if chair_canonical not in shown:
-                # an id outside this pass's listing is one the chair made up or misremembered: it adopts nothing
+                # outside the listing: it adopts nothing
                 self.emit("merge_canonical_unlisted", round=round_, canonical=chair_canonical)
                 continue
             named = dict.fromkeys((chair_canonical, *duplicates))  # one fold per id, whatever the chair echoed twice
             rivals = [i for i in named if i in shown and i in self.docket.items and not self.docket.items[i].closed]
-            # the entry raised first lends the group its claim, so it takes the chair's place when the chair named a
-            # later one: an early entry carries verdicts, so folding it away would land as nothing
+            # the earliest-raised entry is the claim; it takes the chair's place when the chair named a later one
             canonical = min(rivals, key=lambda i: raised[i])
             keep = []
             for duplicate in named:
@@ -859,7 +856,7 @@ class Engine:
                 if item is None or item.closed:
                     continue
                 if duplicate not in shown:
-                    # the same for a duplicate outside the listing: it keeps its claim, which the chair never read
+                    # the same for a duplicate outside the listing: it keeps its claim
                     self.emit("merge_duplicate_unlisted", round=round_, duplicate=duplicate, into=canonical)
                     continue
                 if self.docket.stances.get(duplicate):
@@ -914,7 +911,7 @@ class Engine:
         return outcome
 
     def _closure(self, round_: int, *, reopen: bool = True) -> None:
-        """Close what the seats settled, and moot the deferred asks that asked about an item they settled."""
+        """Close what the seats settled, and moot the deferred asks about the items they settled."""
         for event, fields in closure_pass(self.docket, round_, reopen=reopen):
             self.emit(event, **fields)
             if event == "item_closed":
@@ -948,7 +945,6 @@ class Engine:
         if terminal:
             settled = signature(self.docket)
             await self._peer_pass(round_)
-            # what that pass lets go of is the last movement the run may see, so read the end again
             if (moved := signature(self.docket)) != settled:
                 self.previous_signature = moved
                 stale = False
@@ -977,14 +973,12 @@ class Engine:
         return GO
 
     def _open_asks(self) -> list:
-        """The asks a seat raised and that are still open — everything the chair can fold."""
+        """The asks a seat raised that are still open."""
         return [q for q in self.docket.questions.values() if q.state == ASKED and not q.direction_ask and q.askers]
 
     async def _merge_asks(self, round_: int) -> None:
-        """The chair folds the asks that want one decision; a chair that cannot read this pass costs the run nothing.
-
-        An ask set the chair has already read is not read again, so a fold costs nothing while nothing moves. A
-        refusal or an unreadable chair leaves the next round armed.
+        """The chair folds the asks that want one decision; an unreadable chair reply folds nothing.
+        An ask set the chair has already read is not read again.
         """
         asks = self._open_asks()
         if len(asks) < 2 or len({agent for q in asks for agent in q.askers}) < 2:
@@ -1008,11 +1002,10 @@ class Engine:
         self._folded_asks = _ask_signature(self._open_asks())
 
     async def _peer_pass(self, round_: int) -> None:
-        """Once, before the run ends: every seat gets one last look at the asks the human will not be shown.
-
-        It lets go — answer one, back one, drop one's own, or stance away from an item a peer settled — and it lets
-        the seat that raised an ask say a peer's answer was not enough. Notes and their retractions are read here
-        too. Nothing else in that reply is read.
+        """Once, before the run ends: every seat gets one last look at the asks the human will not be shown —
+        answer one, back one, drop one's own, or stance away from an item a peer settled. It also lets the seat
+        that raised an ask say a peer's answer was not enough, and it reads `notes` and `retract_note`.
+        Nothing else in that reply is read.
         """
         from .termination import held_back_questions
 
@@ -1035,9 +1028,8 @@ class Engine:
             if result.failure or result.rejected:
                 continue
             replies[agent] = parse_verdict(result.text or "", mode=self.docket.mode, me=agent, known_items=known, closed_items=closed).data
-        # every seat's answers and seconds land before any insistence is read, and releases go last: a releasing
-        # stance takes its own stop and ask with it. One loop over the roster would let that order decide what a
-        # peer's reply means.
+        # answers and seconds land before any insistence is read, and releases go last: a releasing stance takes
+        # its own stop and ask with it
         for agent, data in replies.items():
             self._retract_notes(data.get("retract_note") or [], agent, round_)
             self._notes(data.get("notes") or [], agent, round_)
@@ -1048,7 +1040,7 @@ class Engine:
         self._closure(round_, reopen=False)
 
     def _release_holds(self, agent: str, data: dict, round_: int) -> None:
-        """One kind of stance is read on that pass, and one only: a seat letting go of an item it holds."""
+        """On that pass only one stance is read: a seat letting go of an item it holds."""
         for position in data.get("positions") or []:
             item_id, stance = position["item"], position["stance"]
             if stance == NEEDS_HUMAN:
@@ -1097,7 +1089,7 @@ class Engine:
             # a held-back marker already says why the human never saw it
             if question.state != ASKED or any(marker in question.markers for marker in HELD_BACK):
                 continue
-            # a waiting checkpoint showed it: not the same silence as never asking
+            # a waiting checkpoint showed it; a different marker from never asking
             marker = "unanswered" if question.id in self._asked_of_human else "unasked"
             if marker not in question.markers:
                 question.markers.append(marker)
@@ -1119,7 +1111,7 @@ class Engine:
             if terminal and len(open_asks) > len(ask):
                 self.emit_note(_held_back_note(self.docket, open_asks))
             if pending_notes:
-                # nothing to ask, and still the notes' only showing
+                # no asks to show; the notes are the reason for the checkpoint
                 self.phase("the notes for you")
                 await self.port.checkpoint([], round_=round_, terminal=terminal, listing=[], waiting=False, notes=pending_notes)
                 mark_shown(pending_notes, round_)
@@ -1136,11 +1128,10 @@ class Engine:
             return None
         at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
-        # the ceiling asks too, on the grace budget — and an answer already given off-cycle has paid it for this round,
-        # which is no reason to stop asking the human about the rest
+        # the ceiling asks too, on the grace budget — or when an off-cycle answer has already bought one more round
         waiting = (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
         if terminal and not waiting:
-            self._mark_unasked()  # the ledger has to say the run ended without asking
+            self._mark_unasked()
         self.phase(WAITING if waiting else "showing you the asks")
         self.docket.parked_on = [q.id for q in ask] if waiting else []
         try:
@@ -1148,8 +1139,6 @@ class Engine:
                 ask, round_=round_, terminal=terminal, listing=listing, waiting=waiting, notes=pending_notes
             )
         finally:
-            # the park is over the moment the checkpoint is done: a run cut short later must not go on
-            # reporting that it waits on an answer, or naming asks it never put to the human
             self.docket.parked_on = []
             self.phase("applying what you said")
         # the block reached the console whether or not the run waited
@@ -1167,7 +1156,7 @@ class Engine:
             notes=[n.id for n, _kind in pending_notes],
         )
         self._apply_human(outcome, round_, at_ceiling=at_ceiling)
-        # an answer is the one thing that outranks a terminal reading of the docket
+        # an answer from the human beats a terminal reading of the docket
         if terminal and provisional != GO and not outcome.any_answer:
             self.emit("termination", outcome=provisional, reason="the checkpoint closed the run", round=round_)
             return provisional
@@ -1248,7 +1237,6 @@ class Engine:
             return
         if at_ceiling and not self.checkpoint_moved:
             if self._grace_left <= 0:
-                # the answer is on the docket and in the report; a round past the ceiling is the one thing it cannot buy
                 self.emit("answer_buys_no_round", round=round_, answered=len(outcome.answers))
                 return
             self._grace_left -= 1
@@ -1298,12 +1286,12 @@ def _one_line(text: str, width: int = 90) -> str:
 
 
 def _ask_signature(questions: list) -> tuple:
-    """What the chair reads about the asks: a signature it has seen holds nothing new to fold."""
+    """What the chair reads about the asks; an unchanged signature folds nothing."""
     return tuple((q.id, q.text, q.item_id, tuple(q.askers), tuple(sorted(q.peer_answers))) for q in questions)
 
 
 def _held_back_note(docket: Docket, held_asks: list) -> str:
-    """Why the run ends without asking you anything, said per ask: a seat answered it, no seat backed it, its item settled."""
+    """The per-ask reason the run ends without asking the human."""
     answered = [q.id for q in held_asks if held_back(docket, q) == SETTLED]
     unbacked = [q.id for q in held_asks if held_back(docket, q) == UNBACKED]
     moot = [q.id for q in held_asks if held_back(docket, q) == MOOT]
@@ -1343,7 +1331,7 @@ def _tokens(text: str) -> set[str]:
     return {word for word in "".join(c if c.isalnum() else " " for c in (text or "").casefold()).split() if len(word) > 3}
 
 
-#: the two sections of the merge listing, in the words the mode briefings point the chair at
+#: the two headings of the merge listing, as the mode briefings name them
 MERGE_NEW_HEADING = "## Entries to group"
 MERGE_OLDER_HEADING = "## Already on the docket: fold a new entry into one of these, never these into each other"
 

@@ -333,9 +333,7 @@ def test_an_ask_raised_by_two_seats_in_two_wordings_is_insisted_on_by_either():
 
 
 def test_an_answer_landing_in_its_own_round_is_not_rebuttable_in_it():
-    """A verdict cannot refuse an answer that was not on the docket it was written against; the pass before the
-    report is the one pass that does show a seat the answers it carries.
-    """
+    """A verdict cannot refuse an answer that was not on the docket it was written against."""
     docket = docket_with(3)
     question, _ = escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
     escalations.second(docket, qid="H1", agent="Agent2", round_=1)
@@ -405,9 +403,7 @@ def test_the_chair_folds_asks_that_want_one_decision():
 
 
 def test_the_fold_keeps_the_words_of_the_ask_raised_first():
-    """The ask raised first survives whichever one the chair names; a chair that reads the order backwards loses that
-    wording, not the fold — and not the groups it named properly.
-    """
+    """The ask raised first survives whichever one the chair names."""
     docket = docket_with(3)
     escalations.raise_question(docket, text="which tenant owns the cache key?", asker="Agent1", item_id="F1", round_=1)
     escalations.raise_question(docket, text="who is accountable for tenancy?", asker="Agent2", item_id="F1", round_=2)
@@ -427,9 +423,7 @@ def test_the_fold_keeps_the_words_of_the_ask_raised_first():
 
 
 def test_a_fold_cannot_launder_the_answer_a_seat_gave_and_then_asked_about():
-    """A seat answers a peer's ask and wants the human's word in its own words: the fold makes it an asker, so its
-    answer stops being a reason to keep the ask from the human — and stays on the record all the same.
-    """
+    """The fold makes the seat that answered one of the asks it absorbs an asker of the survivor; the answer stays on the record."""
     docket = docket_with(3)
     escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
     escalations.raise_question(docket, text="which colour file?", asker="Agent2", item_id=None, round_=1)

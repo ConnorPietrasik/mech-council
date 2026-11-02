@@ -18,7 +18,7 @@ def collapse_cd(command: str) -> str:
 
 
 def middle_out(text: str, limit: int = _MAX) -> str:
-    """Head and tail with the elision in the middle — the tail is the interesting part."""
+    """Head and tail with the elision in the middle."""
     text = " ".join((text or "").split())
     if len(text) <= limit:
         return text

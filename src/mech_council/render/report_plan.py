@@ -157,7 +157,7 @@ def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
 
 
 def _assumption_kind(docket: Docket, question: Question) -> str:
-    """Why this ask became an assumption, in the word the ledger uses."""
+    """Why this ask became an assumption, as the docket phrases it."""
     held = held_back(docket, question) if question.state == ASKED else next((m for m in question.markers if m in HELD_BACK), "")
     if "unasked" in question.markers:
         return "unasked"
@@ -178,7 +178,6 @@ def _agreed_points(docket: Docket, context: ReportContext) -> list[str]:
         return out + ["The chair's comparison recorded none.", ""]
     for point in docket.agreed_points:
         who = _names(point.get("agents") or [], context)
-        # an empty field reads as a missing field, not as a finding about the council
         tail = f" — {who}" if who != "(nobody)" else " — the chair named no seats"
         out.append(f"- {point.get('point')}{tail}")
     out.append("")

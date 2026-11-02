@@ -147,9 +147,8 @@ def finalize(
 
 
 def _write(manifest: RunManifest) -> None:
-    # a unique tmp: the hurried exit can write while this write is mid-flight
     tmp = f"{manifest.path}.tmp-{os.getpid()}-{time.time_ns()}"
-    # backslashreplace: a member can name a file with bytes that are not text, which would otherwise cost the whole manifest
+    # backslashreplace: a member can name a file with bytes that are not text
     with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
         json.dump(manifest.data, handle, indent=2, ensure_ascii=False, default=str)
         handle.write("\n")

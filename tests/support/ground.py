@@ -1,5 +1,5 @@
-"""The sandbox family's ground rule, in one place: where fixtures may be built, and when it must say it cannot run rather than
-pass on a filesystem that cannot hold the layers the sandbox mounts.
+"""The sandbox family's ground rule, in one place: where fixtures may be built, and when it must refuse to run on a
+filesystem that cannot hold the layers the sandbox mounts.
 """
 
 from __future__ import annotations

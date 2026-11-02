@@ -38,7 +38,7 @@ class Console:
 
 
 class Transcripts:
-    """The two sinks per member, in append mode so a restart continues the file rather than truncating it."""
+    """The two sinks per member, in append mode."""
 
     def __init__(self, run_dir: str, level: str) -> None:
         self.run_dir = run_dir
@@ -61,7 +61,7 @@ class Transcripts:
         return f"{self.bytes_written} bytes"
 
     def sink_claim(self) -> str:
-        """What the report header may say about these sinks: a sink that holds nothing is never named. Empty says nothing."""
+        """What the report header may say about these sinks."""
         if self.bytes_written:
             return f"verbatim stream written: {self.tally()}, under `agents/`"
         return "stderr only, under `agents/`" if self.stderr_bytes else ""

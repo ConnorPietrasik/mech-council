@@ -197,12 +197,12 @@ class PiRpc:
         for future in list(self._pending.values()):
             if not future.done():
                 future.set_exception(error)
-                # mark it seen: an awaiter may already be gone, and asyncio reports unretrieved exceptions on close
+                # mark it seen: asyncio reports unretrieved exceptions on close
                 future.exception()
         self._pending.clear()
         if self._ask is not None and not self._ask.done():
             self._ask.set_exception(error)
-            # unawaited by design: mark it seen for the same reason
+            # unawaited by design; mark it seen
             self._ask.exception()
         self._ask = None
 

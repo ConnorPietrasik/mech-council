@@ -378,7 +378,7 @@ def test_dispose_escalates_from_sigterm_to_sigkill_on_the_group(monkeypatch):
 
 
 def _member(pgid=None, pid=999_991, stubborn=False, settled=None):
-    """A doubled child and session: `dispose` is the subject, and neither fake carries more than it inspects."""
+    """A doubled child and session: `dispose` under test; each fake answers only what the assertions read."""
     from mech_council.process.spawn import Member
 
     class Proc:

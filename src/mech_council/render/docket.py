@@ -20,7 +20,6 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
         out.append("(none)")
     for item in open_items:
         state = derive(docket, item.id)
-        # A seat's own entries are tagged, so self-agreement is not mistaken for independent confirmation.
         yours = " [yours]" if viewer in item.raised_by else ""
         out.append(f"### {item.id} [{state}]{yours} {item.claim}")
         if item.detail:
@@ -113,7 +112,7 @@ NOTE_WINDOW = 2
 
 
 def _notes_section(docket: Docket, viewer: str) -> list[str]:
-    """What peers told the human without asking — owed nothing here."""
+    """What peers told the human without asking."""
     standing = [docket.human_notes[nid] for nid in docket.note_order if docket.human_notes[nid].state == STANDING]
     fresh = [note for note in standing if note.updated_round >= docket.round - NOTE_WINDOW]
     if not fresh:
@@ -170,7 +169,7 @@ def _question_line(docket: Docket, question: Question, viewer: str) -> str:
 
 
 def _ask_sections(docket: Docket) -> tuple[list[Question], list[Question], list[Question]]:
-    """The asks that will be put to the human, the ones still weighing, and the human's answered ones."""
+    """The asks to show the human, the ones still open, and the answered ones."""
     from ..deliberation.termination import unsettled_questions
 
     open_asks = unsettled_questions(docket)

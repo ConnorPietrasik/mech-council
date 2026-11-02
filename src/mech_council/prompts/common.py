@@ -135,7 +135,7 @@ def goal_line(goal: str | None) -> str:
 
 
 def _workspace(in_place: bool) -> str:
-    """The two workspaces differ on exactly one thing the seats can act on: whether a peer shares the tree."""
+    """The two workspaces differ in one thing the seats can act on: whether a peer shares the tree."""
     return SHARED if in_place else SANDBOX
 
 
@@ -268,8 +268,8 @@ def merge_schema(mode: str) -> str:
     return chair.MERGE_SCHEMA.replace("{id}", adapter_for(mode).id_prefix)
 
 
-#: the passes where a seat owes a verdict-shaped reply, so a repair re-ask quotes the round schema back to it;
-#: `explain` owes prose instead, so it is not one of them
+#: the passes that owe a verdict-shaped reply; a repair re-ask quotes their round schema.
+#: `explain` owes prose, so it is not one.
 SEAT_PHASES = ("round", "gap", "defense", "seconding")
 
 
@@ -294,7 +294,6 @@ def schema_hint(mode: str, *, phase: str) -> str:
         return plan_text.DIRECTION_SCHEMA
     from . import chair
 
-    # an unknown phase is a bug here, not a reason to crash a member's ask
     return chair.WATCHDOG_SCHEMA
 
 
@@ -332,7 +331,7 @@ def ask_merge_task(listing: str) -> str:
 
 
 def comparison_task(listing: str, goal: str | None = None) -> str:
-    """Plan mode's comparison pass, in plan's own prose — which is why it takes no mode."""
+    """Plan mode's comparison pass, in plan's own prose."""
     from . import plan as plan_text
 
     return "\n".join(
@@ -351,7 +350,7 @@ def comparison_task(listing: str, goal: str | None = None) -> str:
 
 
 def direction_task(listing: str, goal: str | None = None) -> str:
-    """Plan mode's one chair-worded ask: the directions themselves are the run's, so the reply is a sentence."""
+    """Plan mode's one chair-worded ask."""
     from . import plan as plan_text
 
     return "\n".join(

@@ -11,7 +11,7 @@ from ..sandbox.mount import DISPOSE_SWEEP_AFTER_S, TERM_GRACE_S
 from .spawn import Member
 
 STDIN_CLOSE_GRACE_S = 3.0
-#: The hurried disposal's bound on one step: a member's notice of its closed stdin, then the reap after the kill.
+#: The hurried disposal's bound on one step.
 HURRY_STEP_S = 0.5
 
 
@@ -36,8 +36,9 @@ def send(pgid: int, sig: int, *, own_pgid: int) -> bool:
 
 
 async def dispose(member: Member, *, own_pgid: int | None = None) -> None:
-    """Close stdin, then group SIGTERM, then group SIGKILL.  Closing stdin is what reaches a tool shell pi
-    detached into its own process group, so it comes first.
+    """Close stdin, then group SIGTERM, then group SIGKILL.
+
+    Stdin first: it reaches a tool shell pi detached into its own process group, which no group signal reaches.
     """
     own_pgid = own_pgid if own_pgid is not None else os.getpgid(0)
     await _bounded(STDIN_CLOSE_GRACE_S, (_settle(member),))
@@ -77,14 +78,14 @@ async def kill_all(members: list[Member], *, own_namespace: int | None, on_line=
 
 
 async def _bounded(seconds: float, steps: Iterable[Awaitable[None]]) -> None:
-    """Do these at once, giving up on them after `seconds`."""
+    """Run these concurrently, giving up after `seconds`."""
     with contextlib.suppress(TimeoutError):
         async with asyncio.timeout(seconds):
             await asyncio.gather(*steps)
 
 
 async def _settle(member: Member) -> None:
-    """The closed stdin, then the member's own way out — the only one that reaches what it detached on its own."""
+    """The closed stdin, then the member's own way out."""
     with contextlib.suppress(Exception):
         await member.rpc.close_stdin()
     await _await_exit(member)
@@ -107,7 +108,7 @@ async def _await_exit(member: Member) -> None:
 
 
 def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None = None) -> SweepResult:
-    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created; where `/proc` is absent, nobody.
+    """Kill every pid whose `/proc/<pid>/ns/mnt` is one this run created; with no `/proc`, it kills nothing.
     The comparison is against `keep_fds`, never an inode read back from `/proc`.
     """
     result = SweepResult()
@@ -182,7 +183,7 @@ async def dispose_all(
 
 
 def _sweep_and_report(members: list[Member], *, own_namespace: int | None, on_line=None) -> SweepResult:
-    # in place the members share this namespace, so there is nothing to sweep without reaching past the run
+    # in place the members share this namespace, so there is nothing to sweep
     namespaces = namespace_set(members, own_namespace=own_namespace)
     result = sweep(namespaces, keep_fds=[member.ns_fd for member in members]) if namespaces else SweepResult()
     close_ns_fds(members)

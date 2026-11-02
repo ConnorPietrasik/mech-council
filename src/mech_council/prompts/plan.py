@@ -75,7 +75,7 @@ ROUND_SCHEMA = """\
 ```
 """
 
-# `common.round_briefing`'s per-mode slot: prose only plan's seats read.
+# the `common.round_briefing` slot; plan-specific prose.
 EXTRA_BRIEFING = """\
 # Unanswered questions
 
@@ -128,7 +128,7 @@ COMPARISON_SCHEMA = """\
 ```
 """
 
-# The one ask the chair words: the run raises it, and asks only for the sentence.
+# The chair-worded ask: the run raises it; the reply is a sentence.
 DIRECTION = """\
 # Say what is at stake between these directions
 

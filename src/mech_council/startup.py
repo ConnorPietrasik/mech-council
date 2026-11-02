@@ -95,9 +95,7 @@ def _output_target(args: cli.Args, council: config_mod.Council) -> str:
 
 
 def confirm_overwrite(launch: Launch) -> list[str]:
-    """Ask before `--output` replaces a file that is already there, on stderr: a guard is not narration, and
-    a question that lives in a redirected stdout is a question nobody sees.
-    """
+    """Ask before `--output` replaces a file that is already there, on stderr."""
     target = launch.output_path
     if not os.path.exists(target):
         return []
@@ -113,7 +111,7 @@ def confirm_overwrite(launch: Launch) -> list[str]:
             terminal, answer = False, ""
         if answer not in ("y", "yes"):
             if not terminal:
-                sys.stderr.write("\n")  # no typed answer echoed onto the prompt's line, so the refusal owes one
+                sys.stderr.write("\n")  # no typed answer echoed onto the prompt's line, so the refusal prints one
             unseen = "" if terminal else " (stdin is not a terminal, so the question above went unseen)"
             raise ConfigError(f"{target} was left alone and nothing ran{unseen}: pass --overwrite to replace it without being asked")
     return [note]
@@ -145,7 +143,7 @@ def _trust_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
 
 
 def _in_place_notes(loaded: config_mod.ConfigFile, council: config_mod.Council, args: cli.Args, *, plat: str) -> list[str]:
-    """Who asked to run unsandboxed, in the order the operator should read it."""
+    """Who asked to run unsandboxed."""
     if not council.in_place:
         return []
     costs = "members share one project and nothing they write is journaled or discarded"

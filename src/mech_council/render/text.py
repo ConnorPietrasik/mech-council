@@ -10,13 +10,13 @@ def severity_key(severity: str) -> tuple[int, str]:
 
 
 def caption(agent_id: str, names: dict[str, str]) -> str:
-    """The report's form: the name beside the id every record of the run is written with."""
+    """The report's form: the name beside the id the run's records use."""
     name = names.get(agent_id)
     return f"{name} ({agent_id})" if name else agent_id
 
 
 def name_of(agent_id: str, names: dict[str, str]) -> str:
-    """The console's form: the name alone, the id left to the records."""
+    """The console's form: the name alone; the id stays in the records."""
     return names.get(agent_id, agent_id)
 
 
@@ -25,7 +25,7 @@ _AGENT_ID = re.compile(r"Agent\d+")
 
 
 def spoken(text: str, names: dict[str, str]) -> str:
-    """A model's sentence with names in place of the ids it was handed; only the human's screen gets this."""
+    """A model's sentence with names in place of the ids it was handed."""
     return _AGENT_ID.sub(lambda found: names.get(found.group(), found.group()), text or "")
 
 

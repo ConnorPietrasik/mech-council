@@ -61,7 +61,7 @@ def no_user_config(**extra: str) -> dict[str, str]:
     """`os.environ` plus `extra`, minus whatever would make someone's own councils part of a run.
 
     The run markers go here because a seat's own env always carries them: without the scrub, a test that
-    convenes the CLI from inside a running council trips the nested-council guard and reports a phantom bug.
+    convenes the CLI from inside a running council trips the nested-council guard.
     """
     out = dict(os.environ, **extra)
     for marker in ("COUNCIL_CONFIG", "COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"):

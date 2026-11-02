@@ -293,11 +293,7 @@ def test_a_merge_of_an_id_the_chair_was_never_shown_retires_nothing():
 
 
 def test_a_group_that_names_the_later_entry_canonical_folds_it_into_the_earlier_one():
-    """The chair is told the earliest id is canonical; a group ignoring that must fold, not no-op.
-
-    The earlier entry carries verdicts and a merge may not discard them, so honoring the chair's later canonical
-    would retire nothing at all.
-    """
+    """The chair is told the earliest id is canonical; a group ignoring that must fold, not no-op."""
     import asyncio
 
     from mech_council import run as run_mod
@@ -870,7 +866,7 @@ def test_dropping_an_ask_leaves_the_hold_and_the_item_exactly_where_they_were():
 
 
 def test_the_ask_a_hold_raised_goes_when_the_seat_lets_go_of_the_item():
-    """The ask was the sound of a seat being stuck: once it works the item out, the human is not asked about it."""
+    """An ask is a seat's stuck state: once it works the item out, the human is not asked about it."""
     import asyncio
 
     def reply(ask):
@@ -1060,7 +1056,7 @@ def test_a_question_shown_at_the_grace_checkpoint_is_unanswered_never_unasked():
 
 
 def test_the_pass_before_the_report_opens_no_hold_and_moves_none():
-    """One verb there, said out loud when a seat reaches past it."""
+    """The last pass reads only releases: a restance there is recorded nowhere, and an objection lands nowhere."""
     import asyncio
 
     from mech_council.deliberation.state import AGREE, NEEDS_HUMAN
@@ -1121,9 +1117,7 @@ def test_a_needs_human_at_the_bar_holds_the_run_until_the_human_answers():
 
 
 def test_the_park_is_the_only_thing_that_says_the_run_is_waiting():
-    """A run cut short reports the answer it waited on: a phase left standing after the checkpoint closed
-    would go on naming asks it had stopped putting to the human.
-    """
+    """A run cut short reports the asks it was parked on when the checkpoint closed."""
     import asyncio
 
     def reply(ask):
@@ -1254,7 +1248,7 @@ def test_a_council_that_settles_on_the_last_pass_does_not_end_needs_human():
 
 
 def test_a_second_on_an_ask_a_peer_already_answered_buys_nothing_and_says_so_once():
-    """The answer came first, so the second settled nothing: the seat gets the one line that says what the second did not buy."""
+    """The answer came first, so the second changed nothing: one event names the answer that landed."""
     import asyncio
 
     def reply(ask):
@@ -1932,9 +1926,7 @@ def test_a_council_that_will_not_converge_asks_instead_of_spending_another_round
 
 
 def test_a_council_still_laying_plans_buys_its_split_one_more_round():
-    """A seat laying a fresh plan is still trying to win a camp over, so the ask waits out the rounds it is working in — three at
-    the latest, whatever it is drawing.
-    """
+    """A seat laying a fresh plan is still trying to win a camp over: the split ask waits out its rounds, three at the latest."""
     import asyncio
 
     def reply(ask):
@@ -1962,9 +1954,7 @@ def test_a_council_still_laying_plans_buys_its_split_one_more_round():
 
 
 def test_a_split_on_the_last_round_is_asked_however_busy_the_council_was():
-    """Waiting for an idle round buys nothing when there is no round left to wait for: a split that ends unasked is the failure
-    mode this ask exists to avoid, so the ceiling asks regardless of how much work that round was doing.
-    """
+    """The ceiling asks regardless of how much work that round was doing."""
     import asyncio
 
     def reply(ask):
@@ -1991,7 +1981,7 @@ def test_a_split_on_the_last_round_is_asked_however_busy_the_council_was():
 
 
 def test_renaming_a_merge_is_no_movement_to_a_split():
-    """The clock counts camps, not labels: a seat re-stamping its merge every round is fidgeting, and fidgeting runs out at three."""
+    """The clock counts camps, not labels: renaming the merge every round moves nothing, and the split is asked at three."""
     import asyncio
 
     def reply(ask):
@@ -2012,10 +2002,7 @@ def test_renaming_a_merge_is_no_movement_to_a_split():
 
 
 def test_a_split_menu_offers_the_directions_in_ids_and_prints_them_in_names():
-    """A taken line is recorded verbatim as what the seats plan against, so the menu is stored in the ids they read; the console is
-    where a seat becomes a name — over the chair's sentence too, which is worded from a listing headed by those ids.  Every line
-    carries the plan's own claim and stages — a `merged:` token alone names nothing.
-    """
+    """The menu is stored in the ids the seats read and printed in names; every line carries the plan's own claim and stages."""
     import asyncio
 
     from mech_council.humaninput import render_ask_set
@@ -2077,7 +2064,7 @@ def test_an_answer_at_the_round_limit_buys_the_round_it_promised():
 
 
 def test_an_answer_at_the_ceiling_is_asked_on_the_grace_budget():
-    """`round_limit_reached` used to be the one way a question ended unasked; the grace round is what makes an answer useful."""
+    """The round limit asks rather than silencing: an answer at the ceiling is on the grace budget."""
     import asyncio
 
     def reply(ask):
@@ -2238,7 +2225,7 @@ def test_plan_mode_compares_the_plans_and_no_preference_alone_never_sets_a_direc
 
 
 def test_plan_mode_reaches_consensus_on_one_backer_and_two_shrugs():
-    """The termination order's direction rule, conditions 1-3, including what it concedes out loud."""
+    """The termination order's direction rule, conditions 1-3."""
     import asyncio
 
     def reply(ask):
@@ -2292,7 +2279,7 @@ def test_an_answer_naming_its_addressee_instead_of_a_q_id_still_lands():
 
 
 def test_a_seat_cannot_answer_a_question_the_docket_addressed_to_a_peer():
-    """An answer is printed under a name: a seat answering a question it was not asked puts words in a peer's mouth."""
+    """An answer is printed under a name: a seat answering a question it was not asked answers for a peer."""
     import asyncio
 
     def reply(ask):
@@ -2396,9 +2383,7 @@ def test_a_defense_that_answers_in_other_words_keeps_the_escalation_standing():
 
 
 def test_a_seat_demoted_in_one_round_wins_its_defense_in_the_next():
-    """A demotion used to arm a guard that outlived the round that armed it: on that item the seat's next defense
-    was thrown away unread and the report said it had not answered the challenge at all.
-    """
+    """A demotion in one round does not reach the next: the seat's defense is read and the report says it answered the challenge."""
     import asyncio
 
     def reply(ask):
@@ -2632,9 +2617,7 @@ def test_a_note_about_an_item_that_does_not_exist_keeps_the_note_and_drops_the_l
 
 
 def test_the_last_pass_reaches_the_human_because_the_asking_follows_it():
-    """A peer's answer is what proves a note wrong, and that is learned on the last pass: dropping it there
-    would leave the wrong statement standing in front of the human with no checkpoint left to correct it.
-    """
+    """A peer's answer that proves a note wrong is read on the last pass, so the human is shown the correction."""
     import asyncio
 
     def reply(ask):
