@@ -207,6 +207,12 @@ def _seat_name(entry: dict, where: str) -> str:
     return name
 
 
+def _protocol_shaped(name: str) -> bool:
+    """A name the human's line grammar would claim for its own: `H1`- or `N1`-shaped."""
+    folded = name.strip().casefold()
+    return len(folded) >= 2 and folded[0] in "hn" and folded[1:].isdigit()
+
+
 def _check_written(table: dict, name: str) -> None:
     where = f"[councils.{name}]"
     _reject_unknown(table, COUNCIL_KEYS, where)
@@ -482,16 +488,34 @@ def convene(
     agents = _members(agents_raw, f"councils.{name}.agents", chair=False)
     if len(agents) < 2:
         raise ConfigError(f"[councils.{name}] convenes {len(agents)} agent(s); a council needs ≥ 2{via}")
-    seen: set[str] = set()
+    #: casefolded name → as written: the human's `<name>: <text>` line matches case-insensitively
+    seen: dict[str, str] = {}
     for agent in agents:
-        if agent.name in seen:
-            raise ConfigError(f"[councils.{name}] lists the agent name {agent.name!r} twice")
-        seen.add(agent.name)
+        folded = agent.name.casefold()
+        if folded in seen:
+            if seen[folded] == agent.name:
+                raise ConfigError(f"[councils.{name}] lists the agent name {agent.name!r} twice")
+            raise ConfigError(f"[councils.{name}] lists the agent names {seen[folded]!r} and {agent.name!r}, which differ only in case")
+        seen[folded] = agent.name
     if "chair" not in table:
         raise ConfigError(f"[councils.{name}] has no [councils.{name}.chair]; every council needs one{via}")
     chair = _members(table["chair"], f"councils.{name}.chair", chair=True)[0]
-    if chair.name in seen:
-        raise ConfigError(f"[councils.{name}] lists the name {chair.name!r} for both a seat and the chair")
+    folded = chair.name.casefold()
+    if folded in seen:
+        if seen[folded] == chair.name:
+            raise ConfigError(f"[councils.{name}] lists the name {chair.name!r} for both a seat and the chair")
+        raise ConfigError(f"[councils.{name}] lists {seen[folded]!r} for a seat and {chair.name!r} for the chair, differing only in case")
+    for index, agent in enumerate(agents, 1):
+        if _protocol_shaped(agent.name):
+            raise ConfigError(
+                f"[councils.{name}.agents][{index}] the seat name {agent.name!r} reads like a question or note id (H1, N1), "
+                "which the human's line grammar claims for its own"
+            )
+    if _protocol_shaped(chair.name):
+        raise ConfigError(
+            f"[councils.{name}.chair] the chair name {chair.name!r} reads like a question or note id (H1, N1), "
+            "which the human's line grammar claims for its own"
+        )
     incomplete = "states 'provider' without 'model' — pi refuses to start a seat configured that way" + via
     for index, agent in enumerate(agents, 1):
         if agent.provider and not agent.model:

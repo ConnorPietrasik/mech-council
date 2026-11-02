@@ -30,12 +30,14 @@ class FakeRpc:
     def __init__(self, script):
         self.script = list(script)
         self.calls: list[str] = []
+        self.timeouts: list[float | None] = []
         self.activity = None
         self.aborts = 0
         self.prompts = 0
 
     async def ask(self, message, *, timeout=None):
         self.calls.append(message)
+        self.timeouts.append(timeout)
         self.prompts += 1
         item = self.script.pop(0) if self.script else {"text": ""}
         if isinstance(item, Exception):
@@ -366,12 +368,12 @@ def test_needs_repair_distinguishes_the_repairable_from_themerely_empty():
 
 
 class Reader:
-    """Off-cycle stdin: the human typed `explain H1` and nothing else."""
+    """Off-cycle stdin: scripted lines, then nothing."""
 
     tty = True
 
-    def __init__(self):
-        self.lines = ["explain H1"]
+    def __init__(self, lines=("explain H1",)):
+        self.lines = list(lines)
 
     def read_nowait(self):
         return self.lines.pop(0) if self.lines else None
@@ -379,12 +381,22 @@ class Reader:
 
 def explain_lane(replies):
     """The `explain` lane, with Agent1 holding the one open question and `explain H1` typed; `replies` are the seat's."""
-    from mech_council.run import _explainer
+    from mech_council.run import _messenger
 
     board, members, console, _council = lanes(script={"seat1-one": replies})
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     escalations.raise_question(docket, text="which tenant?", asker="Agent1", item_id=None, blocking=False, round_=1)
-    return members, console, Checkpoint(docket, Reader(), console=console, names={"Agent1": "one"}, ask_seat=_explainer(board))
+    return members, console, Checkpoint(docket, Reader(), console=console, names={"Agent1": "one"}, ask_seat=_messenger(board))
+
+
+def message_lane(replies, lines=("one: why?",)):
+    """The message lane: `lines` typed off-cycle, `replies` the named seat's; Agent1 is named `one`, the chair `gavel`."""
+    from mech_council.run import _messenger
+
+    board, members, console, _council = lanes(script={"seat1-one": replies})
+    docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    checkpoint = Checkpoint(docket, Reader(lines), console=console, names={"Agent1": "one", "chair": "gavel"}, ask_seat=_messenger(board))
+    return board, members, console, checkpoint
 
 
 def test_an_explain_ask_costs_one_prompt_and_answers_in_the_seat_s_own_words():
@@ -406,6 +418,53 @@ def test_an_explain_asked_of_a_dead_seat_costs_the_answer_and_not_the_run():
     assert members.members["seat1-one"].restarts == 1, "the lane took its one restart and one re-ask before giving up"
     assert not result.recommendations
     assert any("still yours to answer or skip" in line for line in console.lines)
+
+
+# --------------------------------------------------------------- The message lane
+
+
+def test_a_message_costs_one_prompt_and_the_seat_answers_in_its_own_words():
+    """A direct message asks for prose, so the lane must not parse a verdict out of it: one prompt, no repair ladder."""
+    said = "it is bounded:\n\n10k entries, oldest drops"
+    _board, members, console, cp = message_lane([{"text": said}])
+    run(cp.drain())
+
+    assert len(members.members["seat1-one"].rpc.calls) == 1, "the seat is asked once"
+    record = cp.docket.human_messages[0]
+    assert record.to == "Agent1" and record.reply == said, "the reply, whole, on the record"
+    assert not [line for line in console.lines if "refused" in line or "rejected" in line], "prose is not a refused answer"
+    assert any("replies:" in line for line in console.lines)
+
+
+def test_a_message_to_the_chair_goes_through_the_chair_lane_not_the_pool():
+    board, members, _console, cp = message_lane([], lines=("gavel: why did you merge those?",))
+    members.members["chair"].rpc = FakeRpc([{"text": "they were the same defect"}])
+    run(cp.drain())
+
+    assert len(members.members["chair"].rpc.calls) == 1, "the chair takes its own slot"
+    assert not members.members["seat1-one"].rpc.calls and not members.members["seat2-two"].rpc.calls
+    assert cp.docket.human_messages[0].to == "chair"
+    assert members.members["chair"].rpc.timeouts == [board.council.chair_timeout_sec], "the chair's message takes the chair's budget"
+
+
+def test_a_message_asked_of_a_dead_seat_costs_the_answer_and_not_the_run():
+    _board, members, console, cp = message_lane([GONE, GONE])
+    run(cp.drain())
+
+    assert members.members["seat1-one"].restarts == 1, "the lane took its one restart and one re-ask before giving up"
+    assert cp.docket.human_messages[0].failure and not cp.docket.human_messages[0].reply
+    assert any("did not reach" in line for line in console.lines)
+
+
+def test_a_message_to_a_seat_that_is_mid_ask_is_refused_not_restarted():
+    """A seat mid-ask cannot take a second prompt; restarting it to deliver a message would lose the round ask in flight."""
+    board, members, console, cp = message_lane([{"text": "never asked"}])
+    board.in_flight["one"] = "seat1-one"
+    run(cp.drain())
+
+    assert not members.members["seat1-one"].rpc.calls and members.members["seat1-one"].restarts == 0
+    assert cp.docket.human_messages[0].failure
+    assert any("mid-ask" in line for line in console.lines)
 
 
 # -------------------------------------------------- The restart-and-re-ask path

@@ -35,6 +35,9 @@ def build(n=3):
         ("skip h2", "skip", "", "skip h2", ("H2",)),
         ("skip H1, h2", "skip", "", "skip H1, h2", ("H1", "H2")),
         ("skip H1 H2", "skip", "", "skip H1 H2", ("H1", "H2")),
+        ("Metic: does it have a bound?", "message", "metic", "does it have a bound?", ()),
+        ("METIC = hi", "message", "metic", "hi", ()),
+        ("Metic Jones: a name with a space", "message", "metic jones", "a name with a space", ()),
         ("", "end", "", "", ()),
         ("   ", "end", "", "", ()),
     ],
@@ -67,6 +70,16 @@ def test_a_line_that_is_not_the_grammar_is_never_an_answer(text):
 
 def test_an_answer_containing_a_colon_is_still_one_answer():
     assert parse_line("H1: use X: because Y").text == "use X: because Y"
+
+
+def test_a_message_body_may_hold_its_own_colons():
+    line = parse_line("Metic: use X: because Y")
+    assert line.kind == "message" and line.id == "metic" and line.text == "use X: because Y"
+
+
+def test_an_empty_message_changes_nothing():
+    line = parse_line("Metic:")
+    assert line.kind == "error" and "empty message" in line.text
 
 
 # --------------------------------------------------------------------------- the menu
@@ -219,15 +232,29 @@ class Reader:
 class Console:
     def __init__(self):
         self.lines: list[str] = []
+        self.events: list[dict] = []
 
     def say(self, text, *args):
         self.lines.append(text % args if args else text)
+
+    def event(self, name, **fields):
+        self.events.append(dict(name=name, **fields))
 
 
 def make_checkpoint(docket, lines=(), interactive=True, ask_seat=None, closed=False):
     console = Console()
     reader = Reader(lines, interactive, closed)
     return Checkpoint(docket, reader, console=console, names=NAMES, ask_seat=ask_seat), console, reader
+
+
+class Reply:
+    def __init__(self, text):
+        self.text = text
+
+
+class Lost:
+    text = ""
+    failure = "one failed (round 1): the child is gone"
 
 
 def backed(docket, *texts):
@@ -399,10 +426,6 @@ def test_explain_asks_the_asker_and_records_a_recommendation_not_an_answer():
     listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
     calls: list[tuple[str, str]] = []
 
-    class Reply:
-        def __init__(self, text):
-            self.text = text
-
     async def ask_seat(agent, text, *, round_, phase):
         calls.append((agent, text))
         return Reply("because the tenant key is what the cache is indexed by")
@@ -451,6 +474,99 @@ def test_an_explain_reply_of_nothing_buys_no_recommendation():
     outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
     assert outcome.recommendations == {}
     assert any("sent nothing" in line for line in console.lines)
+
+
+# --------------------------------------------------------------------------- messages: a seat takes them in its own words
+
+
+def test_a_message_reaches_the_named_seat_and_is_recorded():
+    """A message is not a disposition: the ask stays open, the reply lands beside the record, not on it."""
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    calls: list[tuple[str, str]] = []
+
+    async def ask_seat(agent, text, *, round_, phase):
+        calls.append((agent, text))
+        return Reply("it does: 10k entries, then the oldest drops")
+
+    cp, console, _reader = make_checkpoint(docket, lines=["Metic: does the cache have a bound?", ""], ask_seat=ask_seat)
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert calls and calls[0][0] == "Agent1" and "does the cache have a bound?" in calls[0][1]
+    assert not outcome.answers and not outcome.skipped, "a message is not an answer or a decline"
+    record = docket.human_messages[0]
+    assert record.to == "Agent1" and record.to_name == "Metic"
+    assert record.reply == "it does: 10k entries, then the oldest drops" and not record.failure
+    assert any("it does: 10k entries" in line for line in console.lines), "the reply, whole, is shown"
+    kinds = [event["name"] for event in console.events]
+    assert "human_message" in kinds and "human_message_reply" in kinds
+
+
+def test_a_message_to_the_chair_goes_to_the_chair_key():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    calls: list[str] = []
+
+    async def ask_seat(agent, text, *, round_, phase):
+        calls.append(agent)
+        return Reply("because they were the same defect")
+
+    cp, _console, _reader = make_checkpoint(docket, lines=["Gavel: why did you merge those?", ""], ask_seat=ask_seat)
+    asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert calls == ["chair"], "the chair is addressed by name and routed by its file base"
+
+
+def test_a_message_to_a_name_on_no_roster_is_corrected_not_routed():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    calls: list[str] = []
+
+    async def ask_seat(agent, text, *, round_, phase):
+        calls.append(agent)
+        return Reply("x")
+
+    cp, console, _reader = make_checkpoint(docket, lines=["Bob: hi", ""], ask_seat=ask_seat)
+    asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert calls == [] and not docket.human_messages
+    assert any("no seat called bob" in line for line in console.lines)
+
+
+def test_a_message_with_no_channel_is_said_so_and_records_nothing():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+    cp, console, _reader = make_checkpoint(docket, lines=["Metic: hi", ""])
+    asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    assert not docket.human_messages
+    assert any("no channel" in line for line in console.lines)
+
+
+def test_a_failed_message_is_recorded_as_a_failure_and_keeps_asking():
+    docket = build()
+    listing = questions(docket, ("which tenant?", "Agent1", "F1", True))
+
+    async def ask_seat(agent, text, *, round_, phase):
+        return Lost()
+
+    cp, console, _reader = make_checkpoint(docket, lines=["Metic: hi", ""], ask_seat=ask_seat)
+    outcome = asyncio.run(cp.run(listing, ask_set=listing, round_=1, terminal=True, waiting=True))
+    record = docket.human_messages[0]
+    assert record.failure == Lost.failure and not record.reply
+    assert not outcome.answers, "the failed message declines nothing: the ask is still open"
+    assert any("did not reach Metic" in line for line in console.lines)
+
+
+def test_a_message_typed_while_the_seats_work_lands_at_the_boundary():
+    docket = build()
+    backed(docket, "which tenant?")
+
+    async def ask_seat(agent, text, *, round_, phase):
+        return Reply("a bound there is")
+
+    cp, console, _reader = make_checkpoint(docket, lines=["Senior: does the cache have a bound?"], ask_seat=ask_seat)
+    outcome = asyncio.run(cp.drain())
+    assert not outcome.answers and not outcome.skipped
+    record = docket.human_messages[0]
+    assert record.to == "Agent2" and record.reply == "a bound there is"
+    assert any("between rounds" in line for line in console.lines), "the echo says when the seat hears it"
 
 
 # --------------------------------------------------------------------------- notes: shown, never answered

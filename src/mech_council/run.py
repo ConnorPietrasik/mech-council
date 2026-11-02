@@ -232,7 +232,7 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
     reader = LineReader()
     reader.start()
     checkpoint = Checkpoint(docket, reader, console=console, names=names)
-    checkpoint.ask_seat = _explainer(lanes)
+    checkpoint.ask_seat = _messenger(lanes)
     port = Port(
         council=council, lanes=lanes, chair=chair, brief=brief, console=console, checkpoint_run=checkpoint, docket=docket, names=names
     )
@@ -284,16 +284,23 @@ def _interruption(brake: Brake) -> str:
     return f"interrupted by {at.name} {at.elapsed:.1f} s in{where}"
 
 
-def _explainer(lanes: Lanes):
-    """The `explain H1` lane: the seat answers in prose for the human, so nothing is parsed out of it."""
+def _messenger(lanes: Lanes):
+    """The human's direct-message lane: `explain H1` and `<name>: <text>` both land here. A seat takes the
+    pool, the chair its own slot; the reply is prose, so nothing is parsed out of it."""
 
-    async def explain(agent: str, message: str, *, round_: int, phase: str):
+    async def send(agent: str, message: str, *, round_: int, phase: str):
         try:
+            if agent == lanes.council.chair.file_base:
+                return await lanes.ask_chair(message, round_=round_, phase=phase, kind="prose", timeout=lanes.council.chair_timeout_sec)
+            file_base = lanes.members.file_base_for(agent)
+            if file_base in lanes.in_flight.values():
+                # a seat mid-ask cannot take a second prompt: refusing is the cheap path, restarting it is not
+                return Outcome(text="", failure=f"{lanes.members.display_for(file_base)} is mid-ask; try again at the next checkpoint")
             return await lanes.ask_agent(agent, message, round_=round_, phase=phase, kind="prose", parse_kw={})
         except (AskUnusable, AskLost) as failure:
             return Outcome(text="", failure=str(failure))
 
-    return explain
+    return send
 
 
 def _emitter(console: Console, names: dict[str, str]):
@@ -629,6 +636,18 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
                 "retraction_shown_round": note.retraction_shown_round,
             }
             for note in (docket.human_notes[nid] for nid in docket.note_order)
+        ],
+        "messages": [
+            {
+                "id": m.id,
+                "to": m.to,
+                "to_name": m.to_name,
+                "round": m.round,
+                "message": m.text,
+                "reply": m.reply,
+                "failure": m.failure,
+            }
+            for m in docket.human_messages
         ],
         "escalations": [
             {

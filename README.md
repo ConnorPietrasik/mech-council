@@ -111,10 +111,16 @@ H1: keep it 30 days          # an answer is authoritative, and buys a round
 H1: 2                        # takes that option verbatim; to take it with a qualifier,
                              # answer in your own words
 explain H2: what breaks?     # routes your question to the seat that asked
+Metic: does it have a bound? # a direct message to a seat or the chair: prose in, prose out,
+                             # nothing on the docket changes, no other seat sees it
 skip                         # decline everything on the table
 skip H1 H2                   # decline these two and answer the rest
                              # a blank line ends the checkpoint
 ```
+
+A direct message costs the named seat one prompt and is answered in prose for you alone. It lands
+where your input is read — at once while the run is parked, at the next boundary while the seats
+work — when the named seat is idle; the chair waits out its watchdog ask rather than refuse you.
 
 The last line you type about a question is your word on it: answering one you declined takes it
 back, and declining one you answered withdraws the answer — until the answer is applied, after which
@@ -147,7 +153,7 @@ One `Ctrl+C` stops the deliberation and still writes the report. A second `Ctrl+
 | `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. |
 | `run.json` | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
 | `events.jsonl` | Append-only event log — one JSON object per line, the whole run in order. |
-| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note and the round each one was shown at. |
+| `human_input.json` | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
 | `agents/` | Per-member stderr, and transcripts if you asked for them (`--transcripts full`). |
 
 The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, else

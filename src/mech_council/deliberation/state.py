@@ -161,6 +161,19 @@ class Note:
 
 
 @dataclass
+class HumanMessage:
+    """A direct message from the human to a seat or the chair: no stance, no docket change, prose back."""
+
+    id: str
+    to: str  # the roster key: a seat's protocol id, or the chair's file_base
+    to_name: str  # the display name the message went to
+    round: int
+    text: str
+    reply: str = ""
+    failure: str = ""
+
+
+@dataclass
 class QA:
     id: str
     asker: str
@@ -209,6 +222,8 @@ class Docket:
     #: what seats told the human that needs no answer
     human_notes: dict[str, Note] = field(default_factory=dict)
     note_order: list[str] = field(default_factory=list)
+    #: direct messages the human sent to a seat or the chair, and what came back
+    human_messages: list[HumanMessage] = field(default_factory=list)
     approaches: dict[str, Approach] = field(default_factory=dict)  # plan
     agreed_points: list[dict] = field(default_factory=list)  # plan: compare
     backing: dict[str, str] = field(default_factory=dict)  # plan
@@ -226,6 +241,7 @@ class Docket:
     next_question: int = 1
     next_qa: int = 1
     next_note: int = 1
+    next_message: int = 1
 
     @property
     def n(self) -> int:

@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 from .deliberation.engine import CheckpointOutcome
 from .deliberation.escalations import effective_class, showable, stop_holders
-from .deliberation.state import ASKED, Docket, Note, Question
+from .deliberation.state import ASKED, Docket, HumanMessage, Note, Question
 from .deliberation.termination import unsettled_questions
 from .humanio import EOF
 
@@ -19,17 +19,21 @@ _SKIP_IDS = re.compile(r"^\s*(?:skip|none)\s+((?:h\d+[\s,]+)*h\d+)[\s,]*$", re.I
 _NOTE_LINE = re.compile(r"^\s*(?:note\s+)?n\d+\s*[:=]", re.IGNORECASE)
 #: an answer that is only a number takes that option, and only when the question offered that many
 _SELECTION = re.compile(r"^\s*(\d{1,2})\s*$")
+#: `<name>: <text>` messages the named seat or chair: the first `:` or `=` is the separator
+_MESSAGE = re.compile(r"^\s*(.+?)\s*[:=]\s*(.*)$", re.DOTALL)
 
 #: what the human is told about the explain ask in flight, by the mode that asks it
 _PARKED = "the run stays parked and this is the only ask in flight"
 _BETWEEN = "the run is between rounds and this is the only ask in flight"
 
 _GRAMMAR = (
-    "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), and "
-    "`explain H1: <question>` asks the seat that raised H1 — to answer in your own words, write `H1: <text>`"
+    "that is not the grammar: `skip` declines every open question, `skip H1` declines one (`skip H1 H2` two), "
+    "`explain H1: <question>` asks the seat that raised H1, and `<name>: <text>` messages a seat or the chair — "
+    "to answer in your own words, write `H1: <text>`"
 )
 #: an id and a colon answer nothing: `skip H1` is the word for declining one ask
 _EMPTY_ANSWER = "an empty answer changes nothing: `H1: <text>` answers an open question, `skip H1` declines one"
+_EMPTY_MESSAGE = "an empty message changes nothing: `<name>: <text>` messages a seat or the chair directly"
 
 
 class Line:
@@ -40,8 +44,9 @@ class Line:
 
 
 def parse_line(text: str) -> Line:
-    """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker · `skip` all, `skip H1` one.
-    Every line names the question it answers: a bare sentence or a bare number is refused.
+    """`H1: text` answers · `H1: 2` takes option 2 · `explain H1`/`ask H1: …` asks the asker ·
+    `<name>: <text>` messages the named seat or chair · `skip` all, `skip H1` one.
+    A bare sentence or a bare number names neither a question nor a seat, and is refused.
     """
     if not (text or "").strip():
         return Line("end")
@@ -58,6 +63,11 @@ def parse_line(text: str) -> Line:
         return Line("explain", id=match.group(1).upper(), text=(match.group(2) or "").strip() or "Why are you asking this?")
     if _NOTE_LINE.match(text):
         return Line("error", text="a note needs no answer and nothing you type retracts one; `H1: <text>` answers an open question")
+    if match := _MESSAGE.match(text):
+        body = match.group(2).strip()
+        if not body:
+            return Line("error", text=_EMPTY_MESSAGE)
+        return Line("message", id=match.group(1).strip().casefold(), text=body)
     return Line("error", text=_GRAMMAR)
 
 
@@ -115,6 +125,7 @@ def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, 
             "",
             "answer with `H1: <text>` · a number and nothing else (`H1: 2`) takes that option verbatim, in the asker's words",
             "to take one with a qualifier, answer in your own words · ask the asker `explain H1: <question>`",
+            "`<name>: <text>` messages a seat or the chair directly — prose in, prose out, nothing on the docket changes",
             "`skip` every open question, `skip H1` just one · a blank line ends this checkpoint",
         ]
     return "\n".join(lines)
@@ -171,6 +182,8 @@ class Checkpoint:
         self.console = console
         self.names = names
         self.ask_seat = ask_seat
+        #: display name as typed (casefolded) → the roster key the seat or chair sits under
+        self.targets = {name.casefold(): key for key, name in names.items()}
         #: `run` owns the reader's lines for as long as it is waiting
         self.parked = False
 
@@ -227,6 +240,9 @@ class Checkpoint:
                     reply = await self._explain(parsed.id, parsed.text)
                     if reply is not None:
                         result.recommendations[parsed.id] = reply
+                if parsed.kind == "message":
+                    await self._message(parsed.id, parsed.text)
+                    continue
         finally:
             self.parked = False
         result.skipped = sorted(declined)
@@ -249,7 +265,10 @@ class Checkpoint:
                 break
             parsed = parse_line(item if isinstance(item, str) else "")
             if parsed.kind == "end":
-                self.console.say("nothing is waiting on you: `H1: <text>` answers an open question, `explain H1` asks the asker why")
+                self.console.say(
+                    "nothing is waiting on you: `H1: <text>` answers an open question, `explain H1` asks the asker why, "
+                    "`<name>: <text>` messages a seat or the chair"
+                )
                 continue
             if parsed.kind == "error":
                 self.console.say(parsed.text)
@@ -269,6 +288,9 @@ class Checkpoint:
                 reply = await self._explain(parsed.id, parsed.text, when=_BETWEEN)
                 if reply is not None:
                     result.recommendations[parsed.id] = reply
+            if parsed.kind == "message":
+                await self._message(parsed.id, parsed.text, when=_BETWEEN)
+                continue
         result.skipped = sorted(declined)
         return result
 
@@ -347,6 +369,39 @@ class Checkpoint:
             return None
         self.console.say(f"{qid}, {who}'s recommendation: {_clip(text)}")
         return text
+
+    async def _message(self, name: str, text: str, *, when: str = _PARKED) -> None:
+        """A direct message to the named seat or chair: prose back, no docket change, no disposition."""
+        if self.ask_seat is None:
+            self.console.say("no channel to the seats this run: a message would go nowhere")
+            return
+        key = self.targets.get(name)
+        if key is None:
+            self.console.say(f"no seat called {name}: {', '.join(sorted(self.names.values()))} take a message")
+            return
+        from .prompts import common
+
+        who = self.names[key]
+        record = HumanMessage(id=f"M{self.docket.next_message}", to=key, to_name=who, round=self.docket.round, text=text)
+        self.docket.next_message += 1
+        self.docket.human_messages.append(record)
+        self.console.event("human_message", id=record.id, to=key, to_name=who, round=self.docket.round, text=text)
+        self.console.say(f"messaging {who}; {when}")
+        outcome = await self.ask_seat(key, common.message_ask(text), round_=self.docket.round, phase="message")
+        if failure := getattr(outcome, "failure", None):
+            record.failure = failure
+            self.console.event("human_message_reply", id=record.id, to=key, to_name=who, failure=failure)
+            self.console.say(f"{failure} — the message did not reach {who}")
+            return
+        reply = (getattr(outcome, "text", "") or "").strip()
+        if not reply:
+            record.failure = "the seat sent nothing"
+            self.console.event("human_message_reply", id=record.id, to=key, to_name=who, failure=record.failure)
+            self.console.say(f"{who} sent nothing")
+            return
+        record.reply = reply
+        self.console.event("human_message_reply", id=record.id, to=key, to_name=who, text=reply)
+        self.console.say(f"{who} replies: {reply}")
 
 
 def _ids(pending: Sequence[str]) -> str:

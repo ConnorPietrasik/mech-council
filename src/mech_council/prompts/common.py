@@ -398,6 +398,18 @@ def explain_ask(question: str, followup: str) -> str:
     )
 
 
+def message_ask(message: str) -> str:
+    return "\n".join(
+        [
+            "The human is sending you a direct message while the council runs.",
+            f"Message: {message}",
+            "",
+            "Answer in prose — no JSON. You may re-read the workspace. Your reply goes to the human only: "
+            "it changes no stance and settles nothing, and no other seat sees it.",
+        ]
+    )
+
+
 def defense_ask(item_id: str, challenge: dict, question: str) -> str:
     return "\n".join(
         [

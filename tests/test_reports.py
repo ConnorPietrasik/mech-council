@@ -111,7 +111,8 @@ def test_events_jsonl_is_one_object_per_line_and_covers_the_whole_run(finished):
 
 def test_human_input_json_holds_every_question_whatever_became_of_it(finished):
     record = json.loads(finished.artifact("human_input.json"))
-    assert set(record) == {"questions", "notes", "escalations"}
+    assert set(record) == {"questions", "notes", "escalations", "messages"}
+    assert record["messages"] == [], "no human is at the keyboard in that run"
     asked = [q for q in record["questions"] if q["askers"]]
     assert asked, "phase 0 raised a question that never reached the record"
     for question in asked:

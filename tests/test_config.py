@@ -410,7 +410,9 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
     [
         (body().replace('[[councils.review.agents]]\nname = "B"\n', ""), "convenes 1 agent(s)"),
         (body().replace('name = "A"', 'name = "B"', 1), "lists the agent name 'B' twice"),
+        (body().replace('name = "A"', 'name = "b"', 1), "differ only in case"),
         (body().replace('name = "B"', 'name = "Chair"', 1), "for both a seat and the chair"),
+        (body().replace('name = "B"', 'name = "chair"', 1), "differing only in case"),
         (body().replace("[councils.review.chair]", "[[councils.review.chair]]"), "the chair is the single table"),
         (body().replace('[councils.review.chair]\nname = "Chair"\n', ""), "has no [councils.review.chair]"),
         (body().replace('goal = "g"', 'goal = "g"\nmode = "planning"', 1), "did you mean 'plan'"),
@@ -422,6 +424,8 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
         (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),
         (body().replace('name = "A"', 'name = "A"\nprovider = "p"', 1), "states 'provider' without 'model'"),
         (body().replace('name = "A"', 'name = ""', 1), "needs a non-empty 'name'"),
+        (body().replace('name = "A"', 'name = "H1"', 1), "reads like a question or note id"),
+        (body().replace('name = "Chair"', 'name = "N2"', 1), "reads like a question or note id"),
         (body().replace('name = "A"', 'name = "A"\nnickname = "x"', 1), "unknown config key 'nickname'"),
         (body().replace('goal = "g"', 'goal = "g"\nmaxRounds = 4', 1), "'maxRounds' in [councils.review] (did you mean max_rounds?"),
         (
