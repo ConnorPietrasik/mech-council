@@ -1,1 +1,2 @@
+Nicer-looking HTML report option
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever
