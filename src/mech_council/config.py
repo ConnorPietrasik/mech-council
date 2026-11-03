@@ -20,6 +20,7 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "chair_timeout_sec": 300,
     "max_concurrency": 4,
     "verbosity": "quiet",
+    "report_format": "md",
     "pi_cli": None,
     "sandbox_mib": 32768,
     "in_place": False,
@@ -38,6 +39,7 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "sandbox_mib": ("int>=1", True),
     "in_place": ("bool", True),
     "verbosity": ("verbosity", True),
+    "report_format": ("report_format", True),
     "pi_cli": ("str", True),
     "mode": ("mode", False),
     "goal": ("str", False),
@@ -85,6 +87,8 @@ class Council:
     pi_cli: str
     pi_version: str
     human: str = "blocking"
+    #: The report's format: `md` the markdown file, `html` one self-contained page, `both` the pair.
+    report_format: str = "md"
     #: The councils whose tables merged into this one, nearest first.
     extends: list[str] = field(default_factory=list)
     config_path: str = ""
@@ -146,6 +150,11 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
             hint = suggest.suggest(str(value), VERBOSITY_LEVELS)
             extra = f" (did you mean {hint!r}?)" if hint else ""
             raise ConfigError(f"config key {where}.{key} is one of {'/'.join(VERBOSITY_LEVELS)}, got {value!r}{extra}")
+    elif kind == "report_format":
+        if value not in REPORT_FORMATS:
+            hint = suggest.suggest(str(value), REPORT_FORMATS)
+            extra = f" (did you mean {hint!r}?)" if hint else ""
+            raise ConfigError(f"config key {where}.{key} is one of {'/'.join(REPORT_FORMATS)}, got {value!r}{extra}")
     elif kind == "mode":
         hint = suggest.suggest(str(value), MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
@@ -161,6 +170,9 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
 
 #: The mode names config validation accepts.
 MODES: tuple[str, ...] = ("review", "plan")
+
+#: The report's format: the markdown file, one self-contained HTML page, or the pair.
+REPORT_FORMATS: tuple[str, ...] = ("md", "html", "both")
 
 #: The human's posture toward the council's questions: the run waits at the bar, never waits, or never asks.
 HUMAN_MODES: tuple[str, ...] = ("blocking", "non_blocking", "none")
@@ -588,6 +600,7 @@ def convene_without_pi(
         pi_cli=str(flat["pi_cli"] or ""),
         pi_version="",
         human=args.human or str(flat["human"]),
+        report_format=args.format or str(flat["report_format"]),
         extends=chain,
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),

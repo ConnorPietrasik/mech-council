@@ -72,7 +72,8 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
             "are recorded in the report (state a posture to ask anyway)"
         )
     if output_path:
-        notes.append(f"--output writes the report to {output_path} instead of into the run directory; every other artifact stays there")
+        word = "the reports" if os.path.isdir(output_path) else "the report"
+        notes.append(f"--output writes {word} to {output_path} instead of into the run directory; every other artifact stays there")
         if cli.is_within(output_path, project):
             notes.append(f"the report lands inside {project} as an ordinary write by the orchestrator, so it is in no write journal")
     elif args.overwrite:
@@ -92,7 +93,11 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
 
 
 def _output_target(args: cli.Args, council: config_mod.Council) -> str:
-    """The file `--output` names, resolved against the invoking cwd; a directory keeps the mode's report name."""
+    """Where `--output` sends the report, resolved against the invoking cwd.
+
+    A directory keeps the mode's report name (one file, or both for `both`); a file is the report itself
+    and must wear the format's extension. `both` with a file names the use: two reports, one name.
+    """
     raw = args.output
     if raw is None:
         return ""
@@ -100,10 +105,20 @@ def _output_target(args: cli.Args, council: config_mod.Council) -> str:
     if not expanded:
         raise UsageError("--output wants a path")
     path = os.path.realpath(expanded if os.path.isabs(expanded) else os.path.join(os.getcwd(), expanded))
+    fmt = council.report_format
+    names = council.adapter.report_files(fmt)
     if raw.endswith((os.sep, "/")) or os.path.isdir(path):
         if not os.path.isdir(path):
             raise UsageError(f"--output is not a directory: {raw!r}")
-        path = os.path.join(path, council.adapter.report_name)
+        if not os.access(path, os.W_OK | os.X_OK):
+            raise UsageError(f"--output wants a directory you can write: {path}")
+        return os.path.join(path, names[0]) if len(names) == 1 else path
+    if len(names) == 2:
+        both_names = ", ".join(names)
+        raise UsageError(f"--output names a file, but {fmt!r} writes two reports ({both_names}): name a directory instead")
+    ext = names[0].rsplit(".", 1)[1]
+    if not path.lower().endswith("." + ext):
+        raise UsageError(f"--output writes a {ext} report: the file's extension must match, not {os.path.basename(path)!r}")
     holder = os.path.dirname(path)
     if not os.path.isdir(holder):
         raise UsageError(f"--output wants a directory, or a file in a directory that exists: {raw!r}")
@@ -112,12 +127,28 @@ def _output_target(args: cli.Args, council: config_mod.Council) -> str:
     return path
 
 
+def report_paths(launch: Launch) -> list[str]:
+    """The report files this run writes, in write order: the run directory, or where `--output` sends them."""
+    names = launch.council.adapter.report_files(launch.council.report_format)
+    if not launch.output_path:
+        return [os.path.join(launch.run_dir, name) for name in names]
+    if os.path.isdir(launch.output_path):
+        return [os.path.join(launch.output_path, name) for name in names]
+    return [launch.output_path]
+
+
 def confirm_overwrite(launch: Launch) -> list[str]:
     """Ask before `--output` replaces a file that is already there, on stderr."""
-    target = launch.output_path
-    if not os.path.exists(target):
+    if not launch.output_path:
         return []
-    note = f"--output replaces the {target} that was already there"
+    existing = [target for target in report_paths(launch) if os.path.exists(target)]
+    if not existing:
+        return []
+    if len(existing) > 1:
+        note = f"--output replaces the {' and '.join(existing)} that were already there"
+    else:
+        note = f"--output replaces the {existing[0]} that was already there"
+    target = existing[0]
     if not launch.output_overwrite:
         sys.stderr.write(f"--output {target} already exists: overwrite it? [y/N] ")
         sys.stderr.flush()

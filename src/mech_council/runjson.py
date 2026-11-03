@@ -118,6 +118,7 @@ def create(
             "sandbox_mib": council.sandbox_mib,
             "in_place": council.in_place,
             "human": council.human,
+            "report_format": council.report_format,
             "project_trust": "no-approve" if council.untrusted else "approve",
         },
         "pi_cli": council.pi_cli,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..cli import DEBUG, DETAIL, FULL, QUIET, SUMMARY, VERBOSITY_LEVELS
+from .doc import Block, Heading, List, ListItem, Paragraph, Report, T, Table, Text
+from .markdown import render_md
 from .text import caption
 
 
@@ -61,107 +63,158 @@ class ReportContext:
     report_name: str = "report.md"
     #: The report's path when `--output` puts it outside the run directory.
     report_path: str = ""
+    report_html_name: str = ""
+    report_html_path: str = ""
     goal: str | None = None
     aborted_reason: str = ""
     verbosity: int = 0  # what the run directory kept beyond the report
     captions: dict[str, str] = field(default_factory=dict)
     interrupted: Interrupted | None = None
 
-    def header(self, title: str) -> list[str]:
+    def meta(self) -> list[tuple[str, Text]]:
         trust = "no-approve (untrusted)" if self.untrusted else "approve"
-        lineage = f" ({self.council_lineage})" if self.council_lineage else ""
-        where = (
-            f"- workspace: in place — {self.member_count} members share `{self.project}`; nothing they wrote is journaled or discarded"
-            if self.in_place
-            else (
-                f"- sandbox: `sandbox_mib = {self.sandbox_mib}` shared by "
-                f"{self.member_count} members ({self.member_count - 1} seats + the chair)"
+        lineage = T(" (", self.council_lineage, ")") if self.council_lineage else T()
+        out: list[tuple[str, Text]] = [
+            ("project", T((self.project, "code"))),
+            ("config", T((self.config_path, "code"), " · council ", (self.council, "code"), lineage)),
+            ("mode", T(self.mode, " · outcome: ", (self.outcome, "bold"), f" · rounds: {self.rounds}")),
+            ("date", T(self.date)),
+        ]
+        if self.in_place:
+            out.append(
+                (
+                    "workspace",
+                    T(
+                        "in place — ",
+                        str(self.member_count),
+                        " members share ",
+                        (self.project, "code"),
+                        "; nothing they wrote is journaled or discarded",
+                    ),
+                )
             )
-        )
-        sinks = f" ({self.sink_claim})" if self.sink_claim else ""
-        posture = "the run never waited on the council's questions" if self.human == "non_blocking" else "the council was never asked"
-        return (
-            [
-                f"# {title}",
-                "",
-                f"- project: `{self.project}`",
-                f"- config: `{self.config_path}` · council `{self.council}`{lineage}",
-                f"- mode: {self.mode} · outcome: **{self.outcome}** · rounds: {self.rounds}",
-                f"- date: {self.date}",
-                where,
-                f"- project trust: {trust} · verbosity: {VERBOSITY_LEVELS[self.verbosity]}{sinks}",
-                f"- pi: `{self.pi_cli}` ({self.pi_version})",
-            ]
-            + ([f"- questions: {self.human} — {posture}"] if self.human != "blocking" else [])
-            + ([f"- aborted: {self.aborted_reason}"] if self.aborted_reason else [])
-        )
+        else:
+            out.append(
+                (
+                    "sandbox",
+                    T(
+                        (f"sandbox_mib = {self.sandbox_mib}", "code"),
+                        f" shared by {self.member_count} members ({self.member_count - 1} seats + the chair)",
+                    ),
+                )
+            )
+        sinks = T(" (", self.sink_claim, ")") if self.sink_claim else T()
+        out.append(("project trust", T(trust, " · verbosity: ", VERBOSITY_LEVELS[self.verbosity], sinks)))
+        out.append(("pi", T((self.pi_cli, "code"), f" ({self.pi_version})")))
+        if self.human != "blocking":
+            posture = "the run never waited on the council's questions" if self.human == "non_blocking" else "the council was never asked"
+            out.append(("questions", T(self.human, " — ", posture)))
+        if self.aborted_reason:
+            out.append(("aborted", T(self.aborted_reason)))
+        return out
 
-    def interrupted_block(self) -> list[str]:
+    def interrupted_blocks(self) -> list[Block]:
         cut = self.interrupted
         if cut is None:
             return []
-        out = [f"## Cut short by {cut.name}", ""]
-        out.append(
-            f"Nothing below is settled: {cut.name} arrived {cut.elapsed:.1f} s in"
-            + (f", with the run at {cut.where}." if cut.where else ", before the first round.")
-        )
-        out.append("")
+        where = f", with the run at {cut.where}." if cut.where else ", before the first round."
+        blocks: list[Block] = [
+            Heading(2, T(f"Cut short by {cut.name}")),
+            Paragraph(T(f"Nothing below is settled: {cut.name} arrived {cut.elapsed:.1f} s in{where}")),
+        ]
+        items: list[ListItem] = []
         if cut.waiting_on:
-            out.append("- it was asking you: " + ", ".join(cut.waiting_on))
+            items.append(ListItem(T("it was asking you: ", ", ".join(cut.waiting_on))))
         for row in cut.in_flight:
             who = caption(str(row.get("agent", "?")), self.captions)
             tool = str(row.get("tool_name") or "")
-            doing = f"`{tool}` {row.get('last_tool')}".strip() if tool else f"last event: {row.get('last_event') or 'none yet'}"
-            out.append(f"- in flight: {who} — {doing} ({row.get('elapsed', 0)} s, idle {row.get('idle', 0)} s)")
-        return out + [""]
+            last = str(row.get("last_tool") or "")
+            if tool:
+                doing = T((tool, "code"), f" {last}") if last else T((tool, "code"))
+            else:
+                doing = T(f"last event: {row.get('last_event') or 'none yet'}")
+            items.append(ListItem(T(f"in flight: {who} — ", doing, f" ({row.get('elapsed', 0)} s, idle {row.get('idle', 0)} s)")))
+        if items:
+            blocks.append(List(tuple(items)))
+        return blocks
 
-    def roster_table(self, *, extra: str = "") -> list[str]:
+    def roster_table(self, *, extra: str = "") -> Table:
         noun = "plans" if self.mode == "plan" else "findings"
-        title = f"| ID | name | model | phase-0 {noun}" + (f" | {extra} |" if extra else " |")
-        head = [title, "|---|---|---|" + "---|" * (1 + (1 if extra else 0))]
+        header = (T("ID"), T("name"), T("model"), T(f"phase-0 {noun}")) + ((T(extra),) if extra else ())
+        rows: list[list[Text]] = []
         for row in self.roster:
-            tail = f" {row.warning}" if row.warning else ""
-            line = f"| {row.id} | {row.name} | `{row.model}` | {row.phase0_count}{tail} |"
+            cells = [T(row.id), T(row.name), T((row.model, "code")), T(str(row.phase0_count), f" {row.warning}" if row.warning else "")]
             if extra:
-                line = line[:-1] + f" | {getattr(row, extra, '') or '—'} |"
-            head.append(line)
-        last = f"| — | {self.chair_name} (chair) | `{self.chair_model}` | — |"
-        head.append(last + (" — |" if extra else ""))
-        return head
+                cells.append(T(getattr(row, extra, "") or "—"))
+            rows.append(cells)
+        chair = [T("—"), T(f"{self.chair_name} (chair)"), T((self.chair_model, "code")), T("—")]
+        if extra:
+            chair.append(T("—"))
+        rows.append(chair)
+        return Table(tuple(header), tuple(tuple(row) for row in rows))
 
-    def artifacts(self, run_dir: str) -> list[str]:
+    def artifacts(self, run_dir: str) -> list[Block]:
         manifest = (
             "outcome, in place: no write journal, no namespaces, no sweep"
             if self.in_place
             else "outcome, write journal, namespaces, survivors"
         )
-        lines = [
-            "## Artifacts",
-            "",
-        ]
+        items: list[ListItem] = []
         if self.verbosity >= SUMMARY:
-            lines.append(f"- `run.json` — the machine-readable manifest ({manifest})")
-        lines.append(
-            f"- `{self.report_path or self.report_name}` — this report" + (" (outside the run directory)" if self.report_path else "")
-        )
+            items.append(ListItem(T(("run.json", "code"), f" — the machine-readable manifest ({manifest})")))
+        report_line = " — this report" + (" (outside the run directory)" if self.report_path else "")
+        items.append(ListItem(T((self.report_path or self.report_name, "code"), report_line)))
+        if self.report_html_name:
+            items.append(
+                ListItem(
+                    T(
+                        (self.report_html_path or self.report_html_name, "code"),
+                        " — this report in HTML",
+                        " (outside the run directory)" if self.report_html_path else "",
+                    )
+                )
+            )
         if self.verbosity >= DETAIL:
-            lines.append("- `human_input.json` — every question, answer, recommendation and skip, and every note with where it was shown")
+            items.append(
+                ListItem(
+                    T(
+                        ("human_input.json", "code"),
+                        " — every question, answer, recommendation and skip, and every note with where it was shown",
+                    )
+                )
+            )
         if self.verbosity >= DEBUG:
-            lines.append("- `events.jsonl` — the run's events, one JSON object per line, append-only")
+            items.append(ListItem(T(("events.jsonl", "code"), " — the run's events, one JSON object per line, append-only")))
         if self.verbosity >= FULL and self.transcript_bytes:
-            lines.append("- `agents/<file_base>.transcripts.jsonl` — the verbatim protocol stream, per member")
+            items.append(ListItem(T(("agents/<file_base>.transcripts.jsonl", "code"), " — the verbatim protocol stream, per member")))
         if self.stderr_bytes:
-            tail = "" if self.verbosity >= FULL else " (the verbatim transcripts are written at `full` only)"
-            lines.append(f"- `agents/<file_base>.stderr.txt` — per-member stderr, untrimmed{tail}")
+            tail = T() if self.verbosity >= FULL else T(" (the verbatim transcripts are written at ", ("full", "code"), " only)")
+            items.append(ListItem(T(("agents/<file_base>.stderr.txt", "code"), " — per-member stderr, untrimmed", tail)))
         if self.verbosity == QUIET:
-            lines.append("- nothing else: verbosity `quiet` writes no `run.json`, `human_input.json` or `events.jsonl`")
-        lines += ["", f"Run directory: `{run_dir}`"]
-        return lines
+            items.append(
+                ListItem(
+                    T(
+                        "nothing else: verbosity ",
+                        ("quiet", "code"),
+                        " writes no ",
+                        ("run.json", "code"),
+                        ", ",
+                        ("human_input.json", "code"),
+                        " or ",
+                        ("events.jsonl", "code"),
+                    )
+                )
+            )
+        return [Heading(2, T("Artifacts")), List(tuple(items)), Paragraph(T("Run directory: ", (run_dir, "code")))]
+
+
+def build_minimal(*, reason: str, context: ReportContext) -> Report:
+    blocks: list[Block] = list(context.interrupted_blocks())
+    blocks += [Heading(1, T("Why nothing ran")), Paragraph(T(reason))]
+    if context.roster or context.chair_model:
+        blocks += [Paragraph(T("The council it convened:")), context.roster_table()]
+    return Report(title=T("Council run: no result"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
 
 
 def minimal_report(*, reason: str, context: ReportContext) -> str:
-    lines = context.header("Council run: no result") + [""] + context.interrupted_block()
-    lines += ["# Why nothing ran", "", reason, ""]
-    if context.roster or context.chair_model:
-        lines += ["The council it convened:", ""] + context.roster_table() + [""]
-    return "\n".join(lines) + "\n"
+    return render_md(build_minimal(reason=reason, context=context))

@@ -274,6 +274,15 @@ def test_human_is_a_knob_of_its_own(tmp_path):
     assert convene(tmp_path, body(), human="none").human == "none", "the flag beats the file"
 
 
+def test_report_format_is_a_knob_of_its_own(tmp_path):
+    assert convene(tmp_path, body()).report_format == "md", "the built-in default keeps the report the file it has always been"
+    html_body = body().replace("[defaults]\n", '[defaults]\nreport_format = "html"\n')
+    assert convene(tmp_path, html_body).report_format == "html", "[defaults] may ask"
+    assert convene(tmp_path, body().replace('goal = "g"', 'goal = "g"\nreport_format = "both"')).report_format == "both", "so may a council"
+    assert convene(tmp_path, body(), format="html").report_format == "html", "the flag beats the file"
+    assert convene(tmp_path, html_body, format="md").report_format == "md", "and still wins"
+
+
 def test_in_place_is_a_knob_of_its_own(tmp_path):
     assert convene(tmp_path, body()).in_place is False, "the built-in default is the sandbox"
     assert convene(tmp_path, body().replace("[defaults]\n", "[defaults]\nin_place = true\n")).in_place is True, "[defaults] may ask"
@@ -428,6 +437,8 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
         (body().replace('goal = "g"', 'goal = "g"\nsandbox_mib = 0', 1), "must be ≥ 1"),
         (body().replace('goal = "g"', 'goal = "g"\nin_place = "yes"', 1), "wants true or false, got str"),
         (body().replace('goal = "g"', 'goal = "g"\nverbosity = "everything"', 1), "one of quiet/summary/detail/debug/full"),
+        (body().replace('goal = "g"', 'goal = "g"\nreport_format = "htm"', 1), "did you mean 'html'"),
+        (body().replace('goal = "g"', 'goal = "g"\nreport_format = "all"', 1), "one of md/html/both"),
         (body().replace('goal = "g"', 'goal = "g"\nhuman = "never"', 1), "'blocking', 'non_blocking' or 'none'"),
         (body().replace('goal = "g"', 'goal = "g"\nhuman = "nonblock"', 1), "did you mean 'non_blocking'"),
         (body().replace('goal = "g"', 'goal = "g"\nwatchdog_sec = -1', 1), "must be ≥ 0"),

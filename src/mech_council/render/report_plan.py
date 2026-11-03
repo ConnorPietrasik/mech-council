@@ -16,78 +16,87 @@ from ..deliberation.state import (
     Question,
 )
 from .context import ReportContext
-from .text import caption, wrap
+from .doc import Block, Group, Heading, List, ListItem, Paragraph, Report, T
+from .markdown import render_md
+from .text import caption
 
-RULES = """\
-## Rules for the implementer
+RULES: tuple[ListItem, ...] = (
+    ListItem(T("A ", ("prescriptive", "bold"), ' line ("do X") is a settled outcome: follow it.')),
+    ListItem(T("A ", ("descriptive", "bold"), ' line ("the code does X") is a claim about the tree: the code wins.')),
+    ListItem(T("An outcome you cannot actually produce is surfaced, never silently followed.")),
+    ListItem(T("Meet each stage's validation gate before starting the next one.")),
+)
 
-- A **prescriptive** line ("do X") is a settled outcome: follow it.
-- A **descriptive** line ("the code does X") is a claim about the tree: the code wins.
-- An outcome you cannot actually produce is surfaced, never silently followed.
-- Meet each stage's validation gate before starting the next one.
-"""
+
+def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> Report:
+    blocks: list[Block] = context.interrupted_blocks()
+    blocks += [Heading(2, T("Rules for the implementer")), List(RULES)]
+    blocks += [Heading(2, T("Roster")), context.roster_table(extra="backing")]
+    blocks += _chosen(docket, context, converged)
+    blocks += _stages(docket, context, converged)
+    blocks += _assumptions(docket, context)
+    blocks += _agreed_points(docket, context)
+    blocks += _decision_points(docket, context)
+    blocks += _human_input(docket, context)
+    blocks += _notes(docket, context)
+    blocks += _qa(docket, context)
+    blocks += _alternatives(docket, context)
+    blocks += _rounds(docket, context)
+    blocks += context.artifacts(run_dir)
+    return Report(title=T("Implementation plan"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
 
 
 def render(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> str:
-    lines = context.header("Implementation plan") + [""]
-    lines += context.interrupted_block()
-    lines += [RULES, ""]
-    lines += ["## Roster", ""] + context.roster_table(extra="backing") + [""]
-    lines += _chosen(docket, context, converged)
-    lines += _stages(docket, context, converged)
-    lines += _assumptions(docket, context)
-    lines += _agreed_points(docket, context)
-    lines += _decision_points(docket, context)
-    lines += _human_input(docket, context)
-    lines += _notes(docket, context)
-    lines += _qa(docket, context)
-    lines += _alternatives(docket, context)
-    lines += _rounds(docket, context)
-    lines += context.artifacts(run_dir)
-    return "\n".join(lines).rstrip() + "\n"
+    return render_md(build(docket, context, run_dir=run_dir, converged=converged))
 
 
-def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> list[str]:
-    out = ["## Chosen direction", ""]
+def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Chosen direction"))]
     if not converged:
-        out.append("The council did not settle a direction. The candidates, side by side:")
-        out.append("")
+        blocks.append(Paragraph(T("The council did not settle a direction. The candidates, side by side:")))
+        items: list[ListItem] = []
         for token in sorted({t for t in docket.backing.values() if t != NO_PREFERENCE}):
             backers = [a for a in docket.roster if docket.backing.get(a) == token]
-            out.append(f"- `{token}` — backed by {_names(backers, context)}")
+            items.append(ListItem(T((token, "code"), f" — backed by {_names(backers, context)}")))
         shrug = [a for a in docket.roster if docket.backing.get(a) == NO_PREFERENCE]
         if shrug:
-            out.append(f"- `no_preference` — {_names(shrug, context)}")
+            items.append(ListItem(T(("no_preference", "code"), f" — {_names(shrug, context)}")))
         never = [a for a in docket.roster if not docket.backing.get(a)]
         if never:
-            out.append(f"- `declined` — {_names(never, context)}")
+            items.append(ListItem(T(("declined", "code"), f" — {_names(never, context)}")))
         ask = docket.direction_ask()
         if ask is not None:
             if context.human == "none":
-                out.append(f"- the council's split was recorded, with no human on the run to choose ({ask.id}): {ask.text}")
-                if ask.answer:
-                    out.append(f"  - answer: {ask.answer}")
+                sub = (ListItem(T(f"answer: {ask.answer}")),) if ask.answer else ()
+                items.append(
+                    ListItem(T(f"the council's split was recorded, with no human on the run to choose ({ask.id}): ", ask.text), sub=sub)
+                )
             else:
-                out.append(f"- the human was asked ({ask.id}): {ask.text}")
-                out.append(f"  - answer: {ask.answer}" if ask.answer else f"  - {'declined' if ask.state == SKIPPED else 'never answered'}")
-        out.append("")
-        out.append("No direction is printed for you to follow: nobody chose one.")
-        return out + [""]
+                sub = (
+                    ListItem(T(f"answer: {ask.answer}"))
+                    if ask.answer
+                    else ListItem(T(f"{'declined' if ask.state == SKIPPED else 'never answered'}")),
+                )
+                items.append(ListItem(T(f"the human was asked ({ask.id}): ", ask.text), sub=sub))
+        blocks.append(List(tuple(items)))
+        blocks.append(Paragraph(T("No direction is printed for you to follow: nobody chose one.")))
+        return blocks
     artifact, note = resolve_direction(docket, converged, context.captions)
-    out.append(f"- converged token: `{converged}`")
+    token_items: list[ListItem] = [ListItem(T("converged token: ", (converged, "code")))]
     if context.interrupted is not None:
-        out.append(f"- **{context.interrupted.name} ended the run with this direction holding the majority, not settled**")
+        cut_note = f"{context.interrupted.name} ended the run with this direction holding the majority, not settled"
+        token_items.append(ListItem(T((cut_note, "bold"))))
     if note:
-        out.append(f"- **{note}**")
-    out.append("")
+        token_items.append(ListItem(T((note, "bold"))))
+    blocks.append(List(tuple(token_items)))
     if artifact is None:
-        out.append("(no plan artifact behind that token)")
-        return out + [""]
-    out.append(f"The plan to build: {artifact.get('name') or converged}")
+        blocks.append(Paragraph(T("(no plan artifact behind that token)")))
+        return blocks
+    tail: list[Block] = [Paragraph(T(f"The plan to build: {artifact.get('name') or converged}"))]
     if artifact.get("text"):
-        out += [f"  {line}" for line in wrap(artifact["text"])]
-    out.append("")
-    return out
+        tail.append(Paragraph(T(artifact["text"]), wrapped=True))
+    blocks.append(Group(tuple(tail)))
+    return blocks
 
 
 def resolve_direction(docket: Docket, token: str, captions: dict[str, str]) -> tuple[dict | None, str]:
@@ -130,35 +139,43 @@ def _fullest_backer(docket: Docket, token: str):
     return (best[0], best[1]) if best else None
 
 
-def _stages(docket: Docket, context: ReportContext, converged: str | None) -> list[str]:
+def _stages(docket: Docket, context: ReportContext, converged: str | None) -> list[Block]:
     artifact, _ = resolve_direction(docket, converged, context.captions) if converged else (None, "")
-    out = ["## Stages", ""]
+    blocks: list[Block] = [Heading(2, T("Stages"))]
     if not artifact or not artifact.get("stages"):
-        return out + ["No stages were settled.", ""]
+        return blocks + [Paragraph(T("No stages were settled."))]
+    stage_blocks: list[Block] = []
     for index, stage in enumerate(artifact["stages"], 1):
-        out.append(f"### Stage {index}: {stage.get('state') or '(unnamed)'}")
+        stage_blocks.append(Heading(3, T(f"Stage {index}: {stage.get('state') or '(unnamed)'}")))
+        out: list[ListItem] = []
         if stage.get("gate"):
-            out.append(f"- gate: {stage['gate']}")
+            out.append(ListItem(T("gate: ", stage["gate"])))
         if stage.get("scope"):
-            out.append(f"- scope: {stage['scope']}")
+            out.append(ListItem(T("scope: ", stage["scope"])))
         for exception in stage.get("exceptions") or []:
-            out.append(f"- exception: {exception}")
-    out.append("")
-    return out
+            out.append(ListItem(T("exception: ", exception)))
+        if out:
+            stage_blocks.append(List(tuple(out)))
+    blocks.append(Group(tuple(stage_blocks)))
+    return blocks
 
 
-def _assumptions(docket: Docket, context: ReportContext) -> list[str]:
-    out = ["## Assumptions", ""]
+def _assumptions(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Assumptions"))]
     questions = [docket.questions[i] for i in docket.question_order if _touches_direction(docket, docket.questions[i])]
     if not questions:
-        out.append("None the council had to make: every open question was answered.")
-        return out + [""]
+        return blocks + [Paragraph(T("None the council had to make: every open question was answered."))]
+    items: list[ListItem] = []
     for question in questions:
         kind = _assumption_kind(docket, question)
-        out.append(f"- **{kind}** ({question.id}, {effective_class(docket, question)}): {question.text}")
-        out.append(f"  assumed: {question.answer or 'whatever the seats did in its place'}")
-    out.append("")
-    return out
+        items.append(
+            ListItem(
+                T((kind, "bold"), f" ({question.id}, {effective_class(docket, question)}): ", question.text),
+                tail=T(f"assumed: {question.answer or 'whatever the seats did in its place'}"),
+            )
+        )
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
 def _assumption_kind(docket: Docket, question: Question) -> str:
@@ -179,139 +196,156 @@ def _assumption_kind(docket: Docket, question: Question) -> str:
     return "deferred"
 
 
-def _agreed_points(docket: Docket, context: ReportContext) -> list[str]:
-    out = ["## Agreed points", ""]
+def _agreed_points(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Agreed points"))]
     if not docket.agreed_points:
-        return out + ["The chair's comparison recorded none.", ""]
+        return blocks + [Paragraph(T("The chair's comparison recorded none."))]
+    items: list[ListItem] = []
     for point in docket.agreed_points:
         who = _names(point.get("agents") or [], context)
         tail = f" — {who}" if who != "(nobody)" else " — the chair named no seats"
-        out.append(f"- {point.get('point')}{tail}")
-    out.append("")
-    return out
+        items.append(ListItem(T(f"{point.get('point')}", tail)))
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
-def _decision_points(docket: Docket, context: ReportContext) -> list[str]:
-    out = [f"## Decision points ({len(docket.order)})", ""]
+def _decision_points(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T(f"Decision points ({len(docket.order)})"))]
     if not docket.order:
-        return out + ["None were raised.", ""]
+        return blocks + [Paragraph(T("None were raised."))]
     for item in docket.items.values():
         state = item.disposition if item.closed else derive(docket, item.id)
-        out.append(f"### {item.id} `[{state}]` {item.claim}")
+        group: list[Block] = [Heading(3, T(f"{item.id} ", (f"[{state}]", "code"), f" {item.claim}"))]
+        before: list[ListItem] = []
         if item.closed:
-            out.append(f"- closed {item.disposition} in round {item.closed_round}")
-        out.append(
-            f"- raised by: {_names(item.raised_by, context)}"
-            + (f" (also reported by {_names(item.also_reported_by, context)})" if item.also_reported_by else "")
+            before.append(ListItem(T(f"closed {item.disposition} in round {item.closed_round}")))
+        before.append(
+            ListItem(
+                T(
+                    "raised by: ",
+                    _names(item.raised_by, context),
+                    *([T(f" (also reported by {_names(item.also_reported_by, context)})")] if item.also_reported_by else []),
+                )
+            )
         )
+        group.append(List(tuple(before)))
         if item.detail.strip():  # an empty detail must not print a stray line
-            out += [f"  {line}" for line in wrap(item.detail)]
+            group.append(Paragraph(T(item.detail), wrapped=True))
+        after: list[ListItem] = []
         for agent in docket.roster:
             record = docket.stance(item.id, agent)
             if record is None:
                 continue
-            tag = " `declined`" if record.declined else ""
-            out.append(
-                f"- {caption(agent, context.captions)}: {record.stance}"
-                f" (round {record.round}){tag}" + (f" — {record.note}" if record.note else "")
-            )
+            tag = T(" ", ("declined", "code")) if record.declined else T()
+            who = f"{caption(agent, context.captions)}: {record.stance} (round {record.round})"
+            after.append(ListItem(T(who, tag, *([T(f" — {record.note}")] if record.note else []))))
         for note in item.history:
-            out.append(f"- history: {note}")
-        out.append("")
-    return out
+            after.append(ListItem(T("history: ", note)))
+        if after:
+            group.append(List(tuple(after)))
+        blocks.append(Group(tuple(group)))
+    return blocks
 
 
-def _human_input(docket: Docket, context: ReportContext) -> list[str]:
+def _human_input(docket: Docket, context: ReportContext) -> list[Block]:
     questions = [docket.questions[i] for i in docket.question_order]
-    out = ["## Human input", ""]
+    blocks: list[Block] = [Heading(2, T("Human input"))]
     if not questions:
-        return out + ["None was asked for.", ""]
+        return blocks + [Paragraph(T("None was asked for."))]
+    items: list[ListItem] = []
     for question in questions:
         state = question.state if question.state != ASKED else "standing"
-        out.append(f"- {question.id} ({state}) {_names(question.askers, context)}: {question.text}")
+        subs: list[ListItem] = []
         for seat, said in question.also_asked.items():
-            out.append(f"  - asked as well by {_names([seat], context)}: {said}")
+            subs.append(ListItem(T(f"asked as well by {_names([seat], context)}: ", said)))
         if question.retracted_by:
-            out.append(f"  - retracted by {_names([question.retracted_by], context)} in round {question.retracted_round}")
+            subs.append(ListItem(T(f"retracted by {_names([question.retracted_by], context)} in round {question.retracted_round}")))
         if question.merged_into:
-            out.append(f"  - folded into {question.merged_into}: the same ask in other words")
+            subs.append(ListItem(T(f"folded into {question.merged_into}: the same ask in other words")))
         for seat, answer in question.peer_answers.items():
             said = "answered it and asks it still" if seat in question.askers else "answered instead of asking"
-            out.append(f"  - {said}: {_names([seat], context)}: {answer}")
+            subs.append(ListItem(T(f"{said}: ", _names([seat], context), f": {answer}")))
         if question.answer:
-            out.append(f"  - authoritative answer (round {question.answer_round}): {question.answer}")
+            subs.append(ListItem(T(f"authoritative answer (round {question.answer_round}): ", question.answer)))
         elif question.moot_with:
-            out.append(f"  - moot with {question.moot_with}: the council settled that item, so nothing was assumed in its place")
+            subs.append(ListItem(T(f"moot with {question.moot_with}: the council settled that item, so nothing was assumed in its place")))
         else:
-            out.append("  - assumed in its place: whatever the council did with it — never settled")
-    out.append("")
-    return out
+            subs.append(ListItem(T("assumed in its place: whatever the council did with it — never settled")))
+        items.append(ListItem(T(f"{question.id} ({state}) ", _names(question.askers, context), f": {question.text}"), sub=tuple(subs)))
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
-def _notes(docket: Docket, context: ReportContext) -> list[str]:
+def _notes(docket: Docket, context: ReportContext) -> list[Block]:
     """The whole ledger, including what no checkpoint showed."""
     notes = report_notes(docket)
-    out = ["## Notes for the human", ""]
+    blocks: list[Block] = [Heading(2, T("Notes for the human"))]
     if not notes:
-        return out + ["Nothing was said to you that needed no answer.", ""]
+        return blocks + [Paragraph(T("Nothing was said to you that needed no answer."))]
+    items: list[ListItem] = []
     for note in notes:
         where = f" (on {note.item_id})" if note.item_id else ""
         state = "retracted" if note.state == RETRACTED else "standing"
         shown = f"shown to you in round {note.shown_round}" if note.shown_round is not None else "report only: no checkpoint showed it"
-        out.append(f"- {note.id} ({state}){where} {_names([note.by], context)}: {note.text}")
-        out.append(f"  - {shown}")
+        subs: list[ListItem] = [ListItem(T(shown))]
         if note.state == RETRACTED:
             reason = f": {note.retract_reason}" if note.retract_reason else ""
             after = ", after you had been shown it" if note.shown_round is not None else ""
-            out.append(f"  - **retracted in round {note.retracted_round}**{after}{reason}")
-    out.append("")
-    return out
+            subs.append(ListItem(T((f"retracted in round {note.retracted_round}", "bold"), after, reason)))
+        items.append(ListItem(T(f"{note.id} ({state}){where} ", _names([note.by], context), f": {note.text}"), sub=tuple(subs)))
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
-def _qa(docket: Docket, context: ReportContext) -> list[str]:
-    out = ["## Planner Q&A", ""]
+def _qa(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Planner Q&A"))]
     if not docket.qa_order:
-        return out + ["None asked.", ""]
+        return blocks + [Paragraph(T("None asked."))]
+    items: list[ListItem] = []
     for qid in docket.qa_order:
         qa = docket.qa[qid]
-        out.append(f"- {qa.id} {_names([qa.asker], context)} → {_names([qa.to], context)}: {qa.text}")
-        if qa.answer:
-            out.append(f"  - answer: {qa.answer}")
-    out.append("")
-    return out
+        sub = (ListItem(T(f"answer: {qa.answer}")),) if qa.answer else ()
+        items.append(ListItem(T(f"{qa.id} {_names([qa.asker], context)} → {_names([qa.to], context)}: {qa.text}"), sub=sub))
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
-def _alternatives(docket: Docket, context: ReportContext) -> list[str]:
-    out = ["## Alternatives on the table", ""]
+def _alternatives(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Alternatives on the table"))]
     if not docket.approaches:
-        return out + ["No plans were put on the table.", ""]
+        return blocks + [Paragraph(T("No plans were put on the table."))]
+    items: list[ListItem] = []
     for agent in docket.roster:
         approach = docket.approaches.get(agent)
         if approach is None:
             continue
         original = approach.original or "(no text)"
-        out.append(f"- {caption(agent, context.captions)}: {original.splitlines()[0] if original else ''}")
-        for stage in approach.stages:
-            out.append(f"  - {stage.get('state', '')}")
-        for alternative in approach.rejected_alternatives:
-            out.append(f"  - rejected: {alternative}")
-        for revision in approach.revisions:
-            out.append(
-                f"  - revision `{revision.get('name') or '?'}` (round {revision.get('round')}): {len(revision.get('stages') or [])} stages"
+        subs: list[ListItem] = [ListItem(T(stage.get("state", ""))) for stage in approach.stages]
+        subs += [ListItem(T("rejected: ", alternative)) for alternative in approach.rejected_alternatives]
+        subs += [
+            ListItem(
+                T(
+                    "revision ",
+                    (str(revision.get("name") or "?"), "code"),
+                    f" (round {revision.get('round')}): {len(revision.get('stages') or [])} stages",
+                )
             )
-    out.append("")
-    return out
+            for revision in approach.revisions
+        ]
+        items.append(ListItem(T(f"{caption(agent, context.captions)}: ", original.splitlines()[0] if original else ""), sub=tuple(subs)))
+    blocks.append(List(tuple(items)))
+    return blocks
 
 
-def _rounds(docket: Docket, context: ReportContext) -> list[str]:
-    out = ["## Round-by-round verdicts", ""]
+def _rounds(docket: Docket, context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T("Round-by-round verdicts"))]
     for record in docket.rounds:
-        out.append(f"### Round {record.round}")
+        group: list[Block] = [Heading(3, T(f"Round {record.round}"))]
         if record.summary:
-            out.append(record.summary)
-        out += [f"- {caption(agent, context.captions)}: {line}" for agent, line in record.lines]
-        out.append("")
-    return out
+            group.append(Paragraph(T(record.summary)))
+        group.append(List(tuple(ListItem(T(f"{caption(agent, context.captions)}: {line}")) for agent, line in record.lines)))
+        blocks.append(Group(tuple(group)))
+    return blocks
 
 
 def _touches_direction(docket: Docket, question: Question) -> bool:

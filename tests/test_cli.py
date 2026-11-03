@@ -853,3 +853,91 @@ def test_a_relative_output_lands_in_the_project_you_invoked_from(cli, project):
     assert result.returncode == 0, result.console
     assert os.path.exists(target) and result.manifest["report"] == target
     assert "note: the report lands inside" in result.console, "an ordinary write into the project is said out loud"
+
+# ------------------------------------------------------ The report's format
+
+
+def _html_of(result) -> str:
+    path = result.manifest["report"]
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def test_format_html_keeps_one_self_contained_page_instead_of_markdown(cli, project):
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "html"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "report.html" in written and "report.md" not in written, "html writes the page, not the markdown"
+    page = _html_of(result)
+    assert page.startswith("<!doctype html>")
+    assert "the cache ignores tenants" in page, "the finding reaches the page"
+    assert "<script" not in page and "http" not in page, "self-contained: nothing to execute, nothing to fetch"
+    assert result.manifest["report"].endswith("report.html"), "the manifest points at the page that exists"
+    assert result.manifest["settings"]["report_format"] == "html"
+    assert "the cache ignores tenants" in result.report(), "the console copy still carries the run's substance"
+
+
+def test_format_both_writes_the_pair_and_names_both_in_the_manifest(cli, project):
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "both"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    run_dir = result.run_dir
+    md, html = os.path.join(run_dir, "report.md"), os.path.join(run_dir, "report.html")
+    assert os.path.exists(md) and os.path.exists(html), "both writes the markdown and the page side by side"
+    assert result.manifest["report"] == md, "the manifest's primary report is the markdown"
+    assert result.manifest["reports"] == {"md": md, "html": html}, "and names both"
+    assert "the cache ignores tenants" in result.artifact("report.md")
+    assert "the cache ignores tenants" in _html_of(result)
+
+
+def test_format_from_the_config_not_the_flag(cli, project, tmp_path):
+    config = DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace("watchdog_sec = 0", 'watchdog_sec = 0\nreport_format = "html"')
+    write_project_config(project, config)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["report"].endswith("report.html"), "report_format in council.toml stands"
+    result = cli(["review", "--format", "md"], cwd=project, env=env, timeout=150)
+    assert result.manifest["report"].endswith("report.md"), "the flag overrides the config"
+
+
+@pytest.mark.parametrize(
+    "argv, wanted",
+    [
+        (["review", "--format", "hmtl"], "--format is one of md|html|both"),
+        (["review", "-o", "PLAN.md", "--format", "both"], "--output names a file, but 'both' writes two reports"),
+    ],
+)
+def test_format_usage_errors_exit_two(cli, project, canary, argv, wanted):
+    result = cli(argv, cwd=project)
+    assert result.returncode == 2, result.console
+    assert wanted in result.console
+    assert canary_entries(canary) == [], "a usage error creates nothing anywhere"
+
+
+def test_output_with_html_keeps_the_html_name_and_rejects_the_wrong_extension(cli, project, canary):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "html", "-o", out], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    target = os.path.join(out, "report.html")
+    assert os.path.exists(target), "a directory keeps the format's name"
+    assert not os.path.exists(os.path.join(out, "report.md"))
+    result = cli(["review", "--format", "html", "-o", os.path.join(out, "PLAN.md")], cwd=project)
+    assert result.returncode == 2
+    assert "extension must match" in result.console, "an html report cannot land as a .md file"
+    assert canary_entries(canary) == []
+
+
+def test_both_into_a_directory_writes_the_pair_there(cli, project):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "both", "-o", out], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    md, html = os.path.join(out, "report.md"), os.path.join(out, "report.html")
+    assert os.path.exists(md) and os.path.exists(html), "the directory keeps both names"
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "report.md" not in written and "report.html" not in written, "nothing was left behind in the run directory"
+    assert result.manifest["reports"] == {"md": md, "html": html}, "run.json names the pair where it stands"
+    assert f"the reports to {out}" in result.console

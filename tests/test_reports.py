@@ -450,8 +450,8 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
 
-    with mock.patch("mech_council.render.report_review.render", side_effect=RuntimeError("the renderer had a bug")):
-        path = run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "")
+    with mock.patch("mech_council.render.report_review.build", side_effect=RuntimeError("the renderer had a bug")):
+        path, _text = run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "")
 
     assert path and os.path.exists(path), "a failed renderer must not cost the report too"
     with open(path, encoding="utf-8") as handle:
@@ -480,7 +480,7 @@ def test_a_report_that_cannot_be_replaced_into_place_leaves_no_tmp_behind(projec
     docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
     docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
 
-    assert run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "", report_at=str(target)) == ""
+    assert run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "", report_at=str(target)) == ("", "")
     assert os.listdir(holder) == ["report.md"], "only the thing that refused the report is left"
 
 
@@ -496,7 +496,7 @@ def test_a_file_name_that_is_not_text_costs_neither_the_report_nor_the_manifest(
     journal = [{"file_base": "slot01-metic", "created": ["bad\udcffname"], "modified": [], "deleted": []}]
     console.event("journal_line", artifact=journal[0]["created"][0])
 
-    path = run_mod._report(council, docket, console, str(run_dir), "consensus", journal, manifest, "")
+    path, _text = run_mod._report(council, docket, console, str(run_dir), "consensus", journal, manifest, "")
     runjson.finalize(manifest, outcome="consensus", journal=journal, survivor_pids=[], survivor_ns=[], rounds=1, report=path)
 
     assert path and os.path.exists(path), "the report the human was promised"

@@ -39,6 +39,7 @@ from .prompts.brief import Brief
 from .render import context as report_context
 from .render.context import Interrupted
 from .sandbox import journal as journal_mod
+from .startup import report_paths
 from .watchdog import Watchdog
 
 EXIT_OK, EXIT_ABORT = 0, 1
@@ -54,16 +55,14 @@ def _held_by(verbosity: int) -> str:
     return "verbosity `quiet` left nothing else to hold it"
 
 
-def _disk_line(run_dir: str, report_at: str) -> str:
+def _disk_line(run_dir: str, report_paths: list[str]) -> str:
     """What the run directory kept beyond the report, in one line."""
-    skip = ""
-    if report_at and os.path.dirname(os.path.abspath(report_at)) == os.path.abspath(run_dir):
-        skip = os.path.join(run_dir, os.path.basename(report_at))
+    skip = {os.path.abspath(p) for p in report_paths if os.path.dirname(os.path.abspath(p)) == os.path.abspath(run_dir)}
     total = 0
     for root, _dirs, files in os.walk(run_dir):
         for name in files:
             path = os.path.join(root, name)
-            if path != skip:
+            if path not in skip:
                 with contextlib.suppress(OSError):
                     total += os.path.getsize(path)
     if total:
@@ -111,7 +110,7 @@ async def orchestrate(launch, sandbox) -> int:
     )
     transcripts = Transcripts(run_dir, "full" if council.verbosity >= FULL else "off")
     outcome, aborted = ABORTED, ""
-    report_path = ""
+    report, markdown_text = "", ""
     members: Members | None = None
     lanes: Lanes | None = None
     docket = _docket(council)
@@ -153,6 +152,10 @@ async def orchestrate(launch, sandbox) -> int:
         nonlocal manifest_claimed
         # claimed before the write: an exit landing mid-write must not replace the manifest being written
         manifest_claimed = True
+        extra = run_json_extra()
+        if len(report_paths(launch)) > 1:
+            md_path, html_path = report_paths(launch)
+            extra["reports"] = {"md": md_path, "html": html_path}
         runjson.finalize(
             manifest,
             outcome=outcome,
@@ -162,10 +165,10 @@ async def orchestrate(launch, sandbox) -> int:
             rounds=docket.round,
             report=report,
             namespace_sweep="none (in place)" if council.in_place else ("namespace" if swept else "not swept"),
-            **run_json_extra(),
+            **extra,
         )
 
-    def write_report(journal: list[dict]) -> str:
+    def write_report(journal: list[dict]) -> tuple[str, str]:
         return _report(
             council,
             docket,
@@ -220,24 +223,24 @@ async def orchestrate(launch, sandbox) -> int:
         # Each step is independent: one failing must not cancel the others, and a hurried exit skips the waits.
         survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
         journal = owed(console, "the write journal", _journal, council, sandbox, baselines, console, brake) or []
-        report_path = owed(console, "the report", write_report, journal) or ""
+        report, markdown_text = owed(console, "the report", write_report, journal) or ("", "")
         if council.verbosity >= DETAIL:
             owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
         if lanes is not None:
             owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
-        owed(console, "run.json", write_run_json, survivors, journal, report_path)
+        owed(console, "run.json", write_run_json, survivors, journal, report)
         owed(console, "the transcripts", transcripts.close)
-        owed(console, "the disk tally", console.say, _disk_line(run_dir, report_path))
+        owed(console, "the disk tally", console.say, _disk_line(run_dir, report_paths(launch)))
         if brake.first:
             console.say(f"exiting on signal {brake.first}")
             if brake.skipped:
                 console.say("skipped: " + ", ".join(brake.skipped))
         elif outcome in RESULTS:
             console.say(f"outcome: {outcome}")
-        if report_path:
-            owed(console, "the report's console copy", _print_report, report_path)
+        if report:
+            owed(console, "the report's console copy", _print_report, markdown_text)
         brake.disarm()
-    return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS and report_path else EXIT_ABORT)
+    return 128 + brake.first if brake.first else (EXIT_OK if outcome in RESULTS and report else EXIT_ABORT)
 
 
 def _docket(council: Council) -> Docket:
@@ -529,10 +532,22 @@ def _report(
     sink_claim: str = "",
     transcript_bytes: int = 0,
     stderr_bytes: int = 0,
-) -> str:
+) -> tuple[str, str]:
+    """Render the report once and write it in every format the council asked for.
+
+    Returns the primary report's path and its markdown text (the console copy, even when the
+    run keeps no markdown file).
+    """
+    from .render import html as html_render
+    from .render import markdown as markdown_render
     from .render import report_plan, report_review
 
-    path = report_at or os.path.join(run_dir, council.adapter.report_name)
+    files = council.adapter.report_files(council.report_format)
+    html_file = next((name for name in files if name.endswith(".html")), "")
+    if report_at:
+        paths = [report_at] if len(files) == 1 else [os.path.join(report_at, name) for name in files]
+    else:
+        paths = [os.path.join(run_dir, name) for name in files]
     try:
         context = _report_context(
             council,
@@ -542,21 +557,30 @@ def _report(
             docket,
             aborted,
             interrupted,
-            report_path=report_at,
+            report_name=files[0],
+            report_path=paths[0] if report_at else "",
+            report_html_name=html_file if html_file != files[0] else "",
+            report_html_path=paths[files.index(html_file)] if report_at and html_file and html_file != files[0] else "",
             sink_claim=sink_claim,
             transcript_bytes=transcript_bytes,
             stderr_bytes=stderr_bytes,
         )
         if docket is None or docket.blank:
-            text = report_context.minimal_report(reason=aborted or outcome, context=context)
+            doc = report_context.build_minimal(reason=aborted or outcome, context=context)
         else:
             from .sandbox.journal import mark_sandbox_items
 
             mark_sandbox_items(docket, journal, project=council.project)
             if council.mode == "plan":
-                text = report_plan.render(docket, context, run_dir=run_dir, converged=_converged(docket))
+                doc = report_plan.build(docket, context, run_dir=run_dir, converged=_converged(docket))
             else:
-                text = report_review.render(docket, context, run_dir=run_dir)
+                doc = report_review.build(docket, context, run_dir=run_dir)
+        page_title = f"{council.name} · {council.project}"
+        texts = {
+            name: html_render.render_html(doc, page_title) if name.endswith(".html") else markdown_render.render_md(doc)
+            for name in files
+        }
+        markdown_text = markdown_render.render_md(doc)  # the console copy is always the markdown of the same document
     except Exception as failure:
         console.say(f"the report could not be rendered ({type(failure).__name__}: {failure}) — writing what can be said instead")
         console.event(
@@ -566,24 +590,31 @@ def _report(
             frames=traceback.format_exc(limit=4).strip().splitlines()[-3:],
         )
         held = _held_by(council.verbosity)
-        text = (
+        markdown_text = (
             f"# Council report — `{council.name}`\n\nThe run ended "
             f"({aborted or outcome or 'no outcome'}). The report renderer failed: "
             f"{type(failure).__name__}: {failure}. {held}\n"
         )
-    tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
-    try:
-        with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
-            handle.write(text)
-        os.replace(tmp, path)
-    except OSError as failure:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        console.say(f"could not write the report: {failure}")
-        return ""
+        texts = {files[0]: markdown_text}
+    primary = paths[0]
+    for name, path in zip(files, paths):
+        text = texts.get(name)
+        if text is None:  # the render failed and the primary is not this file: nothing to write here
+            continue
+        tmp = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
+        try:
+            with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
+                handle.write(text)
+            os.replace(tmp, path)
+        except OSError as failure:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            console.say(f"could not write the report: {failure}")
+            return "", ""
     if report_at:
-        console.say(f"report {report_at}")
-    return path
+        for path in paths:
+            console.say(f"report {path}")
+    return primary, markdown_text
 
 
 def _converged(docket) -> str | None:
@@ -600,7 +631,10 @@ def _report_context(
     aborted: str = "",
     interrupted: Interrupted | None = None,
     *,
+    report_name: str = "",
     report_path: str = "",
+    report_html_name: str = "",
+    report_html_path: str = "",
     sink_claim: str = "",
     transcript_bytes: int = 0,
     stderr_bytes: int = 0,
@@ -642,8 +676,10 @@ def _report_context(
         chair_name=council.chair.name,
         chair_model=council.chair.model or "pi default",
         journal=journal,
-        report_name=council.adapter.report_name,
+        report_name=report_name or council.adapter.report_name,
         report_path=report_path,
+        report_html_name=report_html_name,
+        report_html_path=report_html_path,
         goal=council.goal,
         aborted_reason=aborted,
         captions=council.roster_names,
@@ -734,9 +770,6 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
         console.say(f"could not write human_input.json: {failure}")
 
 
-def _print_report(path: str) -> None:
-    try:
-        with open(path, encoding="utf-8") as handle:
-            sys.stdout.write("\n" + handle.read())
-    except OSError:
-        return
+def _print_report(text: str) -> None:
+    if text:
+        sys.stdout.write("\n" + text)
