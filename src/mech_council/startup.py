@@ -57,7 +57,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
     if human_fallback:
         council.human = "none"
     output_path = _output_target(args, council)
-    runs_dir = cli._runs_root_from_env(environ)
+    runs_dir = cli.runs_root_from_env(environ)
     _check_runs_root(runs_dir, project)
     run_name = _run_name(project)
     if cli.is_within(os.path.join(runs_dir, run_name), project):

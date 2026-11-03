@@ -510,7 +510,7 @@ def test_user_config_resolution(ground, council_config, xdg, home, expected):
     ],
 )
 def test_runs_root_resolution(ground, runs, xdg, home, expected):
-    from mech_council.cli import _runs_root_from_env
+    from mech_council.cli import runs_root_from_env
 
     env = {"CWD": ground}
     for key, name in (("COUNCIL_RUNS_DIR", runs), ("XDG_CACHE_HOME", xdg), ("HOME", home)):
@@ -518,13 +518,13 @@ def test_runs_root_resolution(ground, runs, xdg, home, expected):
             continue
         # `relative-xdg` stays relative on purpose: the resolution rules say it is ignored.
         env[key] = name if name == "relative-xdg" else os.path.join(ground, name)
-    assert _runs_root_from_env(env) == os.path.realpath(os.path.join(ground, expected))
+    assert runs_root_from_env(env) == os.path.realpath(os.path.join(ground, expected))
 
 
 def test_a_relative_runs_root_is_absolute_against_the_invoking_cwd(ground):
-    from mech_council.cli import _runs_root_from_env
+    from mech_council.cli import runs_root_from_env
 
-    assert _runs_root_from_env({"COUNCIL_RUNS_DIR": "side", "CWD": ground}) == os.path.realpath(os.path.join(ground, "side"))
+    assert runs_root_from_env({"COUNCIL_RUNS_DIR": "side", "CWD": ground}) == os.path.realpath(os.path.join(ground, "side"))
 
 
 def test_a_runs_root_inside_the_project_is_exit_one_naming_both(cli, project):

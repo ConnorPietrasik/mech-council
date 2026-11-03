@@ -1,0 +1,154 @@
+"""`mech-council list`: what the config offers, read the way a run would read it."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from .conftest import write_project_config
+
+
+def test_list_shows_every_council_with_its_effective_shape(cli, project):
+    result = cli(["list"], cwd=project)
+    assert result.returncode == 0, result.console
+    out = result.stdout
+    assert out.index("review · review") < out.index("plan · plan"), "config order"
+    assert "goal: Is this right?" in out
+    assert "goal: How should we do it?" in out
+    assert "roster: Metic, Senior · chair: Chair" in out
+    # [defaults] differs from the built-in on exactly these
+    assert 'knobs: max_rounds = 2 · watchdog_sec = 0 · verbosity = "debug" · pi_cli = "' in out
+    assert f"source: {project}/council.toml" in out
+
+
+def test_list_marks_templates_and_broken_councils(cli, project):
+    write_project_config(
+        project,
+        """\
+[councils._base]
+mode = "review"
+
+[councils._base.chair]
+name = "Chair"
+
+[[councils._base.agents]]
+name = "A"
+
+[[councils._base.agents]]
+name = "B"
+
+[councils.child]
+extends = "_base"
+goal = "on the base"
+
+[councils.child.chair]
+name = "Chair"
+
+[councils.solo]
+mode = "review"
+
+[councils.solo.chair]
+name = "Chair"
+
+[[councils.solo.agents]]
+name = "Only"
+""",
+    )
+    result = cli(["list"], cwd=project)
+    assert result.returncode == 0, result.console
+    out = result.stdout
+    assert "_base · review · template (extended, never convened)" in out
+    assert "child · review" in out
+    assert "extends: _base" in out
+    assert "goal: on the base" in out
+    assert "solo · not convenable" in out
+    assert "as-is: [councils.solo] convenes 1 agent(s); a council needs" in out
+
+
+def test_list_shows_both_layers_and_the_replacement_note(cli, project, child_env):
+    user = os.path.join(child_env["XDG_CONFIG_HOME"], "council", "council.toml")
+    os.makedirs(os.path.dirname(user), exist_ok=True)
+    with open(user, "w", encoding="utf-8") as handle:
+        handle.write("""\
+[councils.review]
+mode = "review"
+goal = "the user goal"
+
+[councils.review.chair]
+name = "Chair"
+
+[[councils.review.agents]]
+name = "U1"
+
+[[councils.review.agents]]
+name = "U2"
+
+[councils.only-user]
+mode = "review"
+
+[councils.only-user.chair]
+name = "Chair"
+
+[[councils.only-user.agents]]
+name = "U1"
+
+[[councils.only-user.agents]]
+name = "U2"
+""")
+    result = cli(["list"], cwd=project)
+    assert result.returncode == 0, result.console
+    out = result.stdout
+    assert user in out and os.path.join(project, "council.toml") in out, "the header names both files"
+    assert "replaces any council of the same name" in out
+    assert "goal: Is this right?" in out, "the project's review beats the user's"
+    assert "the user goal" not in out
+    assert "only-user" in out
+
+
+def test_list_with_no_config_refuses(cli, ground):
+    bare = os.path.join(ground, "bare")
+    os.makedirs(bare, exist_ok=True)
+    result = cli(["list"], cwd=bare)
+    assert result.returncode == 1
+    assert "no council.toml" in result.stderr
+
+
+def test_list_help_and_unknown_flag(cli, ground):
+    assert cli(["list", "--help"], cwd=ground).returncode == 0
+    result = cli(["list", "--rounds", "3"], cwd=ground)
+    assert result.returncode == 2
+    assert "unknown flag" in result.stderr
+    result = cli(["list", "review"], cwd=ground)
+    assert result.returncode == 2
+    assert "accepts no positionals" in result.stderr
+
+
+def test_list_takes_project_and_config_flags(cli, project, ground):
+    assert cli(["list", "--project", project], cwd=ground).returncode == 0
+    result = cli(["list", "-c", os.path.join(project, "council.toml")], cwd=ground)
+    assert result.returncode == 0, result.console
+    assert f"source: {os.path.join(project, 'council.toml')}" in result.stdout
+
+
+@pytest.mark.parametrize("name", ["list", "doctor"])
+def test_council_names_list_and_doctor_are_reserved(cli, project, name):
+    write_project_config(
+        project,
+        f"""\
+[councils.{name}]
+mode = "review"
+
+[councils.{name}.chair]
+name = "Chair"
+
+[[councils.{name}.agents]]
+name = "A"
+
+[[councils.{name}.agents]]
+name = "B"
+""",
+    )
+    result = cli([name], cwd=project)
+    assert result.returncode == 1
+    assert "reserved" in result.console

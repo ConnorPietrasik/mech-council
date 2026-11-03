@@ -1,2 +1,6 @@
 Nicer-looking HTML report option
+"implement" somehow; some way to have agents work together for implementation
+"do" - plan then implement
+"fix" - review, then human / llm gate to decide which findings to fix, then either plan then implement or just go straight to implement
 EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever
+EVENTUALLY: Reference docker container for super easy download / setup?

@@ -43,6 +43,10 @@ mech-council review            # from any project; or: mech-council -g "focus on
 mech-council plan
 ```
 
+`mech-council list` shows the councils the config offers — roster, goal, the knobs that
+differ from the defaults, and which file each comes from. `mech-council doctor` checks what
+a run needs: the config, pi, the namespaces the sandbox stands on, and the runs root.
+
 Prefer a council of your own? Put the smallest one in `<project>/council.toml` — two seats and a
 chair; `provider` and `model` are optional, and without them a seat takes whatever pi is configured
 with.

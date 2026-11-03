@@ -52,6 +52,9 @@ COUNCIL_KEYS = set(SCALAR_KEYS) | {"agents", "chair", "extends"}
 #: A council name starting with this is a template: `extends` reaches it, `mech-council <name>` does not.
 TEMPLATE_PREFIX = "_"
 
+#: council names the subcommands claim for themselves: a config may not name a council after one
+RESERVED_NAMES: tuple[str, ...] = ("init", "list", "doctor")
+
 
 @dataclass
 class MemberSpec:
@@ -415,8 +418,8 @@ def _read(path: str, *, require_councils: bool) -> ConfigFile:
     for key, table in councils_raw.items():
         if not str(key).strip():
             raise ConfigError(f"{path}: a council name (its table key) must not be empty")
-        if str(key) == "init":
-            raise ConfigError(f"{path}: the council name 'init' is reserved for the mech-council init subcommand")
+        if str(key) in RESERVED_NAMES:
+            raise ConfigError(f"{path}: the council name {key!r} is reserved for the mech-council {key} subcommand")
         if not isinstance(table, dict):
             raise ConfigError(f"council {key!r} must be a table")
     return ConfigFile(path=path, defaults=defaults, councils=councils_raw, paths=[path], raw={path: raw})
@@ -495,6 +498,23 @@ def convene(
     untrusted: bool = False,
     namespaces_available: bool = True,
 ) -> Council:
+    council = convene_without_pi(config, name, args, project, untrusted=untrusted, namespaces_available=namespaces_available)
+    stated = _pi_cli_stated_by_project(config, [name, *council.extends])
+    pi_cli, pi_version = resolve_pi(council.pi_cli or None, project, from_project=stated)
+    council.pi_cli, council.pi_version = pi_cli, pi_version
+    return council
+
+
+def convene_without_pi(
+    config: ConfigFile,
+    name: str,
+    args: Args,
+    project: str,
+    *,
+    untrusted: bool = False,
+    namespaces_available: bool = True,
+) -> Council:
+    """Convene without probing pi: `pi_cli` is what the config wrote, `pi_version` empty; `convene` runs the probe on the result."""
     table, chain = _resolve(config, name)
     via = f" [the roster merges {' → '.join([*reversed(chain), name])}: it can be stated in any of them]" if chain else ""
     flat = _flatten(table, config.defaults, f"[councils.{name}]")
@@ -551,7 +571,6 @@ def convene(
     chair.id = None
     chair.file_base = chair_file_base()
 
-    pi_cli, pi_version = resolve_pi(flat["pi_cli"], project, from_project=_pi_cli_stated_by_project(config, [name, *chain]))
     council = Council(
         name=name,
         mode=str(flat["mode"]),
@@ -566,8 +585,8 @@ def convene(
         max_concurrency=int(flat["max_concurrency"]),
         verbosity=VERBOSITY_LEVELS.index(args.verbosity or str(flat["verbosity"])),
         sandbox_mib=int(flat["sandbox_mib"]),
-        pi_cli=pi_cli,
-        pi_version=pi_version,
+        pi_cli=str(flat["pi_cli"] or ""),
+        pi_version="",
         human=args.human or str(flat["human"]),
         extends=chain,
         config_path=config.supplied_by(name),

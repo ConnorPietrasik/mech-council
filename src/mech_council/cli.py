@@ -77,6 +77,8 @@ something you convene.
 positional arguments:
   <council>          a [councils.<name>] to convene; omit it when the file holds exactly one
   init               write the starter user council.toml — it convenes no council; `mech-council init --help`
+  list               list the councils the config offers, in config order; `mech-council list --help`
+  doctor             check what a run needs — config, pi, namespaces, the runs root; `mech-council doctor --help`
 
 flags:
   -p, --project <path>     project directory (default: the invoking cwd)
@@ -182,6 +184,46 @@ def _record_override(obj: object, attr: str, value: object, flag: Flag, notes: l
     setattr(obj, attr, value)
 
 
+@dataclass(frozen=True)
+class InspectArgs:
+    """What `-p`/`-c` give the inspect subcommands; `help` is the caller's to print as its own text."""
+
+    project: str | None
+    config: str | None
+    help: bool = False
+
+
+def parse_inspect_flags(argv: list[str], what: str) -> InspectArgs:
+    """The flags `list` and `doctor` share: `-p/--project` and `-c/--config`, the last one winning."""
+    project: str | None = None
+    config: str | None = None
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        i += 1
+        if token in ("-h", "--help"):
+            return InspectArgs(project, config, help=True)
+        name, inline = token, None
+        if token.startswith("--") and "=" in token:
+            name, inline = token.split("=", 1)
+        if name not in ("-p", "--project", "-c", "--config"):
+            if not token.startswith("-"):
+                raise UsageError(f"{what} accepts no positionals: {token!r} (it takes only -p/--project and -c/--config)")
+            hint = suggest.suggest(name.lstrip("-"), ["project", "config", "help"])
+            extra = f" (did you mean {hint}?)" if hint else ""
+            raise UsageError(f"unknown flag {name!r} for {what}: it takes only -p/--project and -c/--config{extra}")
+        if inline is None:
+            if i >= len(argv):
+                raise UsageError(f"{name} wants a value")
+            inline = argv[i]
+            i += 1
+        if name in ("-p", "--project"):
+            project = inline
+        else:
+            config = inline
+    return InspectArgs(project, config)
+
+
 def fail(message: str) -> int:
     sys.stderr.write(f"{message}\n")
     sys.stderr.write("run 'mech-council --help'\n")
@@ -193,7 +235,7 @@ def resolve_project(raw: str | None) -> str:
     return os.path.realpath(path)
 
 
-def _runs_root_from_env(environ: dict[str, str]) -> str:
+def runs_root_from_env(environ: dict[str, str]) -> str:
     raw = environ.get("COUNCIL_RUNS_DIR") or ""
     if raw:
         return os.path.realpath(raw if os.path.isabs(raw) else os.path.join(environ.get("CWD", os.getcwd()), raw))
@@ -278,6 +320,14 @@ def main(argv: list[str] | None = None) -> int:
         from . import init_config
 
         return init_config.main(argv[1:])
+    if argv[:1] == ["list"]:
+        from . import list_councils
+
+        return list_councils.main(argv[1:])
+    if argv[:1] == ["doctor"]:
+        from . import doctor
+
+        return doctor.main(argv[1:])
     from . import startup
 
     try:
