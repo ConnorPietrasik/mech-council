@@ -214,7 +214,7 @@ class StageRecord:
     gate_output: str = ""  # what the builder reported
     gate_rerun: str = ""  # what the gate's verifier last said
     gate_ok: bool = False  # the last gate verdict
-    findings: list[str] = field(default_factory=list)  # the stage's review item ids, in the order raised
+    findings: list[str] = field(default_factory=list)  # the review item ids that hold the stage open, in the order raised
     gate_item: str = ""  # the synthetic "the gate fails" item, while it stands
     open_items: list[str] = field(default_factory=list)  # what the builder left open
     changed: list[str] = field(default_factory=list)  # the paths the builder named as created or modified

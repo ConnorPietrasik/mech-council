@@ -307,7 +307,9 @@ check that proves it: a command, or a statement of what must be true. The review
 verifies the gate at every review — the run never runs it itself, so a gate that is prose still
 works — and the stage only passes when the crew's verdict is pass and it has nothing left to
 report — it re-reports what it still finds, so a finding outlives the passes until it is fixed or
-withdrawn. When the crew's verdicts do not read, the run's chair verifies the gate itself. A
+withdrawn; a `trivial` nit is the exception — past the builder's second pass it stops holding the
+stage open and stays on the docket, still standing in the report. When the crew's verdicts do not
+read, the run's chair verifies the gate itself. A
 stage that names no gate has nothing to verify: it passes when the review crew has nothing left
 to report. New text a stage needs (docs, release notes) lands in the same stage —
 the builder writes it and names it as `user_text` — and the report prints it. A `prose`-role

@@ -47,6 +47,9 @@ _FILE_CAP = 4000
 _SNAPSHOT_TIMEOUT_S = 600
 #: how much of the verifier's account of the gate a stage carries: the prompts and the report
 _GATE_EVIDENCE_CAP = 2000
+#: the builder passes on which a `trivial` finding still holds the stage open: the work pass and the first fix pass
+#: from the third on, `minor` or higher is what keeps the stage open, so the ladder cannot churn on nits
+_NIT_PASSES = 2
 
 #: a work reply that carried nothing: what the run reads of a pass that was unreadable after its repairs
 _NO_WORK: dict = {
@@ -585,13 +588,15 @@ class Implement:
         )
         data = await self._work_pass(rec, stage)
         await self._maybe_prose_pass(rec, stage, data)
-        findings = await self._stage_review(rec, stage=stage, changed=[*data["changed"], *data["user_text"]])
+        findings = await self._stage_review(rec, stage=stage, changed=[*data["changed"], *data["user_text"]], pass_number=1)
         fix_pass = 0
         while (findings or not rec.gate_ok) and fix_pass < self.fix_budget:
             fix_pass += 1
             data = await self._fix_pass(rec, stage, self._stage_items(rec), fix_pass)
             await self._maybe_prose_pass(rec, stage, data)
-            findings = await self._stage_review(rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"))
+            findings = await self._stage_review(
+                rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"), pass_number=1 + fix_pass
+            )
         replan = 0
         while (findings or not rec.gate_ok) and replan < self.replans:
             replan += 1
@@ -604,7 +609,9 @@ class Implement:
                 sub["kind"] = stage.get("kind") or "code"
             data = await self._fix_pass(rec, stage, self._stage_items(rec), fix_pass + replan, revised=revised)
             await self._maybe_prose_pass(rec, stage, data)
-            findings = await self._stage_review(rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"))
+            findings = await self._stage_review(
+                rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"), pass_number=1 + fix_pass + replan
+            )
         if findings or not rec.gate_ok:
             return await self._block_stage(rec)
         rec.status = "passed"
@@ -825,16 +832,24 @@ class Implement:
 
     # ------------------------------------------------------------- review
 
+    @staticmethod
+    def _holds_stage(item: Item, pass_number: int) -> bool:
+        """Whether a finding holds the stage open at this rung: anything through the first two builder
+        passes; from the third on, `minor` or higher only, so the ladder cannot churn on nits."""
+        return pass_number <= _NIT_PASSES or item.severity != "trivial"
+
     async def _stage_review(
         self,
         rec: StageRecord,
         *,
         stage: dict,
         changed: list[str],
+        pass_number: int,
         addressed: list[dict] | None = None,
     ) -> list[str]:
         """The review crew's scoped pass: one review round over the stage's diff — and the gate, which the crew runs —
-        the findings onto the shared docket, the gate verdict onto the stage record."""
+        the findings onto the shared docket, the gate verdict onto the stage record. `pass_number` is the
+        builder pass just reviewed: a finding holds the stage open only while its severity holds it there."""
         crew = self.crews.reviewer
         if crew is None or crew.brief is None:
             await self._settle_gate(rec, stage, {})
@@ -855,8 +870,7 @@ class Implement:
                 f"- {item['id']}: {item['claim']}" + (f" — {item['evidence']}" if item["evidence"] else "") for item in open_findings
             ]
             sections.append(
-                "Re-report any that are still wrong, with the same claim: the re-report joins the standing item, "
-                "and it still holds the stage open."
+                "Re-report any that are still wrong, with the same claim: the re-report joins the standing item."
             )
         sections += [
             "",
@@ -900,7 +914,7 @@ class Implement:
                 claim = str(entry.get("claim") or "")[:600]
                 standing = self._open_item_for(claim)
                 if standing is not None:
-                    # the same defect under the same words: one item, the re-report joins it — and it still holds the stage open
+                    # the same defect under the same words: one item, the re-report joins it
                     if agent not in standing.also_reported_by:
                         standing.also_reported_by.append(agent)
                     if standing.id in rec.findings and standing.id not in re_reported:
@@ -928,15 +942,28 @@ class Implement:
         if rec.review_blind:
             self.emit("implement_stage_review_unreadable", stage=rec.index)
         await self._settle_gate(rec, stage, results)
+        held_new = [i for i in new_ids if self._holds_stage(self.docket.items[i], pass_number)]
+        held_standing = [i for i in re_reported if self._holds_stage(self.docket.items[i], pass_number)]
         if new_ids:
-            rec.findings.extend(new_ids)
             self.emit("implement_stage_findings", stage=rec.index, findings=new_ids)
             self.console.say(f"stage {rec.index}: the review crew found {', '.join(new_ids)}")
-        if re_reported:
-            self.emit("implement_stage_findings_standing", stage=rec.index, findings=re_reported)
-            self.console.say(f"stage {rec.index}: the review crew still finds {', '.join(re_reported)}")
+        if held_new:
+            rec.findings.extend(held_new)
+        for item_id in [i for i in new_ids + re_reported if i not in held_new + held_standing]:
+            # the finding is on the docket and in the report, but it no longer holds the stage: out of the stage's own record
+            if item_id in rec.findings:
+                rec.findings.remove(item_id)
+            item = self.docket.items[item_id]
+            self.emit("implement_finding_not_holding", stage=rec.index, finding=item_id, severity=item.severity)
+            self.console.say(
+                f"stage {rec.index}: {item_id} is {item.severity} — past the first {_NIT_PASSES} passes it does not hold "
+                "the stage open; it stays on the docket"
+            )
+        if held_standing:
+            self.emit("implement_stage_findings_standing", stage=rec.index, findings=held_standing)
+            self.console.say(f"stage {rec.index}: the review crew still finds {', '.join(held_standing)}")
         await self._checkpoint(terminal=False)
-        return new_ids + re_reported
+        return held_new + held_standing
 
     def _open_item_for(self, claim: str) -> Item | None:
         """The open item this claim already stands on, if any: a re-report joins it, never a duplicate."""

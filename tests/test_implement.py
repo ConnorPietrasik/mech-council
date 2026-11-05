@@ -1657,6 +1657,54 @@ def test_a_standing_finding_is_re_reported_not_duplicated(cli, project):
     assert "re-confirmed by" in report
 
 
+def test_a_trivial_finding_stops_holding_the_stage_after_two_passes(cli, project):
+    """A `trivial` finding holds the stage open through the work pass and the first fix pass; from the
+    third builder pass on, only `minor` or higher keeps the stage open — so a stage that is down to a
+    nit passes instead of spending the ladder and blocking on it. The nit stays on the docket."""
+    text = CONFIG.format(pi=PI).replace("[councils.build]", "[councils.build]\nfix_budget = 3\nreplans = 0")
+    write_project_config(project, text)
+    commit_all(project)
+    plan = os.path.join(os.path.dirname(project), "plan.md")
+    with open(plan, "w", encoding="utf-8") as handle:
+        handle.write("# Plan\n\n1. Write the hello module.\n")
+    script = json.dumps(
+        [
+            # every re-review re-reports the nit: held through pass 2, released at pass 3
+            {
+                "contains": "## The findings still standing",
+                "reply": {
+                    "findings": [{"claim": "the code is smelly", "severity": "trivial", "evidence": "hello.py:1"}],
+                    "summary": "still there",
+                    "open_questions": [],
+                },
+            },
+            {
+                "contains": "## The stage",
+                "reply": {
+                    "findings": [{"claim": "the code is smelly", "severity": "trivial", "evidence": "hello.py:1"}],
+                    "summary": "one nit",
+                    "open_questions": [],
+                },
+            },
+            {"contains": "# Structure the plan", "reply": {"stages": [{"state": "write the hello module", "gate": "test -f hello.py"}]}},
+            {
+                "contains": "# Your work",
+                "reply": {"summary": "done", "changed": ["hello.py"], "open_issues": []},
+                "write": [{"path": "hello.py", "text": "print('hello')\n"}],
+            },
+            {"contains": "# Fix pass", "reply": {"summary": "left it", "changed": [], "addressed": [{"id": "C1", "how": "noted"}]}},
+        ]
+    )
+    result = cli(["build", "--plan", plan], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["outcome"] == "implemented", "the nit held the stage through pass two, then let it go — the ladder never spent"
+    assert "still finds C1" in result.console, "through the second builder pass the nit still held the stage open"
+    assert "does not hold the stage open" in result.console
+    assert "implement_finding_not_holding" in result.kinds()
+    report = result.artifact("implementation.md")
+    assert "C1 [trivial] the code is smelly — still standing" in report, "the nit stays on the docket, unclosed, in the report"
+
+
 def test_a_stage_passes_on_its_gate_when_the_review_crew_is_unreadable(cli, project):
     """Every reviewer unreadable after its repair re-asks: the chair steps in to verify the gate, and
     the stage still passes when the chair says it does — the run says so, the event, the console
