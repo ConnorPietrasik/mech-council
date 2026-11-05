@@ -1438,6 +1438,32 @@ def test_the_options_own_words_are_the_selection(cli, project):
     assert "The human approved the build" in report
 
 
+def test_a_bare_yes_is_an_approval(cli, project):
+    """`H1: yes` — an unqualified affirmative — picks `proceed` the way the option's own words do."""
+    write_project_config(project, solo_config().replace('human = "none"', 'human = "blocking"'))
+    commit_all(project)
+    plan = os.path.join(os.path.dirname(project), "plan.md")
+    with open(plan, "w", encoding="utf-8") as handle:
+        handle.write("# Plan\n\n1. Write the hello module.\n")
+    script = json.dumps(
+        [
+            {"contains": "# Structure the plan", "reply": {"stages": [{"state": "write the hello module", "gate": "test -f hello.py"}]}},
+            {"contains": "# Your work", "reply": {"summary": "done", "changed": ["hello.py"], "open_issues": []}},
+        ]
+    )
+    result = cli(
+        ["build", "--plan", plan],
+        cwd=project,
+        env=dict(runs_env(project), FAKE_PI_SCRIPT=script),
+        timeout=150,
+        stdin="H1: yes\n",
+    )
+    assert result.returncode == 0, result.console
+    assert result.manifest["outcome"] == "implemented", "a bare yes is the proceed bit, not a refusal"
+    report = result.artifact("implementation.md")
+    assert "The human approved the build" in report
+
+
 def test_a_non_blocking_approval_is_reported_recorded_not_standing(cli, project):
     """A run that never waits on its own approval gate: the report says it was recorded and the run
     kept going — not `standing`, which would say the run is waiting on a gate it already passed."""

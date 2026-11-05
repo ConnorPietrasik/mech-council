@@ -40,6 +40,14 @@ def test_an_unlisted_outcome_reads_muted():
     assert '<span class="badge muted">something_new</span>' in page
 
 
+def test_the_implement_outcomes_wear_their_colours():
+    docket = build()
+    ok = render_html(report_review.build(docket, context(outcome="implemented")), "build · /srv/app")
+    assert '<span class="badge ok">implemented</span>' in ok, "a build that landed everything is a success"
+    partial = render_html(report_review.build(docket, context(outcome="partial")), "build · /srv/app")
+    assert '<span class="badge warn">partial</span>' in partial, "a build with blocked stages reads as a warning"
+
+
 def test_the_minimal_report_is_one_page_too():
     doc = build_minimal(reason="interrupted by SIGINT 41.2 s in (phase 0)", context=context(outcome="aborted"))
     page = render_html(doc, "review · /srv/app")

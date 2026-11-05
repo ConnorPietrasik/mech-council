@@ -14,9 +14,11 @@ from .doc import Block, Group, Heading, List, ListItem, Paragraph, Report, Text
 #: the badge colour per outcome; anything else reads as muted
 OUTCOME_CLASS = {
     "consensus": "ok",
+    "implemented": "ok",
     "unvetted": "info",
     "needs_human": "warn",
     "stalemate": "warn",
+    "partial": "warn",
     "round_limit_reached": "muted",
     "aborted": "bad",
 }

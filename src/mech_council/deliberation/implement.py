@@ -14,7 +14,7 @@ import subprocess
 
 from ..console import Console
 from ..crews import Crew, Crews
-from ..extraction import Extraction, parse_replan, parse_work
+from ..extraction import YES_TOKENS, Extraction, parse_replan, parse_work
 from ..humaninput import Checkpoint
 from ..port import Port
 from ..prompts import implement as impl_text
@@ -429,13 +429,19 @@ class Implement:
 
     @staticmethod
     def _picked(question: Question, option_number: int) -> bool:
-        """The explicit pick of option N: its number, or its own words and nothing else.
+        """The explicit pick of option N: its number, its own words and nothing else, or on a
+        two-option question a bare yes-word, which picks the first option.
 
         A number is stored as the option's words, so the words are all there is to compare. A
         free-text qualifier is not a decision: the run reads one bit from its own gates and
         applies nothing else, so anything that does not say the option is no pick of it.
         """
-        return (question.answer or "").strip().casefold() == question.options[option_number - 1].strip().casefold()
+        answer = (question.answer or "").strip().casefold()
+        if not answer:
+            return False
+        if answer == question.options[option_number - 1].strip().casefold():
+            return True
+        return option_number == 1 and len(question.options) == 2 and answer in YES_TOKENS
 
     # ------------------------------------------------------------- the checkpoint
 
