@@ -895,11 +895,9 @@ class Engine:
         for state in states.values():
             counts[state] = counts.get(state, 0) + 1
         signed = len(self.docket.signoffs)
-        summary = (
-            f"round {round_}: {signed}/{self.docket.n} signed off · "
-            + ", ".join(f"{count} {state}" for state, count in sorted(counts.items()))
-            or f"round {round_}: {signed}/{self.docket.n} signed off"
-        )
+        summary = f"round {round_}: {signed}/{self.docket.n} signed off"
+        if counts:
+            summary += " · " + ", ".join(f"{count} {state}" for state, count in sorted(counts.items()))
         record = RoundRecord(round=round_, summary=summary)
         for agent in self.docket.roster:
             backing = self.docket.backing.get(agent, "—") if self.docket.mode == "plan" else "n/a"

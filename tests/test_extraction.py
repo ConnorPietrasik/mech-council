@@ -296,6 +296,22 @@ def test_an_item_less_human_input_entry_is_a_question_not_an_escalation():
     assert out.data["human_input"][0]["item"] is None
 
 
+def test_a_wordless_human_input_entry_is_refused_not_invented():
+    """An entry that means to ask and carries no words goes back for the words; its dump is never the question."""
+    out = parse(verdict(**positions(("F1", "agree")), human_input=[{"item": "F1", "blocking": True}]))
+    assert out.data["human_input"] == []
+    assert [r["field"] for r in out.refused] == ["human_input"]
+    assert out.refused[0]["about"] == "F1"
+    assert "question" in out.refused[0]["why"]
+
+
+def test_an_empty_human_input_entry_is_noise_not_a_repair():
+    empties: list[object] = ["", [{}]]
+    for empty in empties:
+        out = parse(verdict(**positions(("F1", "agree")), human_input=empty))
+        assert out.data["human_input"] == [] and not out.refused, empty
+
+
 def test_an_answer_keeps_its_text_and_its_question_id_apart():
     """An answer routes on `to` + `Q<n>`; its prose is its own field."""
     out = parse(verdict(**positions(("F1", "agree")), answers=[{"to": "Agent2", "question": "Q9", "answer": "no"}]))
@@ -543,6 +559,14 @@ def test_a_comparison_carries_agreed_conflicts_and_uncovered():
     assert data["agreed"][0]["point"] == "the staging"
     assert data["conflicts"][0]["claim"] == "step two"
     assert data["uncovered"] == ["the rollback"]
+
+
+def test_a_pointless_agreed_entry_is_dropped_not_invented():
+    """An agreed line with no words is dropped; the entry's dump is never the point."""
+    text = json.dumps({"agreed": [{"agents": ["Agent1", "Agent2"]}, {"point": "the staging"}, ""]})
+    data, errors = parse_comparison(text)
+    assert data is not None and not errors
+    assert data["agreed"] == [{"point": "the staging", "agents": []}]
 
 
 def test_a_watchdog_reply_reads_both_action_spellings():

@@ -197,6 +197,25 @@ def test_stalemate_needs_two_identical_rounds_and_no_checkpoint_movement():
     assert stalemate.stalemate(docket, sig, sig, True) is False, "the human moved it"
 
 
+def test_ask_movement_moves_the_stalemate_signature():
+    """A second, a peer answer and an insistence are movement: the run must not stall over them."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", DISAGREE, note="no tenant guard", evidence="app.py:9", round=1)
+    stance(docket, "F1", "Agent2", AGREE, round=1)
+    stance(docket, "F1", "Agent3", AGREE, round=1)
+    escalations.raise_question(docket, text="is the upstream guard acceptable?", asker="Agent1", item_id="F1", round_=1)
+    first = stalemate.signature(docket)
+    docket.round = 2
+    escalations.second(docket, qid="H1", agent="Agent3", round_=2)
+    assert stalemate.signature(docket) != first, "a second is movement: it can show the ask to the human"
+    before = stalemate.signature(docket)
+    escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="the guard is upstream", round_=2)
+    assert stalemate.signature(docket) != before, "a peer answer holds the ask back: the asker may now insist"
+    before = stalemate.signature(docket)
+    escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=2)
+    assert stalemate.signature(docket) != before, "an insistence is movement"
+
+
 # ---------------------------------------------------------------------------
 # The escalation ledger is a second axis
 # ---------------------------------------------------------------------------

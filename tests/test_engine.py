@@ -524,6 +524,29 @@ def test_an_option_number_the_menu_never_offered_is_refused_and_the_answer_stand
     assert refused[0]["id"] == "H1" and refused[0]["option"] == 9 and refused[0]["menu"] == 1
 
 
+def test_a_round_summary_with_nothing_open_has_no_dangling_separator():
+    """A round that closes every item reports only the sign-off line, no trailing separator."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who != "Agent1":
+                return payload(findings=[])
+            return payload(findings=[{"claim": "a bug"}])
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply)
+        outcome = await built.run()
+        return outcome, built
+
+    outcome, built = asyncio.run(main())
+    assert outcome == "consensus"
+    summary = built.docket.rounds[0].summary
+    assert "3/3" in summary, summary  # the sign-off count is still reported
+    assert " · " not in summary, summary  # no states left, no separator
+
+
 def test_a_selection_whose_line_is_not_the_answer_records_no_line():
     """`answer_option` claims the human chose a particular line, so that line had to **be** the answer."""
     import asyncio

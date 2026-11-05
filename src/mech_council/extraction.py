@@ -657,11 +657,18 @@ def _human_input(data: dict, refused: list[dict[str, str]]) -> list[dict]:
     out = []
     for entry in raw:
         if isinstance(entry, str):
+            if not entry.strip():
+                continue
             entry = {"question": entry}
         if not isinstance(entry, dict):
             continue
-        question = text_of(pick(entry, "question")) or text_of(entry)
-        if not question or question == "{}":
+        question = text_of(pick(entry, "question"))
+        if not question:
+            if any(entry.values()):
+                record = {"field": "human_input", "why": "carries no question text", "said": text_of(entry), "counts": "dropped"}
+                if (about := text_of(pick(entry, "item")).strip()):
+                    record["about"] = about
+                refused.append(record)
             continue
         blocking = pick(entry, "blocking")
         out.append(
@@ -836,15 +843,16 @@ def _agreed(value: object) -> list[dict]:
         return out
     for entry in value:
         if isinstance(entry, str):
-            out.append({"point": entry, "agents": []})
+            point, agents = text_of(entry), []
         elif isinstance(entry, dict):
-            agents = pick(entry, "agents") or pick(entry, "agent") or []
-            out.append(
-                {
-                    "point": text_of(pick(entry, "point")) or text_of(pick(entry, "claim")) or text_of(entry),
-                    "agents": _strings(agents) if isinstance(agents, list) else _strings([agents]),
-                }
-            )
+            point = text_of(pick(entry, "point")) or text_of(pick(entry, "claim"))
+            listed = pick(entry, "agents") or pick(entry, "agent") or []
+            agents = _strings(listed) if isinstance(listed, list) else _strings([listed])
+        else:
+            continue
+        if not point:
+            continue
+        out.append({"point": point, "agents": agents})
     return out
 
 

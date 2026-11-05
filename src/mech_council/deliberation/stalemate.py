@@ -6,6 +6,9 @@ from .state import ANSWERED, Docket
 
 
 def signature(docket: Docket) -> tuple:
+    """What two alike rounds say: the stances and signoffs, the items' fates, and the facts an ask's
+    showing turns on — its state, askers, declared stops, peer answers, insistences. New words on the
+    same ground — reworded asks, notes, option menus — count as no movement."""
     items = []
     for item_id in docket.order:
         item = docket.items[item_id]
@@ -30,10 +33,22 @@ def signature(docket: Docket) -> tuple:
         )
         for esc in docket.escalations.values()
     )
+    questions = tuple(
+        (
+            qid,
+            question.state,
+            tuple(question.askers),
+            tuple(question.blocked_by),
+            tuple(sorted(question.peer_answers.items())),
+            question.insisted,
+        )
+        for qid in docket.question_order
+        if (question := docket.questions[qid]) is not None
+    )
     answered_qa = sum(1 for qid in docket.qa_order if docket.qa[qid].answer)
     answered_human = sum(1 for qid in docket.question_order if docket.questions[qid].state == ANSWERED)
     # Who signed, not when.
-    parts = [tuple(items), tuple(sorted(docket.signoffs)), escalations, answered_qa, answered_human]
+    parts = [tuple(items), tuple(sorted(docket.signoffs)), escalations, questions, answered_qa, answered_human]
     if docket.mode == "plan":
         parts.append(tuple(sorted(docket.backing.items())))
         parts.append(sum(len(approach.revisions) for approach in docket.approaches.values()))
