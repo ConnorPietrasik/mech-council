@@ -1221,13 +1221,11 @@ class Implement:
         """The project's worktree as a tree object, in the run directory's private index and object store.
 
         The add is scoped to the project directory: a project that is a subdirectory of a larger
-        repo snapshots only what the run may touch. The index is fresh, never a copy of the repo's:
-        a copied stat cache can claim a file unchanged when its mtime matches to the second, and the
-        tree must hold what is on disk.
+        repo snapshots only what the run may touch. The index persists across the run's snapshots,
+        so the stat cache skips files the builder did not touch; the cache compares ctime as well,
+        and a restore cannot carry one, so an old mtime cannot hide a change.
         """
         env = snapshot_env(self.run_dir)
-        with contextlib.suppress(OSError):
-            os.remove(env["GIT_INDEX_FILE"])
         # git refuses a repo whose object directory does not exist yet, so the private store is created first
         os.makedirs(env["GIT_OBJECT_DIRECTORY"], exist_ok=True)
         if not self._git("add", "-A", "--", ".", env=env, timeout=_SNAPSHOT_TIMEOUT_S)[0]:

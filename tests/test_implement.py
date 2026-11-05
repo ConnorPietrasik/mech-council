@@ -229,6 +229,38 @@ def test_the_stage_diff_is_a_snapshot_since_the_last_review(tmp_path):
     assert "+v = 2" not in diff and "-v = 1" not in diff, "only what changed since the last review"
 
 
+def test_a_change_that_carries_the_old_mtime_still_reaches_the_review(tmp_path):
+    """A builder can restore a file with its old mtime (cp -p, tar -x): same size, same mtime,
+    different content. The claimed path is touched before the snapshot, so the stat cache cannot
+    call it unchanged, and the diff shows what changed."""
+    import asyncio
+    import types
+    from typing import cast
+
+    from mech_council.deliberation.implement import Implement
+
+    project = os.path.join(str(tmp_path), "proj")
+    os.makedirs(project)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    old = os.stat(os.path.join(project, "app.py")).st_mtime_ns
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+
+    host = types.SimpleNamespace(project=project, run_dir=os.path.join(str(tmp_path), "runs"))
+    host._git = types.MethodType(Implement._git, host)
+    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
+    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    assert host.last_tree, "the starting tree snapshots"
+
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    os.utime(os.path.join(project, "app.py"), ns=(old, old))  # a restore carries the old mtime
+    diff = asyncio.run(Implement._stage_diff(cast("Implement", host), changed=["app.py"]))
+    assert "-v = 1" in diff and "+v = 2" in diff, "a same-size change with a restored mtime still shows"
+
+
 def test_a_failed_diff_does_not_advance_the_last_tree(tmp_path):
     """A review whose git diff fails falls back to the changed files, but the failed pass is not
     the next review's baseline: the next diff still shows what the failed pass changed, or it
