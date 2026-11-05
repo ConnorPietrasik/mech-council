@@ -470,9 +470,9 @@ def test_a_work_reply_keeps_only_lines_that_name_real_seats_and_items():
     assert parsed.data["addressed"] == [{"id": "C1", "how": "fixed"}], "addressed may only name a docket item"
 
 
-def test_user_text_accumulates_across_passes():
+def test_user_text_accumulates_across_passes(tmp_path):
     """A fix pass that names no user-visible surfaces does not erase the ones the work pass named:
-    the stage's `user_text` is the union of its passes, the way `changed` is."""
+    the stage's `user_text` is the union of its passes, deduped, the way the report reads it."""
     import types
     from typing import cast
 
@@ -480,9 +480,16 @@ def test_user_text_accumulates_across_passes():
     from mech_council.deliberation.state import Docket, StageRecord
     from mech_council.extraction import parse_work
 
+    project = str(tmp_path)
+    with open(os.path.join(project, "docs.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Docs\n")
     host = types.SimpleNamespace(
-        docket=Docket(mode="implement", goal="g", roster=["Agent1"], chair_name="Chair", seconding=True, human="none")
+        project=project,
+        console=types.SimpleNamespace(say=lambda line: None),
+        emit=lambda name, **fields: None,
+        docket=Docket(mode="implement", goal="g", roster=["Agent1"], chair_name="Chair", seconding=True, human="none"),
     )
+    host._record_user_text = types.MethodType(Implement._record_user_text, host)
     rec = StageRecord(index=1, state="write it", gate="test -f app.py")
     Implement._apply_work(
         cast("Implement", host), rec, parse_work(json.dumps({"summary": "built it", "changed": ["app.py"], "user_text": ["docs.md"]}))
@@ -493,8 +500,47 @@ def test_user_text_accumulates_across_passes():
         parse_work(json.dumps({"summary": "fixed it", "addressed": [{"id": "C1", "how": "done"}]})),
         fix_pass=1,
     )
-    assert rec.user_text == ["docs.md"], "a later pass that names no surfaces keeps the earlier ones"
+    Implement._apply_work(
+        cast("Implement", host),
+        rec,
+        parse_work(json.dumps({"summary": "fixed it again", "user_text": ["docs.md"], "addressed": [{"id": "C1", "how": "done"}]})),
+        fix_pass=2,
+    )
+    assert rec.user_text == ["docs.md"], "a later pass that names no surfaces keeps the earlier ones, and a rename dedupes"
     assert rec.changed == ["app.py"]
+
+
+def test_user_text_that_is_not_a_file_is_dropped_and_the_builder_told(tmp_path):
+    """An entry that is a sentence, not a path, is dropped: the prose seat would starve and the report
+    would print it as a vanished file."""
+    import types
+    from typing import cast
+
+    from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.state import Docket, StageRecord
+    from mech_council.extraction import parse_work
+
+    project = str(tmp_path)
+    with open(os.path.join(project, "docs.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Docs\n")
+    said: list[str] = []
+    host = types.SimpleNamespace(
+        project=project,
+        console=types.SimpleNamespace(say=said.append),
+        emit=lambda name, **fields: None,
+        docket=Docket(mode="implement", goal="g", roster=["Agent1"], chair_name="Chair", seconding=True, human="none"),
+    )
+    host._record_user_text = types.MethodType(Implement._record_user_text, host)
+    rec = StageRecord(index=1, state="write it", gate="test -f app.py", builder="Agent1")
+    sentence = "tests/check.py (assert/raise failure messages are the only user-visible text in this stage)"
+    parsed = parse_work(json.dumps({"summary": "built it", "changed": ["app.py"], "user_text": ["docs.md", sentence]}))
+    data = Implement._apply_work(cast("Implement", host), rec, parsed)
+    assert rec.user_text == ["docs.md"], "only the real file counts as a surface"
+    assert data["user_text"] == ["docs.md"], "the prose pass and the review scope see only files in the tree"
+    told = host.docket.drain_messages("Agent1")
+    assert len(told) == 1 and told[0].from_ == "chair", "the builder is told at its next prompt"
+    assert sentence in told[0].text, "the builder is told which entry was dropped"
+    assert any(sentence in line for line in said), "the drop is said on the console, not swallowed"
 
 
 def test_a_replan_and_a_structure_reply_carry_stages():

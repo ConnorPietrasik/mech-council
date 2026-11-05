@@ -71,6 +71,18 @@ def blind_note(rec: StageRecord) -> str:
     return f"stage {rec.index}: the final review was unreadable — {tail}"
 
 
+def _user_text_surfaces(project: str, entries: list[str]) -> tuple[list[str], list[str]]:
+    """Which entries name files in the tree, and which do not."""
+    kept: list[str] = []
+    rejected: list[str] = []
+    for entry in dict.fromkeys(entries):
+        if os.path.isfile(os.path.join(project, entry)):
+            kept.append(entry)
+        else:
+            rejected.append(entry)
+    return kept, rejected
+
+
 #: how many stages the approval lists before collapsing the rest
 _APPROVAL_STAGES = 12
 
@@ -1094,6 +1106,22 @@ class Implement:
         self._next_c += 1
         return item_id
 
+    def _record_user_text(self, rec: StageRecord, data: dict) -> None:
+        """user_text must name files in the tree: the prose seat rewrites them, and the report prints them."""
+        kept, rejected = _user_text_surfaces(self.project, data.get("user_text") or [])
+        for entry in rejected:
+            self.emit("implement_user_text_rejected", stage=rec.index, seat=rec.builder, entry=entry)
+            self.docket.queue_message(
+                to=rec.builder,
+                from_=CHAIR_ID,
+                text=f"stage {rec.index}: user_text entry {entry!r} is not a file in the project — "
+                "name the paths of the files holding user-visible text, or omit the field",
+                stage=rec.index,
+            )
+            self.console.say(f"stage {rec.index}: user_text entry {entry!r} is not a file in the project — dropped, the builder is told")
+        data["user_text"] = kept
+        rec.user_text = list(dict.fromkeys([*rec.user_text, *kept]))
+
     def _apply_work(self, rec: StageRecord, parsed, *, fix_pass: int | None = None) -> dict:
         """What a work reply puts on the record: the docket side effects, whatever the shape check said."""
         data = parsed.data
@@ -1106,7 +1134,7 @@ class Implement:
             self.docket.queue_message(to=line["to"], from_=rec.builder, text=line["text"], stage=rec.index)
         rec.open_items = [str(o) for o in data.get("open_issues") or []]
         rec.changed.extend(dict.fromkeys(data.get("changed") or []))
-        rec.user_text.extend(dict.fromkeys(data.get("user_text") or []))
+        self._record_user_text(rec, data)
         if fix_pass is not None:
             rec.fix_passes.append({"pass": fix_pass, "addressed": data.get("addressed") or []})
         return data

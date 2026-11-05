@@ -69,7 +69,7 @@ def work_schema() -> str:
   "gate_command": "what you ran (or checked) to satisfy the gate",
   "gate_output": "its last lines, as it printed them",
   "changed": ["the paths you created or modified"],
-  "user_text": ["the paths of user-visible text you touched: help strings, docs, error messages"],
+  "user_text": ["the paths of the files holding user-visible text you touched — help strings, docs, error messages; paths, not the text"],
   "open_issues": ["what is left open, if anything"],
   "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
                    "context": "what you saw that leaves it open, and the cost of guessing",
