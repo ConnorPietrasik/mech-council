@@ -66,6 +66,7 @@ class RawAsk:
     text: str | None = None
     failure: str | None = None  # the ask failed terminally; the loop turns it into an `Abort`
     rejected: bool = False  # it arrived and lenient extraction refused it
+    data: object = None  # the final text's parsed extraction, when the ask produced one
 
 
 @dataclass
@@ -273,7 +274,7 @@ class Engine:
             self.docket,
             text=wording.get("question") or "The seats will not converge on one direction: which do you want?",
             context=wording.get("context") or f"{self._camps_held} rounds: {held} still standing, no camp changed.",
-            options=[self._direction_option(token) for token in split],
+            options=[self.direction_option(token) for token in split],
             round_=round_,
         )
         self._recheck_class(question, round_)
@@ -324,7 +325,14 @@ class Engine:
             fallback = fallback or approach.artifact()
         return fallback
 
-    def _direction_option(self, token: str) -> str:
+    def direction_plan(self, token: str) -> dict:
+        """The adopted direction's plan, as the implement run reads it: text and its gated stages."""
+        return self._direction_plan(token)
+
+    def plan_text(self, token: str) -> str:
+        return _plan_text(self._direction_plan(token))
+
+    def direction_option(self, token: str) -> str:
         plan = self._direction_plan(token)
         states = [_one_line(state) for state in _stage_states(plan)]
         tail = " → ".join(states[:_MENU_STAGES]) + (" → …" if len(states) > _MENU_STAGES else "")

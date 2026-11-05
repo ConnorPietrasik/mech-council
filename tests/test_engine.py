@@ -178,10 +178,14 @@ def test_the_ask_fold_brief_shows_the_chair_asks_and_their_ids():
 
 
 def test_every_seat_phase_repairs_with_the_verdict_shape():
-    """A repair re-ask quotes the shape of the pass it repairs: the gap, defense and seconding passes had the chair's."""
+    """A repair re-ask quotes the shape of the pass it repairs: the gap, defense and seconding passes had the chair's.
+    The builder's passes are the exception: `work` and `replan` repair with the builder's own shapes."""
     verdict = common.schema_hint("review", phase="round")
-    for phase in common.SEAT_PHASES:
+    for phase in ("round", "gap", "defense", "seconding"):
         assert common.schema_hint("review", phase=phase) == verdict
+    assert {"work", "replan"} <= set(common.SEAT_PHASES)
+    assert common.schema_hint("implement", phase="work") != verdict, "work repairs with the work shape, not the verdict"
+    assert common.schema_hint("implement", phase="replan") != verdict, "replan repairs with the replan shape, not the verdict"
     for phase in ("merge", "asks", "compare", "direction"):
         assert common.schema_hint("review", phase=phase) != verdict, "a chair publication is not a seat's verdict"
 

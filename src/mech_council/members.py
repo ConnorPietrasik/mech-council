@@ -151,7 +151,7 @@ class Members:
         held = list(self.members.values())
         self.console.say(f"disposing {len(self.council.agents) + 1} member(s)")
         self.survivors = await lifecycle.dispose_all(held, own_namespace=self.own_namespace(), on_line=self.console.say)
-        self.transcripts.close()
+        self.transcripts.close_bases(self.council.member_file_bases)
         return self.survivors
 
     async def dispose_fast(self) -> lifecycle.SweepResult:
@@ -160,7 +160,7 @@ class Members:
         self.console.say(f"killing {len(self.council.agents) + 1} member(s)")
         held = list(self.members.values())
         self.survivors = await lifecycle.kill_all(held, own_namespace=self.own_namespace(), on_line=self.console.say)
-        self.transcripts.close()
+        self.transcripts.close_bases(self.council.member_file_bases)
         return self.survivors
 
     def own_namespace(self) -> int | None:

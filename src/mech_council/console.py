@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import time
-from typing import BinaryIO
+from typing import BinaryIO, Iterable
 
 from .cli import DEBUG
 
@@ -71,6 +71,17 @@ class Transcripts:
                 pass
         self._raw.clear()
         self._err.clear()
+
+    def close_bases(self, bases: Iterable[str]) -> None:
+        """Close one roster's sinks, leaving the other crews' streams open: the crews share these sinks."""
+        wanted = set(bases)
+        for table in (self._raw, self._err):
+            for key in list(table):
+                if key in wanted:
+                    try:
+                        table.pop(key).close()
+                    except OSError:
+                        pass
 
 
 class MemberSinks:

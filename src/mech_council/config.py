@@ -25,6 +25,11 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "sandbox_mib": 32768,
     "in_place": False,
     "human": "blocking",
+    "planning_rounds": 4,
+    "fix_budget": 3,
+    "replans": 2,
+    "planner": None,
+    "reviewer": None,
 }
 
 #: name → (type, `[defaults]`-allowed)
@@ -43,10 +48,18 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "pi_cli": ("str", True),
     "mode": ("mode", False),
     "goal": ("str", False),
+    "planning_rounds": ("int>=1", True),
+    "fix_budget": ("int>=1", True),
+    "replans": ("int>=0", True),
+    "planner": ("str", False),
+    "reviewer": ("str", False),
 }
 #: What a seat table states; `drop` is a patch verb, so it is `PATCH_KEYS` only.
-AGENT_KEYS = {"name": "str", "provider": "str", "model": "str", "persona": "str"}
+AGENT_KEYS = {"name": "str", "provider": "str", "model": "str", "persona": "str", "role": "role"}
 PATCH_KEYS = AGENT_KEYS | {"drop": "bool"}
+
+#: A builder seat's `role`: who it writes. `code` writes code, `prose` writes user-visible text, `both` writes either.
+BUILDER_ROLES: tuple[str, ...] = ("code", "prose", "both")
 
 #: The keys a council table (or a template, which is one too) may state.
 COUNCIL_KEYS = set(SCALAR_KEYS) | {"agents", "chair", "extends"}
@@ -67,6 +80,7 @@ class MemberSpec:
     id: str | None = None  # `AgentN`, assigned at convening
     file_base: str = ""
     model_warning: str | None = None
+    role: str = "both"  # implement builders: code | prose | both
 
 
 @dataclass
@@ -98,6 +112,15 @@ class Council:
     #: Members work in the real project: no namespaces, no overlays, no masks, no write journal.
     in_place: bool = False
     project: str = ""
+    #: implement: the planning half's round budget; execution depth is the per-stage ladders.
+    planning_rounds: int = 4
+    #: implement: the per-stage repair ladder's fix passes.
+    fix_budget: int = 3
+    #: implement: the per-stage repair ladder's replan passes; 0 disables replanning.
+    replans: int = 2
+    #: implement: the council that writes the plan, and the one that reviews each stage.
+    planner: str | None = None
+    reviewer: str | None = None
 
     @property
     def adapter(self):
@@ -155,10 +178,15 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
             hint = suggest.suggest(str(value), REPORT_FORMATS)
             extra = f" (did you mean {hint!r}?)" if hint else ""
             raise ConfigError(f"config key {where}.{key} is one of {'/'.join(REPORT_FORMATS)}, got {value!r}{extra}")
+    elif kind == "role":
+        if value not in BUILDER_ROLES:
+            hint = suggest.suggest(str(value), BUILDER_ROLES)
+            extra = f" (did you mean {hint!r}?)" if hint else ""
+            raise ConfigError(f"config key {where}.{key} is 'code', 'prose' or 'both', got {value!r}{extra}")
     elif kind == "mode":
         hint = suggest.suggest(str(value), MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
-        raise ConfigError(f"config key {where}.mode is 'review' or 'plan', got {value!r}{extra}")
+        raise ConfigError(f"config key {where}.mode is 'review', 'plan' or 'implement', got {value!r}{extra}")
     elif kind == "human":
         if value in HUMAN_MODES:
             return value
@@ -169,7 +197,7 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
 
 
 #: The mode names config validation accepts.
-MODES: tuple[str, ...] = ("review", "plan")
+MODES: tuple[str, ...] = ("review", "plan", "implement")
 
 #: The report's format: the markdown file, one self-contained HTML page, or the pair.
 REPORT_FORMATS: tuple[str, ...] = ("md", "html", "both")
@@ -195,7 +223,15 @@ def _members(raw: object, key: str, *, chair: bool) -> list[MemberSpec]:
     for entry, where in seats:
         _seat_keys(entry, where, patch=False)
         name = _seat_name(entry, where)
-        out.append(MemberSpec(name=name, provider=entry.get("provider"), model=entry.get("model"), persona=entry.get("persona")))
+        out.append(
+            MemberSpec(
+                name=name,
+                provider=entry.get("provider"),
+                model=entry.get("model"),
+                persona=entry.get("persona"),
+                role=str(entry.get("role") or "both"),
+            )
+        )
     return out
 
 
@@ -349,7 +385,7 @@ def _flatten(source: dict, defaults: dict, where: str) -> dict:
         if mode not in MODES:
             hint = suggest.suggest(str(mode), list(MODES))
             extra = f" (did you mean {hint!r}?)" if hint else ""
-            raise ConfigError(f"config key {where}.mode is 'review' or 'plan', got {mode!r}{extra}")
+            raise ConfigError(f"config key {where}.mode is 'review', 'plan' or 'implement', got {mode!r}{extra}")
         out["mode"] = mode
     return out
 
@@ -534,7 +570,15 @@ def convene_without_pi(
     if agents_raw is None:
         raise ConfigError(f"[councils.{name}] declares no [[councils.{name}.agents]]{via}")
     agents = _members(agents_raw, f"councils.{name}.agents", chair=False)
-    if len(agents) < 2:
+    if flat["mode"] == "implement":
+        # the run's plan comes from a planner crew or a --plan document; the builders never plan themselves
+        if not agents:
+            raise ConfigError(f"[councils.{name}] declares no builders: an implement run needs at least one{via}")
+        if not (flat["planner"] or args.plan):
+            raise ConfigError(
+                f"[councils.{name}] names no planner council and --plan was not passed: the run's plan comes from one of the two{via}"
+            )
+    elif len(agents) < 2:
         raise ConfigError(f"[councils.{name}] convenes {len(agents)} agent(s); a council needs ≥ 2{via}")
     #: casefolded name → as written: the human's `<name>: <text>` line matches case-insensitively
     seen: dict[str, str] = {}
@@ -548,6 +592,8 @@ def convene_without_pi(
     if "chair" not in table:
         raise ConfigError(f"[councils.{name}] has no [councils.{name}.chair]; every council needs one{via}")
     chair = _members(table["chair"], f"councils.{name}.chair", chair=True)[0]
+    if "role" in table["chair"]:
+        raise ConfigError(f"config key [councils.{name}.chair].role is a builder-seat knob: the chair takes no role{via}")
     folded = chair.name.casefold()
     if folded in seen:
         if seen[folded] == chair.name:
@@ -574,6 +620,28 @@ def convene_without_pi(
     goal = args.goal if args.goal is not None else flat["goal"]
     if flat["mode"] == "plan" and not (goal or "").strip():
         raise ConfigError(f"[councils.{name}] is a plan council with no goal stated anywhere")
+    if flat["mode"] == "implement":
+        if not (goal or "").strip():
+            raise ConfigError(f"[councils.{name}] is an implement council with no goal stated anywhere: state a goal or pass --goal")
+        if flat["planner"] or flat["reviewer"]:
+            _crew_reference(config, name, flat)
+    else:
+        for key, what in (("planner", "plan"), ("reviewer", "review")):
+            if flat[key]:
+                raise ConfigError(
+                    f"config key [councils.{name}].{key} names a {what} council for an implement run, "
+                    f"but {name!r} is a {flat['mode']} council"
+                )
+        for index, entry in enumerate(agents_raw, 1):
+            if isinstance(entry, dict) and "role" in entry:
+                raise ConfigError(
+                    f"config key [councils.{name}.agents][{index}].role is an implement builder knob, "
+                    f"but {name!r} is a {flat['mode']} council"
+                )
+    if args.plan is not None and flat["mode"] != "implement":
+        raise UsageError(f"--plan is an implement flag: {name!r} is a {flat['mode']} council, it runs no plan phase")
+    if args.dirty and flat["mode"] != "implement":
+        raise UsageError("--dirty overrides a dirty-tree refusal, and only implement runs refuse a dirty tree")
 
     from .naming import chair_file_base, seat_file_base
 
@@ -605,9 +673,90 @@ def convene_without_pi(
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),
         untrusted=untrusted,
-        in_place=bool(args.in_place or not namespaces_available or flat["in_place"]),
+        in_place=flat["mode"] == "implement" or bool(args.in_place or not namespaces_available or flat["in_place"]),
         project=project,
+        planning_rounds=int(flat["planning_rounds"]),
+        fix_budget=int(flat["fix_budget"]),
+        replans=int(flat["replans"]),
+        planner=flat["planner"],
+        reviewer=flat["reviewer"],
     )
     if council.max_rounds < 1:
         raise ConfigError(f"--rounds must be ≥ 1, got {council.max_rounds}")
     return council
+
+
+def _crew_reference(config: ConfigFile, name: str, flat: dict) -> None:
+    """`planner` must name a plan council and `reviewer` a review council: no self, no template, no other mode."""
+    for key, mode in (("planner", "plan"), ("reviewer", "review")):
+        target = flat[key]
+        if not target:
+            continue
+        if target == name:
+            raise ConfigError(f"config key [councils.{name}].{key} names the implement council itself, which cannot be its own {key}")
+        if str(target).startswith(TEMPLATE_PREFIX):
+            raise ConfigError(f"config key [councils.{name}].{key} names {target!r}, a template: templates are extended, not convened")
+        if target not in config.councils:
+            hint = suggest.suggest(str(target), list(config.councils))
+            extra = f" (did you mean {hint}?)" if hint else ""
+            raise ConfigError(f"config key [councils.{name}].{key} names {target!r}, which is not a council in {config.where}{extra}")
+        try:
+            resolved, _chain = _resolve(config, target)
+        except ConfigError as failure:
+            raise ConfigError(f"config key [councils.{name}].{key} names {target!r}, which does not convene: {failure}") from None
+        # the mode as _flatten would read it: stated in the table, else the built-in default
+        target_mode = resolved.get("mode") or "review"
+        if target_mode != mode:
+            raise ConfigError(
+                f"config key [councils.{name}].{key} names {target!r}, which is a {target_mode} council: the {key} must be a {mode} council"
+            )
+
+
+def resolve_crews(config: ConfigFile, council: Council, args: Args) -> list[tuple[str, Council]]:
+    """The implement run's crews in crew order: `(label, council)` — planner, builder, reviewer.
+
+    A borrowed council contributes its roster, chairs and personas — the run's knobs and posture apply to it.
+    Seats take global `AgentN` ids in crew order; borrowed seats are shown with a crew suffix.
+    """
+    crews: list[tuple[str, Council]] = []
+    # `--plan` skips the planning phase, so the planner crew is not convened at all
+    if council.planner and not args.plan:
+        crews.append(("planner", _borrow(config, council, council.planner)))
+    crews.append(("builder", council))
+    if council.reviewer:
+        crews.append(("reviewer", _borrow(config, council, council.reviewer)))
+    counter = 0
+    for label, crew in crews:
+        borrowed = crew is not council
+        for agent in crew.agents:
+            counter += 1
+            agent.id = f"Agent{counter}"
+            if borrowed:
+                agent.file_base = f"{label}-{agent.file_base}"
+                agent.name = f"{agent.name} ({label})"
+        if borrowed:
+            crew.chair.file_base = f"{label}-{crew.chair.file_base}"
+            crew.chair.name = f"{crew.chair.name} ({label})"
+    return crews
+
+
+def _borrow(config: ConfigFile, run: Council, name: str) -> Council:
+    """The referenced council as a crew: its roster, chair and personas under the run's knobs.
+
+    The run's goal rides in on the convene, not a patch after it: a plan council that states no goal
+    of its own is refused at convening before one could be set.
+    """
+    crew = convene_without_pi(config, name, Args(goal=run.goal), run.project, untrusted=run.untrusted)
+    crew.max_rounds = run.max_rounds
+    crew.grace_rounds = run.grace_rounds
+    crew.seconding = run.seconding
+    crew.watchdog_sec = run.watchdog_sec
+    crew.chair_timeout_sec = run.chair_timeout_sec
+    crew.max_concurrency = run.max_concurrency
+    crew.verbosity = run.verbosity
+    crew.human = run.human
+    crew.in_place = True
+    crew.project = run.project
+    crew.untrusted = run.untrusted
+    crew.pi_cli = run.pi_cli
+    return crew

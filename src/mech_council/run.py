@@ -11,26 +11,32 @@ import traceback
 from dataclasses import asdict
 
 from . import runjson
-from .asks import AskLost, AskUnusable, Lanes, Outcome
+from .asks import AskUnusable, Lanes
 from .chairwork import Chair, ChairUnusable
 from .cli import DEBUG, DETAIL, FULL, SUMMARY, VERBOSITY_LEVELS
 from .config import Council
 from .console import Console, Transcripts
+from .crews import Crews
 from .deliberation.engine import Abort, Engine
 from .deliberation.escalations import MOOT, SETTLED, effective_class, showable
+from .deliberation.implement import Implement
 from .deliberation.state import (
     ABORTED,
     CONSENSUS,
+    IMPLEMENTED,
     NEEDS_OUTCOME,
     NO_PREFERENCE,
+    PARTIAL,
     RETIRED,
     ROUND_LIMIT,
     STALEMATE,
     UNVETTED,
     Docket,
+    Execution,
 )
 from .deliberation.termination import direction_rule
 from .humaninput import Checkpoint
+from .humanio import LineReader
 from .interrupt import Brake, owed, signal_name
 from .members import MemberGone, Members
 from .port import Port
@@ -43,7 +49,7 @@ from .startup import report_paths
 from .watchdog import Watchdog
 
 EXIT_OK, EXIT_ABORT = 0, 1
-RESULTS = (CONSENSUS, UNVETTED, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT)
+RESULTS = (CONSENSUS, UNVETTED, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, IMPLEMENTED, PARTIAL)
 
 
 def _held_by(verbosity: int) -> str:
@@ -75,7 +81,11 @@ async def orchestrate(launch, sandbox) -> int:
     run_dir, runs_dir = launch.run_dir, launch.runs_dir
     console = Console(run_dir=run_dir, verbosity=council.verbosity)
     lineage = f" extends {' → '.join(council.extends)}" if council.extends else ""
+    is_implement = council.mode == "implement"
     console.say(f"council `{council.name}`{lineage} · mode {council.mode} · {len(council.agents)} seat(s) + a chair")
+    if is_implement:
+        crew_lines = [f"{label} ({len(crew_council.agents)} seat(s) + chair)" for label, crew_council in launch.crews]
+        console.say("crews · " + " · ".join(crew_lines))
     console.say(f"roster {_roster(council)}")
     console.say(f"config {council.config_path}")
     console.say(f"run directory {run_dir}")
@@ -87,6 +97,8 @@ async def orchestrate(launch, sandbox) -> int:
         console.say("questions: the run never waits on them — you may answer while it works")
     elif council.human == "none":
         console.say("questions: none — the council will not be asked anything this run")
+    if is_implement:
+        console.say("an implement run never commits: you review the whole diff when it is done")
     console.say(
         f"verbosity {VERBOSITY_LEVELS[council.verbosity]} · project trust {'untrusted (no approval)' if council.untrusted else 'approve'}"
     )
@@ -107,34 +119,56 @@ async def orchestrate(launch, sandbox) -> int:
         project=council.project,
         orchestrator_pid=os.getpid(),
         enabled=council.verbosity >= SUMMARY,
+        crew_councils=launch.crews if is_implement else None,
     )
     transcripts = Transcripts(run_dir, "full" if council.verbosity >= FULL else "off")
     outcome, aborted = ABORTED, ""
     report, markdown_text = "", ""
     members: Members | None = None
     lanes: Lanes | None = None
+    crews: Crews | None = None
     docket = _docket(council)
+    if is_implement:
+        # the run's docket is shared by every crew: global seat ids, the run's chair
+        docket.roster = [spec.id for label, crew_council in launch.crews for spec in crew_council.agents]
+        execution = Execution()
+        for label, crew_council in launch.crews:
+            execution.crews.append(
+                {
+                    "label": label,
+                    "council": crew_council.name,
+                    "mode": crew_council.mode,
+                    "seats": [[spec.id, spec.name] for spec in crew_council.agents],
+                    "chair": {"name": crew_council.chair.name, "file_base": crew_council.chair.file_base},
+                }
+            )
+        docket.execution = execution
     # whether this run's own `run.json` write has started
     manifest_claimed = False
     baselines: dict[str, dict[str, str]] = {}
 
     def picture(signum: int) -> Interrupted:
+        lanes_view = crews.lanes() if is_implement and crews is not None else lanes
         return Interrupted(
             name=signal_name(signum),
             elapsed=console.duration(),
             round=docket.round,
             phase=docket.phase,
             waiting_on=list(docket.parked_on),
-            in_flight=lanes.digest() if lanes is not None else [],
+            in_flight=lanes_view.digest() if lanes_view is not None else [],
         )
 
     def kill_now() -> None:
         """What the hurried exit does to the members once a closed stdin has not settled them."""
-        if members is None:
+        if is_implement:
+            targets = [member for crew in (crews.live if crews is not None else []) for member in crew.live_members.values()]
+        else:
+            targets = list(members.members.values()) if members is not None else []
+        if not targets:
             return
         brake.skip("the members' stop grace")
         own_pgid = os.getpgid(0)
-        for member in list(members.members.values()):
+        for member in targets:
             lifecycle.send(member.pgid, signal.SIGKILL, own_pgid=own_pgid)
 
     def run_json_extra() -> dict:
@@ -195,19 +229,45 @@ async def orchestrate(launch, sandbox) -> int:
     brake.arm()
 
     try:
-        baselines = {} if sandbox.in_place else {base: journal_mod.listing(sandbox.upper(base)) for base in _file_bases(council)}
-        members = Members(
-            council=council,
-            sandbox=sandbox,
-            run_dir=run_dir,
-            runs_dir=runs_dir,
-            console=console,
-            manifest=manifest,
-            transcripts=transcripts,
-        )
-        await members.start_all()
-        lanes = Lanes(council, members, console)
-        outcome = await _deliberate(council, members, console, brake, lanes, docket)
+        if sandbox.in_place or is_implement:
+            baselines = {}
+        else:
+            baselines = {base: journal_mod.listing(sandbox.upper(base)) for base in _file_bases(council)}
+        if is_implement:
+            crews = Crews(
+                launch.crews,
+                sandbox=sandbox,
+                run_dir=run_dir,
+                runs_dir=runs_dir,
+                console=console,
+                manifest=manifest,
+                transcripts=transcripts,
+            )
+            for label in crews.order:
+                crews[label].prepare()
+            planner = crews.get("planner")
+            builder = crews["builder"]
+            if planner is not None:
+                # the planning half: the planners and the run's chair; the builder's seats join at the build
+                await planner.start(seats=True)
+                await builder.start(seats=False)
+            else:
+                # --plan: no planning crew is convened, so the builders are up from the start
+                await builder.start(seats=True)
+            outcome = await _implement_deliberate(crews, console, brake, docket, plan_file=launch.plan_file)
+        else:
+            members = Members(
+                council=council,
+                sandbox=sandbox,
+                run_dir=run_dir,
+                runs_dir=runs_dir,
+                console=console,
+                manifest=manifest,
+                transcripts=transcripts,
+            )
+            await members.start_all()
+            lanes = Lanes(council, members, console)
+            outcome = await _deliberate(council, members, console, brake, lanes, docket)
     except (Abort, AskUnusable, ChairUnusable, MemberGone) as failure:
         aborted, outcome = str(failure), ABORTED
         console.say(aborted)
@@ -220,12 +280,24 @@ async def orchestrate(launch, sandbox) -> int:
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
     finally:
-        # Each step is independent: one failing must not cancel the others, and a hurried exit skips the waits.
-        survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
+        # prompt counts while the lanes are still reachable; a disposed crew's counts were stashed at dispose
+        crew_prompts: list[tuple[str, dict]] = []
+        if is_implement and crews is not None:
+            for label in crews.order:
+                crew = crews[label]
+                counts = crew.lanes.prompts if crew.lanes is not None else crew.prompts
+                if counts is not None:
+                    crew_prompts.append((label, counts))
+        if is_implement:
+            survivors = await crews.dispose_all(fast=brake.hard) if crews is not None else lifecycle.SweepResult()
+        else:
+            survivors = await _teardown(members, console, in_place=council.in_place, brake=brake)
         journal = owed(console, "the write journal", _journal, council, sandbox, baselines, console, brake) or []
         report, markdown_text = owed(console, "the report", write_report, journal) or ("", "")
         if council.verbosity >= DETAIL:
             owed(console, "human_input.json", _write_human_input, run_dir, docket, console)
+        for _label, counts in crew_prompts:
+            owed(console, "prompt counts", manifest.record_prompts, counts)
         if lanes is not None:
             owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
         owed(console, "run.json", write_run_json, survivors, journal, report)
@@ -266,8 +338,6 @@ def _roster(council: Council) -> str:
 
 
 async def _deliberate(council: Council, members: Members, console: Console, brake: Brake, lanes: Lanes, docket: Docket) -> str:
-    from .humanio import LineReader
-
     names = council.roster_names
     brief = Brief(mode=council.mode, project=council.project, in_place=council.in_place, human=council.human)
     chair = Chair(council, lanes, console, brief)
@@ -296,6 +366,35 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
     finally:
         await watchdog.stop()
         await lanes.abort_all()
+
+
+async def _implement_deliberate(crews: Crews, console: Console, brake: Brake, docket: Docket, *, plan_file: str) -> str:
+    """The implement run: the orchestrator over the crews, with the watchdog on the run's chair."""
+    reader = LineReader()
+    reader.start()
+    builder = crews["builder"]
+    council = builder.council
+    names = crews.names()
+
+    checkpoint = Checkpoint(docket, reader, console=console, names=names, ask_seat=crews.send_message)
+    impl = Implement(
+        crews=crews,
+        docket=docket,
+        checkpoint=checkpoint,
+        console=console,
+        plan_file=plan_file,
+        emit=_emitter(console, names, council.human),
+    )
+    chair = builder.chair
+    if chair is None:
+        raise MemberGone("the run's chair never came up")
+    watchdog = Watchdog(council=council, lanes=crews.lanes(), chair=chair, console=console)
+    watchdog.start()
+    try:
+        return await _race(impl.run(), brake)
+    finally:
+        await watchdog.stop()
+        await crews.lanes().abort_all()
 
 
 async def _race(run, brake: Brake):
@@ -327,20 +426,11 @@ def _interruption(brake: Brake) -> str:
 
 
 def _messenger(lanes: Lanes):
-    """The human's direct-message lane: `explain H1` and `<name>: <text>` both land here. A seat takes the
-    pool, the chair its own slot; the reply is prose, so nothing is parsed out of it."""
+    """The human's direct-message lane: `explain H1` and `<name>: <text>` both land here. The reply is
+    prose, so nothing is parsed out of it."""
 
     async def send(agent: str, message: str, *, round_: int, phase: str):
-        try:
-            if agent == lanes.council.chair.file_base:
-                return await lanes.ask_chair(message, round_=round_, phase=phase, kind="prose", timeout=lanes.council.chair_timeout_sec)
-            file_base = lanes.members.file_base_for(agent)
-            if file_base in lanes.in_flight.values():
-                # a seat mid-ask cannot take a second prompt: refusing is the cheap path, restarting it is not
-                return Outcome(text="", failure=f"{lanes.members.display_for(file_base)} is mid-ask; try again at the next checkpoint")
-            return await lanes.ask_agent(agent, message, round_=round_, phase=phase, kind="prose", parse_kw={})
-        except (AskUnusable, AskLost) as failure:
-            return Outcome(text="", failure=str(failure))
+        return await lanes.message(agent, message, round_=round_, phase=phase)
 
     return send
 
@@ -540,7 +630,7 @@ def _report(
     """
     from .render import html as html_render
     from .render import markdown as markdown_render
-    from .render import report_plan, report_review
+    from .render import report_implement, report_plan, report_review
 
     files = council.adapter.report_files(council.report_format)
     html_file = next((name for name in files if name.endswith(".html")), "")
@@ -571,14 +661,15 @@ def _report(
             from .sandbox.journal import mark_sandbox_items
 
             mark_sandbox_items(docket, journal, project=council.project)
-            if council.mode == "plan":
+            if council.mode == "implement":
+                doc = report_implement.build(docket, context, run_dir=run_dir)
+            elif council.mode == "plan":
                 doc = report_plan.build(docket, context, run_dir=run_dir, converged=_converged(docket))
             else:
                 doc = report_review.build(docket, context, run_dir=run_dir)
         page_title = f"{council.name} · {council.project}"
         texts = {
-            name: html_render.render_html(doc, page_title) if name.endswith(".html") else markdown_render.render_md(doc)
-            for name in files
+            name: html_render.render_html(doc, page_title) if name.endswith(".html") else markdown_render.render_md(doc) for name in files
         }
         markdown_text = markdown_render.render_md(doc)  # the console copy is always the markdown of the same document
     except Exception as failure:
@@ -652,6 +743,10 @@ def _report_context(
                 backing=(docket.backing.get(agent_id, "") if docket else ""),
             )
         )
+    member_count = len(_file_bases(council))
+    if docket is not None and docket.mode == "implement" and manifest.data.get("crews"):
+        # every crew's seats and chairs, not just the run's own roster
+        member_count = sum(len(crew["seats"]) + 1 for crew in manifest.data["crews"])
     return report_context.ReportContext(
         project=council.project,
         config_path=council.config_path,
@@ -662,7 +757,7 @@ def _report_context(
         rounds=docket.round if docket else 0,
         date=time.strftime("%Y-%m-%d %H:%M:%S"),
         sandbox_mib=council.sandbox_mib,
-        member_count=len(_file_bases(council)),
+        member_count=member_count,
         pi_cli=council.pi_cli,
         pi_version=council.pi_version,
         verbosity=council.verbosity,
@@ -682,9 +777,20 @@ def _report_context(
         report_html_path=report_html_path,
         goal=council.goal,
         aborted_reason=aborted,
-        captions=council.roster_names,
+        captions=(_implement_captions(manifest) if docket is not None and docket.mode == "implement" else council.roster_names),
         interrupted=interrupted,
+        docket_execution=docket.execution if (docket is not None and docket.mode == "implement") else None,
     )
+
+
+def _implement_captions(manifest) -> dict[str, str]:
+    """Every crew's roster keys to the names a human reads: global seat ids, each crew's chair by file_base."""
+    captions: dict[str, str] = {}
+    for crew in manifest.data.get("crews") or []:
+        for agent_id, name in crew["seats"]:
+            captions[agent_id] = name
+        captions[crew["chair"]["file_base"]] = crew["chair"]["name"]
+    return captions
 
 
 def _write_human_input(run_dir: str, docket: Docket | None, console: Console) -> None:
@@ -714,7 +820,7 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
                 "answer_option": q.answer_option,
                 "answer_option_text": q.answer_option_text,
                 "recommendation": q.recommendation,
-                "markers": list(q.markers),  # unasked / unanswered / settled / unseconded / moot / merged / skipped / no_human
+                "markers": list(q.markers),  # unasked / unanswered / settled / unseconded / moot / merged / skipped / no_human / not_waited
                 "merged_into": q.merged_into,
                 "direction_ask": q.direction_ask,
                 "retired_escalations": [list(k) for k, e in docket.escalations.items() if e.question_id == q.id and e.state == RETIRED],

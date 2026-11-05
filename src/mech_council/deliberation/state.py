@@ -16,6 +16,11 @@ CONSENSUS, NEEDS_OUTCOME, STALEMATE, ROUND_LIMIT, ABORTED = ("consensus", "needs
 #: everyone signed off and nothing is disputed, but an open item reached no disposition: a result, not an agreement
 UNVETTED = "unvetted"
 
+#: implement: every stage passed its gate and review
+IMPLEMENTED = "implemented"
+#: implement: some stages landed, some are blocked
+PARTIAL = "partial"
+
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
 #: a `backing` naming a merge one seat wrote down: `merged: <label>`
@@ -184,6 +189,66 @@ class QA:
 
 
 @dataclass
+class PeerMessage:
+    """A `say_to` line: queued fire-and-forget, printed at the target's next prompt."""
+
+    to: str
+    from_: str
+    text: str
+    stage: int = 0
+
+
+@dataclass
+class StageRecord:
+    """One stage of the adopted plan, as the run built it."""
+
+    index: int
+    state: str
+    gate: str
+    scope: str = ""
+    kind: str = "code"  # code | prose
+    builder: str = ""  # the global id that held the baton
+    review_blind: bool = False  # the last review pass was unreadable: the stage passed on its gate alone
+    prose_pass: bool = False
+    status: str = "pending"  # pending | passed | blocked
+    gate_output: str = ""  # what the builder reported
+    gate_rerun: str = ""  # what the orchestrator's re-run said
+    gate_ok: bool = False  # the last orchestrator re-run
+    findings: list[str] = field(default_factory=list)  # the stage's review item ids, in the order raised
+    gate_item: str = ""  # the synthetic "the gate fails" item, while it stands
+    open_items: list[str] = field(default_factory=list)  # what the builder left open
+    changed: list[str] = field(default_factory=list)  # the paths the builder named as created or modified
+    user_text: list[str] = field(default_factory=list)  # the stage's user-visible surfaces, as the builder named them
+    fix_passes: list[dict] = field(default_factory=list)  # {pass, addressed: [{id, how}]}
+    replans: list[dict] = field(default_factory=list)  # {pass, note, stages: int}
+    blocked_reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Execution:
+    """The implement run's spine, kept on the shared docket for the report and `run.json`."""
+
+    crews: list[dict] = field(default_factory=list)  # {label, council, mode, seats: [(id, name)], chair: {name, file_base}}
+    adopted: str = ""  # the direction token the run builds
+    adopted_how: str = ""  # consensus | human | majority | chair | structured
+    plan_text: str = ""
+    assumptions: list[str] = field(default_factory=list)  # the planning phase's decision points, settled or not: the report's trail
+    open_assumptions: list[str] = field(default_factory=list)  # the ones no answer settled: the planning carry the builder prompt takes
+    approval: str = ""  # granted | recorded | declined
+    baseline: str = ""  # the tree the run started from, when the project is a git repo
+    final_tree: str = ""  # the tree the run ended on, for the report's diffstat
+    stages: list[StageRecord] = field(default_factory=list)
+
+    @property
+    def blocked(self) -> list[StageRecord]:
+        return [stage for stage in self.stages if stage.status == "blocked"]
+
+    @property
+    def landed(self) -> list[StageRecord]:
+        return [stage for stage in self.stages if stage.status == "passed"]
+
+
+@dataclass
 class Approach:
     agent: str
     original: str = ""
@@ -244,6 +309,10 @@ class Docket:
     next_qa: int = 1
     next_note: int = 1
     next_message: int = 1
+    #: implement: the run's spine — crews, adoption, stages
+    execution: Execution | None = None
+    #: implement: `say_to` lines waiting for their target's next prompt
+    peer_messages: list[PeerMessage] = field(default_factory=list)
 
     @property
     def n(self) -> int:
@@ -259,6 +328,17 @@ class Docket:
 
     def open_items(self) -> list[Item]:
         return [self.items[i] for i in self.order if not self.items[i].closed]
+
+    def queue_message(self, *, to: str, from_: str, text: str, stage: int = 0) -> None:
+        """A `say_to` line, waiting for its target's next prompt."""
+        self.peer_messages.append(PeerMessage(to=to, from_=from_, text=text, stage=stage))
+
+    def drain_messages(self, agent_id: str) -> list[PeerMessage]:
+        """The `say_to` lines waiting for this seat, cleared on the way to its next prompt."""
+        kept = [m for m in self.peer_messages if m.to != agent_id]
+        drained = [m for m in self.peer_messages if m.to == agent_id]
+        self.peer_messages = kept
+        return drained
 
     def closed_items(self) -> list[Item]:
         return [self.items[i] for i in self.order if self.items[i].closed]

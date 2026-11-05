@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..deliberation.dispositions import derive
-from ..deliberation.escalations import HELD_BACK, NO_HUMAN, effective_class, held_back
+from ..deliberation.escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, SETTLED, UNBACKED, effective_class, held_back
 from ..deliberation.notes import report_notes
 from ..deliberation.state import (
     ANSWERED,
@@ -254,7 +254,21 @@ def _human_input(docket: Docket, context: ReportContext) -> list[Block]:
         return blocks + [Paragraph(T("None was asked for."))]
     items: list[ListItem] = []
     for question in questions:
-        state = question.state if question.state != ASKED else "standing"
+        if question.state == ASKED and NO_HUMAN in question.markers:
+            # a no-human run never put the ask in front of anyone: "standing" would say the run is waiting
+            state = "never asked"
+        elif question.state == ASKED and NOT_WAITED in question.markers:
+            # the run's own gate on a run that never waits: "standing" would say the run is waiting
+            state = "not waited on"
+        elif question.state == ASKED and UNBACKED in question.markers:
+            # the council itself kept the ask back: "standing" would say the run is waiting on it
+            state = "unseconded"
+        elif question.state == ASKED and SETTLED in question.markers:
+            state = "settled"
+        elif question.state != ASKED:
+            state = question.state
+        else:
+            state = "standing"
         subs: list[ListItem] = []
         for seat, said in question.also_asked.items():
             subs.append(ListItem(T(f"asked as well by {_names([seat], context)}: ", said)))
@@ -269,6 +283,14 @@ def _human_input(docket: Docket, context: ReportContext) -> list[Block]:
             subs.append(ListItem(T(f"authoritative answer (round {question.answer_round}): ", question.answer)))
         elif question.moot_with:
             subs.append(ListItem(T(f"moot with {question.moot_with}: the council settled that item, so nothing was assumed in its place")))
+        elif NO_HUMAN in question.markers:
+            subs.append(ListItem(T("raised, but this run had no human to answer it")))
+        elif NOT_WAITED in question.markers:
+            subs.append(ListItem(T("the run recorded it and kept going; it never waited on this one")))
+        elif UNBACKED in question.markers:
+            subs.append(ListItem(T("no second seat backed it: the council never put this to you — it is a result, not a question you owe")))
+        elif SETTLED in question.markers:
+            subs.append(ListItem(T("a seat answered it: the council took that answer as settlement, so this was never put to you")))
         else:
             subs.append(ListItem(T("assumed in its place: whatever the council did with it — never settled")))
         items.append(ListItem(T(f"{question.id} ({state}) ", _names(question.askers, context), f": {question.text}"), sub=tuple(subs)))

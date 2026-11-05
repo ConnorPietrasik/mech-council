@@ -4,7 +4,7 @@ import os
 import stat
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import cli, naming
 from . import config as config_mod
@@ -23,6 +23,10 @@ class Launch:
     output_path: str = ""
     #: `--overwrite`: replace an existing `output_path` without asking.
     output_overwrite: bool = False
+    #: implement runs: the run's crews in crew order — `(label, council)`, the implement council itself under `builder`
+    crews: list[tuple[str, config_mod.Council]] = field(default_factory=list)
+    #: implement: `--plan <file>` — a plan document the run's chair structures instead of convening the planners
+    plan_file: str = ""
 
 
 def stdin_is_terminal() -> bool:
@@ -80,7 +84,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
         notes.append("--overwrite asks about an existing --output target, and there is none")
     if note := cli.proc_clearing_note(council.in_place):
         notes.append(note)
-    return args, Launch(
+    launch = Launch(
         council=council,
         runs_dir=runs_dir,
         run_name=run_name,
@@ -90,6 +94,15 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
         output_path=output_path,
         output_overwrite=args.overwrite,
     )
+    if council.mode == "implement":
+        launch.crews = config_mod.resolve_crews(loaded, council, args)
+        if args.plan:
+            if not os.path.isfile(args.plan):
+                raise UsageError(f"--plan is not a file: {args.plan!r}")
+            # absolute: the orchestrator's cwd moves to the runs dir before the document is read
+            launch.plan_file = os.path.abspath(args.plan)
+        notes += _implement_notes(council, args)
+    return args, launch
 
 
 def _output_target(args: cli.Args, council: config_mod.Council) -> str:
@@ -164,6 +177,72 @@ def confirm_overwrite(launch: Launch) -> list[str]:
             unseen = "" if terminal else " (stdin is not a terminal, so the question above went unseen)"
             raise ConfigError(f"{target} was left alone and nothing ran{unseen}: pass --overwrite to replace it without being asked")
     return [note]
+
+
+def _implement_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
+    """What an implement run owes the human before the first edit: the tree's state and the no-commit line."""
+    import subprocess
+
+    notes = ["an implement run never commits: when it is done, review the diff before you do"]
+    try:
+        inside = subprocess.run(
+            ["git", "-C", council.project, "rev-parse", "--is-inside-work-tree"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            notes.append(
+                "the project is not a git repo: the stage diffs and the report's diffstat read the tree directly, "
+                "and the run's diff is weaker for it"
+            )
+            return notes
+        rev = subprocess.run(
+            ["git", "-C", council.project, "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if rev.returncode != 0:  # an unborn HEAD: the repo exists and has no commits
+            branch = "(no commits yet)"
+        else:
+            head = subprocess.run(
+                ["git", "-C", council.project, "rev-parse", "--abbrev-ref", "HEAD"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            branch = head.stdout.strip() or "HEAD"
+        # scoped to the project directory: a project that is a subdirectory of a larger repo runs on
+        # the project's dirt, the way the snapshots are scoped to it
+        dirty = subprocess.run(
+            ["git", "-C", council.project, "status", "--porcelain", "--", "."],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if dirty.returncode != 0:
+            notes.append("git status failed: the tree's dirt could not be checked — the run proceeds against it as found")
+        elif dirty.stdout.strip():
+            if args.dirty:
+                notes.append(
+                    f"the git tree is dirty on branch {branch!r} and --dirty was passed: the stage diffs and "
+                    "the report's diffstat are measured against it"
+                )
+            else:
+                raise UsageError(
+                    f"the project's git tree is dirty on branch {branch!r}: an implement run measures its stage "
+                    "diffs against a clean baseline — commit or stash first, or pass --dirty to proceed anyway"
+                )
+        else:
+            notes.append(f"on git branch {branch!r}: the stage diffs and the report's diffstat are measured against it")
+    except OSError, subprocess.TimeoutExpired:
+        notes.append("git is not reachable: the stage diffs and the report's diffstat read the tree directly")
+    return notes
 
 
 def _check_runs_root(runs_dir: str, project: str) -> None:

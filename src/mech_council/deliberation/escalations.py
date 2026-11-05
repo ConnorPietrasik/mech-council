@@ -65,6 +65,8 @@ SETTLED, UNBACKED, MOOT = "settled", "unseconded", "moot"
 HELD_BACK = (SETTLED, UNBACKED, MOOT)
 #: the run has no human: the ask is the report's, not a checkpoint's
 NO_HUMAN = "no_human"
+#: the run's own gate (an implement approval), shown but never waited on
+NOT_WAITED = "not_waited"
 
 
 def held_back(docket: Docket, question: Question) -> str:

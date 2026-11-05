@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 
 from .deliberation.notes import NOTE_MAX_CHARS, NOTE_MAX_PER_REPLY
-from .deliberation.state import ABSTAIN, AGREE, DISAGREE, MERGED, NEEDS_HUMAN, NO_PREFERENCE, STANCES
+from .deliberation.state import ABSTAIN, AGREE, CHAIR_ID, DECLINED, DISAGREE, MERGED, NEEDS_HUMAN, NO_PREFERENCE, STANCES
 
 
 #: fold case and drop `_`/`-`: `validationGate`/`VALIDATION_GATE` → `validation_gate`.
@@ -65,6 +65,15 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "to": ("to", "addressee", "target", "addressed_to", "whom"),
     "question": ("question", "text", "ask", "query", "what"),
     "item": ("item", "item_id", "finding", "finding_id", "topic", "topic_id", "on"),
+    "how": ("how", "how_addressed", "what_you_did", "response"),
+    "say_to": ("say_to", "say_to_message", "messages", "say"),
+    "changed": ("changed", "changed_files", "files_changed", "touched", "files"),
+    "user_text": ("user_text", "user_visible_text", "text_surfaces", "user_facing", "user_facing_text"),
+    "gate_command": ("gate_command", "gate_cmd", "command", "check_command", "gate"),
+    "gate_output": ("gate_output", "output", "gate_result", "result"),
+    "open_issues": ("open_issues", "issues", "open_issue"),
+    "addressed": ("addressed", "fixes", "handled", "fixes_for"),
+    "kind": ("kind", "role", "type"),
     "blocking": ("blocking", "block", "is_blocking", "urgent"),
     "options": ("options", "choices", "alternatives"),
     "context": ("context", "background"),
@@ -181,6 +190,23 @@ MERGE_FIELDS = ("groups",)
 DIRECTION_FIELDS = ("question", "context")
 COMPARISON_FIELDS = ("agreed", "conflicts", "uncovered", "summary")
 WATCHDOG_FIELDS = ("decisions",)
+#: the builder's work and fix replies: the stage's result, as the orchestrator re-checks it
+WORK_FIELDS = (
+    "summary",
+    "gate_command",
+    "gate_output",
+    "changed",
+    "user_text",
+    "open_issues",
+    "human_input",
+    "notes",
+    "say_to",
+    "addressed",
+)
+#: the builder's replan reply: a revised, smaller breakdown of the stuck stage
+REPLAN_FIELDS = ("note", "stages")
+#: the run's chair structuring and classification replies: stages with gates and kinds
+STRUCTURE_FIELDS = ("stages",)
 
 
 @dataclass
@@ -449,6 +475,7 @@ def parse_verdict(
     out.data["open_questions"] = _texts(pick(data, "open_questions"))
     out.data["notes"] = _notes(pick(data, "notes"))
     out.data["retract_note"] = _retract_note(pick(data, "retract_note"))
+    out.data["say_to"] = _say_to(pick(data, "say_to"), out.refused)
     if mode == "plan":
         revised = pick(data, "revised_plan")
         out.data["revised_plan"] = _revised_plan(revised)
@@ -554,6 +581,12 @@ _ASK_ID = re.compile(r"H\d+")
 
 #: a note id and nothing else
 _NOTE_ID = re.compile(r"N\d+")
+
+#: a docket item id, any mode's prefix: what `addressed` may name
+_ITEM_ID = re.compile(r"[A-Z]\d+")
+
+#: a seat id, as `say_to` names it
+_SEAT_ID = re.compile(r"Agent\d+")
 
 
 def _ids(value: object) -> list[str]:
@@ -827,6 +860,118 @@ def parse_watchdog(payload: str) -> tuple[list[dict], list[str]]:
     return out, []
 
 
+def parse_work(payload: str) -> Extraction:
+    """A builder's work, fix or prose-pass reply: the stage's state as the builder reports it."""
+    data, error = find_json(payload, WORK_FIELDS)
+    if data is None:
+        return Extraction(invalid=True, errors=[error or "no JSON object found"])
+    out = Extraction(data={})
+    out.data["summary"] = text_of(pick(data, "summary"))
+    out.data["gate_command"] = text_of(pick(data, "gate_command"))
+    out.data["gate_output"] = text_of(pick(data, "gate_output"))
+    out.data["changed"] = _strings(pick(data, "changed"))
+    out.data["user_text"] = _strings(pick(data, "user_text"))
+    out.data["open_issues"] = _strings(pick(data, "open_issues"))
+    out.data["human_input"] = _human_input(data, out.refused)
+    out.data["notes"] = _notes(pick(data, "notes"))
+    out.data["say_to"] = _say_to(pick(data, "say_to"), out.refused)
+    out.data["addressed"] = _addressed(pick(data, "addressed"))
+    if data and not (out.data["summary"] or out.data["changed"] or out.data["addressed"]):
+        out.errors.append("the work reply carries no summary and names no changed files")
+    return out
+
+
+def _say_to(value: object, refused: list[dict[str, str]]) -> list[dict]:
+    """`say_to` lines: `[{"to": "Agent2", "text": "…"}]`. A line that names no seat is refused, the rest land."""
+    raw = [value] if isinstance(value, dict) else value if isinstance(value, list) else []
+    out: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        who = text_of(pick(entry, "to")).strip()
+        text = text_of(pick(entry, "text")).strip()
+        if not text:
+            continue
+        if not _SEAT_ID.fullmatch(who):
+            refused.append({"field": "say_to", "about": who, "why": "must be a seat ID (AgentN)", "counts": "dropped"})
+            continue
+        out.append({"to": who, "text": text[:1000]})
+    return out
+
+
+def _addressed(value: object) -> list[dict]:
+    """`addressed` lines: `[{"id": "C1", "how": "…"}]` — a line that names no docket item is dropped."""
+    raw = [value] if isinstance(value, dict) else value if isinstance(value, list) else []
+    out: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        item = text_of(pick(entry, "id")).strip()
+        how = text_of(pick(entry, "how")).strip()
+        if _ITEM_ID.fullmatch(item) and how:
+            out.append({"id": item, "how": how[:2000]})
+    return out
+
+
+def parse_replan(payload: str) -> Extraction:
+    """A builder's replan reply: a revised, smaller breakdown of the stuck stage."""
+    data, error = find_json(payload, REPLAN_FIELDS)
+    if data is None:
+        return Extraction(invalid=True, errors=[error or "no JSON object found"])
+    out = Extraction(data={})
+    out.data["note"] = text_of(pick(data, "note")) or text_of(pick(data, "summary"))
+    out.data["stages"] = _clean_stages(pick(data, "stages"))
+    if not out.data["stages"]:
+        out.errors.append("the replan carries no stages")
+    return out
+
+
+def parse_structure(payload: str) -> tuple[dict | None, list[str]]:
+    """The run's chair structuring and classification replies: stages with gates, and `kind` per stage."""
+    data, error = find_json(payload, STRUCTURE_FIELDS)
+    if data is None:
+        return None, [error or "no JSON object found"]
+    stages = _clean_stages(pick(data, "stages"))
+    for stage in stages:
+        kind = fold(stage.get("kind"))
+        stage["kind"] = kind if kind in ("code", "prose") else "code"  # a kind the chair mangled counts as code
+    return {"stages": stages}, []
+
+
+PICK_FIELDS = ("backing",)
+
+
+def parse_pick(payload: str) -> tuple[dict | None, list[str]]:
+    """The run's chair picking a direction: the token, back-mapped, with no invention."""
+    data, error = find_json(payload, PICK_FIELDS)
+    if data is None:
+        return None, [error or "no JSON object found"]
+    token, _ = map_backing(pick(data, "backing"), CHAIR_ID)
+    if not token or token in (NO_PREFERENCE, DECLINED):
+        return None, ["the chair picked no direction"]
+    return {"backing": token}, []
+
+
+def _clean_stages(value: object) -> list[dict]:
+    clean: list[dict] = []
+    if not isinstance(value, list):
+        return clean
+    for stage in value:
+        if isinstance(stage, str):
+            clean.append({"state": stage, "gate": "", "scope": "", "exceptions": [], "kind": "code"})
+        elif isinstance(stage, dict):
+            clean.append(
+                {
+                    "state": text_of(pick(stage, "state")),
+                    "gate": text_of(pick(stage, "gate")),
+                    "scope": text_of(pick(stage, "scope")),
+                    "exceptions": _strings(pick(stage, "exceptions")),
+                    "kind": text_of(pick(stage, "kind")),
+                }
+            )
+    return [stage for stage in clean if stage["state"].strip() or stage["gate"].strip() or stage["kind"].strip()]
+
+
 def extract(kind: str, text: str, **kwargs) -> Extraction:
     if kind == "phase0":
         return parse_phase0(text, **kwargs)
@@ -847,6 +992,16 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
     if kind == "watchdog":
         decisions, errors = parse_watchdog(text)
         return Extraction(data={"decisions": decisions}, invalid=not decisions, errors=errors)
+    if kind == "work":
+        return parse_work(text)
+    if kind == "replan":
+        return parse_replan(text)
+    if kind == "structure":
+        plan, errors = parse_structure(text)
+        return Extraction(data=(plan or {"stages": []}), invalid=plan is None, errors=errors)
+    if kind == "pick":
+        picked, errors = parse_pick(text)
+        return Extraction(data=(picked or {"backing": ""}), invalid=picked is None, errors=errors)
     if kind == "prose":
         # an `explain` reply: prose is the shape, so nothing here is repairable
         return Extraction()

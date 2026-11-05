@@ -291,6 +291,35 @@ def test_a_no_human_ask_is_reported_as_recorded_never_asked():
     assert "asked to stop the run" not in text, "the stop machinery never existed on this run"
 
 
+def test_a_no_human_ask_in_the_plan_ledger_is_never_asked_not_standing():
+    """`human = none`: the ledger says the ask was never asked, not that it stands unsettled — the
+    run kept going on its own, so "standing" and "never settled" would both say it is waiting."""
+    docket = build(mode="plan")
+    docket.human = "none"
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=1)
+    docket.questions["H1"].markers.append(escalations.NO_HUMAN)
+    text = report_plan.render(docket, context(human="none"))
+    human_input = section(text, "Human input")
+    assert "H1 (never asked)" in human_input
+    assert "no human to answer it" in human_input
+    assert "standing" not in human_input and "never settled" not in human_input
+
+
+def test_a_held_back_ask_in_the_plan_ledger_is_unseconded_not_standing():
+    """A single seat's ask that no second seat backs is held back, not settled: the ledger says
+    unseconded — `standing` would say the run is waiting, and `never settled` would say the council
+    assumed an answer in its place."""
+    docket = build(mode="plan")
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    docket.questions["H1"].markers.append(escalations.UNBACKED)
+    text = report_plan.render(docket, context())
+    human_input = section(text, "Human input")
+    assert "H1 (unseconded)" in human_input
+    assert "never put this to you" in human_input
+    assert "standing" not in human_input and "never settled" not in human_input
+
+
 def test_the_report_header_names_the_posture_that_never_waits_or_never_asks():
     for human, wanted in (("non_blocking", "the run never waited"), ("none", "the council was never asked")):
         docket = build()

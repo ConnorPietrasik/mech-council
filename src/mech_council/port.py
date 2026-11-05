@@ -51,6 +51,36 @@ class Port:
             return RawAsk(text=str(failure), failure=str(failure))
         return _raw(outcome)
 
+    async def builder_work(self, agent: str, message: str, *, round_: int, phase: str = "work") -> RawAsk:
+        """A builder's long ask — a work, fix or prose pass: no verdict shape, no deadline on the parse."""
+        try:
+            outcome = await self.lanes.ask_agent(agent, message, round_=round_, kind="work", phase=phase, parse_kw={})
+        except (AskUnusable, AskLost) as failure:
+            return RawAsk(text=str(failure), failure=str(failure))
+        return _raw(outcome)
+
+    async def builder_replan(self, agent: str, message: str, *, round_: int) -> RawAsk:
+        """A builder's replan: a revised, smaller breakdown of the stuck stage."""
+        try:
+            outcome = await self.lanes.ask_agent(agent, message, round_=round_, kind="replan", phase="replan", parse_kw={})
+        except (AskUnusable, AskLost) as failure:
+            return RawAsk(text=str(failure), failure=str(failure))
+        return _raw(outcome)
+
+    async def chair_structure(self, message: str, *, round_: int = 0) -> dict:
+        """The run's chair structuring and classification passes: stages with gates and kinds."""
+        try:
+            return await self.chair.structure(message, round_=round_)
+        except ChairUnusable as failure:
+            raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
+
+    async def chair_pick(self, message: str, *, round_: int = 0) -> dict:
+        """The run's chair picking the direction when no rule adopted one."""
+        try:
+            return await self.chair.pick(message, round_=round_)
+        except ChairUnusable as failure:
+            raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
+
     async def chair_merge(self, listing: str, *, round_: int) -> dict:
         try:
             return await self.chair.merge(listing, round_=round_)
@@ -84,4 +114,4 @@ class Port:
 
 
 def _raw(outcome) -> RawAsk:
-    return RawAsk(text=outcome.text, failure=getattr(outcome, "failure", None), rejected=bool(outcome.rejected))
+    return RawAsk(text=outcome.text, failure=getattr(outcome, "failure", None), rejected=bool(outcome.rejected), data=outcome.data)

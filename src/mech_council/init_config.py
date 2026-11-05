@@ -6,8 +6,8 @@ import sys
 
 from . import cli
 
-#: The starter user council.toml: a `review` and a `plan` council, no provider or model stated,
-#: so every seat takes whatever pi is configured with.
+#: The starter user council.toml: `review`, `plan` and `build` (implement) councils, no provider or model
+#: stated, so every seat takes whatever pi is configured with.
 STARTER = '''\
 # council.toml — the user councils: one config that serves every project.
 # Knobs not stated here take their built-in defaults.
@@ -80,6 +80,30 @@ name = "Coworker"
 persona = """
 You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
 """
+
+[councils.build]                   # `mech-council build`
+mode = "implement"
+goal = "Implement the next TODO item in this project."
+planner = "plan"
+reviewer = "review"
+human = "non_blocking"
+
+[councils.build.chair]
+name = "Chair"
+
+[[councils.build.agents]]
+name = "Forge"
+role = "both"
+persona = """
+You are the builder. Implement the stage exactly as the plan states it, keep the change as small as the stage allows, and re-run the stage's gate until it passes.
+"""
+
+[[councils.build.agents]]
+name = "Wordsmith"
+role = "prose"
+persona = """
+You write the user-visible text the run ships: docs, messages, names. You match the project's existing voice, and you never touch code.
+"""
 '''
 
 HELP = """\
@@ -87,7 +111,7 @@ usage: mech-council init [--overwrite]
 
 Write the starter user council.toml to the user location: $COUNCIL_CONFIG, else
 $XDG_CONFIG_HOME/council/council.toml, else ~/.config/council/council.toml.  The starter holds a
-`review` and a `plan` council, each a chair and four seats; no seat states a provider or a model,
+`review`, a `plan` and an `implement` (build) council; no seat states a provider or a model,
 so every seat takes whatever pi is configured with.
 
 flags:

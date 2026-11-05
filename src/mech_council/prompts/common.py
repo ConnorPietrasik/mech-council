@@ -179,10 +179,15 @@ case- and separator-insensitively, so `validationGate` and `validation_gate` are
 
 
 def _mode_text(mode: str):
+    from . import implement as implement_text
     from . import plan as plan_text
     from . import review as review_text
 
-    return review_text if mode == "review" else plan_text
+    if mode == "review":
+        return review_text
+    if mode == "implement":
+        return implement_text
+    return plan_text
 
 
 def goal_line(goal: str | None) -> str:
@@ -335,11 +340,23 @@ def merge_schema(mode: str) -> str:
 
 
 #: the passes that owe a verdict-shaped reply; a repair re-ask quotes their round schema.
-#: `explain` owes prose, so it is not one.
-SEAT_PHASES = ("round", "gap", "defense", "seconding")
+#: `explain` owes prose, so it is not one. `work` and `replan` repair with the builder's own shapes.
+SEAT_PHASES = ("round", "gap", "defense", "seconding", "work", "replan")
 
 
 def schema_hint(mode: str, *, phase: str, human: str = "blocking") -> str:
+    if phase in ("work", "prose", "fix"):
+        from . import implement as implement_text
+
+        return implement_text.work_schema()
+    if phase == "replan":
+        from . import implement as implement_text
+
+        return implement_text.replan_schema()
+    if phase == "structure":
+        from . import implement as implement_text
+
+        return implement_text.structure_schema()
     if phase == "phase0":
         return _mode_text(mode).phase0_schema(human)
     if phase in SEAT_PHASES:

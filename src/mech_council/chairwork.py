@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from .config import Council
 from .console import Console
-from .deliberation.state import CHAIR_ID
 from .prompts.brief import Brief
 from .sandbox.mount import WATCHDOG_PASS_TIMEOUT_S
 
@@ -35,6 +34,14 @@ class Chair:
         message = self.brief.direction(listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="direction", phase="direction", round_=round_)
 
+    async def structure(self, message: str, *, round_: int) -> dict:
+        """The implement run's chair structuring and classification passes: the message is already brief."""
+        return await self._publication(message, kind="structure", phase="structure", round_=round_)
+
+    async def pick(self, message: str, *, round_: int) -> dict:
+        """The implement run's chair picking a direction the rules did not adopt: the message is already brief."""
+        return await self._publication(message, kind="pick", phase="pick", round_=round_)
+
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:
         refusal = "no JSON object"
         for attempt in (0, 1):
@@ -53,7 +60,8 @@ class Chair:
                 self.console.event("chair_unreadable", phase=phase, round=round_, reason=refusal, restart=True)
                 self.console.say(f"chair {phase} pass unreadable ({refusal}) — a digest, then a restart, then one re-run")
                 await self.digest(self.lanes.digest())
-                await self.lanes.restart_member(CHAIR_ID, why=f"unreadable {phase} pass")
+                # a borrowed crew's chair sits under a crew-suffixed base; `chair` is a different crew's member
+                await self.lanes.restart_member(self.council.chair.file_base, why=f"unreadable {phase} pass")
         raise ChairUnusable(phase, round_, f"{refusal} — unreadable after repair re-asks, a digest, a restart and one re-run")
 
     async def digest(self, rows: list[dict]) -> dict | None:

@@ -141,6 +141,39 @@ class Lanes:
     async def restart_member(self, file_base: str, *, why: str) -> None:
         await self.members.restart(file_base, why=why)
 
+    async def abort_member(self, file_base: str) -> None:
+        member = self.members.members.get(file_base)
+        if member is not None:
+            with contextlib.suppress(Exception):
+                await member.rpc.abort()
+
+    async def message(self, key: str, message: str, *, round_: int, phase: str) -> Outcome:
+        """A direct message, prose in prose out: the chair its own slot, a seat the pool."""
+        try:
+            if key == self.council.chair.file_base:
+                return await self.ask_chair(message, round_=round_, phase=phase, kind="prose", timeout=self.council.chair_timeout_sec)
+            file_base = self.members.file_base_for(key)
+            if file_base in self.in_flight.values():
+                # a seat mid-ask cannot take a second prompt: refusing is the cheap path, restarting it is not
+                return Outcome(text="", failure=f"{self.display_for(file_base)} is mid-ask; try again at the next checkpoint")
+            return await self.ask_agent(key, message, round_=round_, phase=phase, kind="prose", parse_kw={})
+        except (AskUnusable, AskLost) as failure:
+            return Outcome(text="", failure=str(failure))
+
+    def resolve(self, label: str) -> str | None:
+        """The file_base behind a digest label: a seat's id, file_base or name."""
+        for spec in self.council.agents:
+            if label in (spec.id, spec.file_base, spec.name):
+                return spec.file_base
+        return None
+
+    def label_for(self, file_base: str) -> str:
+        """The digest label behind a file_base: a seat's global id, `chair` for the chair."""
+        return self.members.label_for(file_base)
+
+    def display_for(self, file_base: str) -> str:
+        return self.members.display_for(file_base)
+
     def digest(self) -> list[dict]:
         from .render import preview
 
@@ -153,6 +186,7 @@ class Lanes:
             rows.append(
                 {
                     "agent": label,
+                    "file_base": file_base,
                     "elapsed": round(time.monotonic() - activity.started, 1),
                     "idle": round(activity.age(), 1),
                     "events": activity.events,

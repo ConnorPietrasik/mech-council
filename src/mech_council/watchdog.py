@@ -2,20 +2,34 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from .chairwork import Chair
 from .config import Council
 from .console import Console
 
-if TYPE_CHECKING:
-    from .asks import Lanes
+
+class LanesLike(Protocol):
+    """What the watchdog reads of the lanes: a busy chair, a digest, and the restart route."""
+
+    @property
+    def chair_busy(self) -> bool: ...
+
+    def digest(self) -> list[dict]: ...
+
+    def resolve(self, label: str) -> str | None: ...
+
+    def display_for(self, file_base: str) -> str: ...
+
+    async def abort_member(self, file_base: str) -> None: ...
+
+    async def restart_member(self, file_base: str, *, why: str) -> None: ...
 
 
 @dataclass
 class Watchdog:
     council: Council
-    lanes: Lanes
+    lanes: LanesLike
     chair: Chair
     console: Console
     task: asyncio.Task | None = None
@@ -75,31 +89,22 @@ class Watchdog:
                 if reason:
                     self.console.event("watchdog_keep", member=label, note=reason)
                 continue
-            file_base = self._file_base(label)
+            file_base = self.lanes.resolve(label)
             if file_base is None:
                 self.console.event("watchdog_unknown_agent", member=label)
-                self.console.say(f"watchdog: the chair named {label!r}, which is not a member of this council — nobody is restarted")
+                self.console.say(f"watchdog: the chair named {label!r}, which is not a member of this run — nobody is restarted")
                 continue
             self.console.event("watchdog_restart", member=label, reason=reason)
-            self.console.say(f"watchdog: restarting {self.lanes.members.display_for(file_base)} ({reason or 'no reason given'})")
+            self.console.say(f"watchdog: restarting {self.lanes.display_for(file_base)} ({reason or 'no reason given'})")
             await self._restart(file_base, reason or "watchdog restart")
 
     async def _restart(self, file_base: str, why: str) -> None:
-        member = self.lanes.members.members.get(file_base)
-        if member is None:
-            return
         try:
-            await member.rpc.abort()
+            await self.lanes.abort_member(file_base)
         except Exception:
             pass
         try:
-            await self.lanes.members.restart(file_base, why=why)
+            await self.lanes.restart_member(file_base, why=why)
         except Exception as failure:
             self.console.event("member_spawn_failed", member=file_base, error=str(failure))
-            self.console.say(f"watchdog: {self.lanes.members.display_for(file_base)} could not be restarted: {failure}")
-
-    def _file_base(self, label: str) -> str | None:
-        for spec in self.council.agents:
-            if label in (spec.id, spec.file_base, spec.name):
-                return spec.file_base
-        return None
+            self.console.say(f"watchdog: {self.lanes.display_for(file_base)} could not be restarted: {failure}")

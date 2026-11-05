@@ -98,7 +98,11 @@ class FakeMembers:
         raise KeyError(agent_id)
 
     def label_for(self, file_base):
-        return file_base
+        # mirrors the real one: a seat's global id, `chair` for the chair, the file_base where no spec holds it
+        spec = SPEC.get(file_base)
+        if spec is None:
+            return file_base
+        return "chair" if spec.id is None else spec.id
 
     def display_for(self, file_base):
         return SPEC[file_base].name
@@ -280,7 +284,7 @@ def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
         return rows
 
     rows = run(main())
-    assert [row["agent"] for row in rows] == ["seat1-one"], "only the seat being asked is in the digest"
+    assert [row["agent"] for row in rows] == ["Agent1"], "only the seat being asked is in the digest"
     assert rows[0]["events"] == 2, "the row carries the activity as it stands, not as it was when the ask began"
 
 
@@ -297,6 +301,63 @@ def test_the_digest_line_names_the_seat_it_is_watching():
         return console.lines
 
     assert "watchdog: chair pass over one Read 12s idle; gavel no tool 2s idle" in run(main())
+
+
+def test_the_crews_digest_labels_each_row_with_the_seats_global_id():
+    """The run's chair reads one digest over every crew: each row wears the seat's global ID — how
+    seats are addressed in this run, and what the chair echoes back — never a display name. A
+    borrowed crew's chair is not the run's `chair`, so its row wears the crew's name."""
+    import types
+
+    from mech_council.crews import CrewLanes, Crews
+
+    def crew_council(spec):
+        return Council(
+            name="t",
+            mode="review",
+            goal="g",
+            agents=[spec],
+            chair=SPEC["chair"],
+            max_rounds=3,
+            grace_rounds=0,
+            seconding=True,
+            watchdog_sec=0,
+            chair_timeout_sec=60,
+            max_concurrency=2,
+            verbosity=0,
+            sandbox_mib=64,
+            pi_cli="pi",
+            pi_version="1.4.0",
+            config_path="/proj/council.toml",
+            project="/proj",
+        )
+
+    async def main():
+        SPEC["bld-forge"] = MemberSpec(name="Forge", id="Agent3", file_base="bld-forge")
+        SPEC["pln-metic"] = MemberSpec(name="Metic (planner)", id="Agent1", file_base="pln-metic")
+        SPEC["pln-chair"] = MemberSpec(name="Plan Chair", file_base="pln-chair")
+        member_a = FakeMember("bld-forge", "Agent3", FakeRpc([]))
+        member_b = FakeMember("pln-metic", "Agent1", FakeRpc([]))
+        member_c = FakeMember("pln-chair", None, FakeRpc([]))
+        council_b = crew_council(SPEC["pln-metic"])
+        council_b.chair = SPEC["pln-chair"]
+        lanes_a = Lanes(crew_council(SPEC["bld-forge"]), cast(Members, FakeMembers({"bld-forge": member_a})), cast(RunConsole, Console()))
+        lanes_b = Lanes(council_b, cast(Members, FakeMembers({"pln-metic": member_b, "pln-chair": member_c})), cast(RunConsole, Console()))
+        for lanes, base, member in ((lanes_a, "bld-forge", member_a), (lanes_b, "pln-metic", member_b), (lanes_b, "pln-chair", member_c)):
+            lanes.in_flight[lanes.members.label_for(base)] = base
+            member.rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
+        crews = types.SimpleNamespace(
+            live=[
+                types.SimpleNamespace(label="builder", lanes=lanes_a, council=crew_council(SPEC["bld-forge"])),
+                types.SimpleNamespace(label="planner", lanes=lanes_b, council=council_b),
+            ]
+        )
+        return CrewLanes(cast(Crews, crews)).digest()
+
+    rows = run(main())
+    assert {row["agent"] for row in rows} == {"Agent3", "Agent1", "chair (planner)"}, (
+        "each row wears the seat's global ID, never a name; the borrowed crew's chair is not the run's chair"
+    )
 
 
 # --------------------------------------------------------- Lenient extraction's repairs
@@ -587,6 +648,29 @@ def test_the_chair_is_told_the_goal_its_pass_serves():
     assert len(calls) == 2, f"one ask per pass, no repair re-asks: {len(calls)}"
     for ask in calls:
         assert "Goal: ship the migration" in ask, f"the chair is told what the council was convened for: {ask[:200]}"
+
+
+def test_an_unreadable_pass_restarts_the_chair_under_its_own_file_base():
+    """A borrowed crew's chair sits under a crew-suffixed base: the unreadable-pass repair restarts
+    that base, not the run's `chair`, which belongs to a different crew."""
+
+    async def main():
+        SPEC["planner-chair"] = MemberSpec(name="plan gavel", file_base="planner-chair")
+        garble = {"text": "the chair wrote prose instead of JSON"}
+        good = {"text": '{"question": "which way?", "context": "a split held two rounds"}'}
+        members = FakeMembers({"planner-chair": FakeMember("planner-chair", None, FakeRpc([garble, garble, garble, good]))})
+        council_ = council(n=0)
+        council_.chair = SPEC["planner-chair"]
+        console = Console()
+        board = Lanes(council_, cast(Members, members), cast(RunConsole, console))
+        chair = Chair(council_, board, cast(RunConsole, console), Brief(mode="plan", project="/proj"))
+        data = await chair.direction("### Agent1\n- Agent1, backing `x`:\nthe plan text", round_=1)
+        return data, members, console
+
+    data, members, console = run(main())
+    assert data == {"question": "which way?", "context": "a split held two rounds"}
+    assert members.members["planner-chair"].restarts == 1, "the crew's own chair is the one restarted"
+    assert any(e["type"] == "chair_unreadable" for e in console.events)
 
 
 def test_a_pass_in_flight_suppresses_the_next_tick_instead_of_queueing_one():

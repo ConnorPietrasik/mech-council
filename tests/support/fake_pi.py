@@ -182,6 +182,7 @@ def main() -> int:
         return 0
     prompts = 0
     label = os.environ.get("FAKE_PI_LABEL", os.path.basename(sys.argv[0]))
+    session = next((sys.argv[i + 1] for i in range(len(sys.argv) - 1) if sys.argv[i] == "--name"), label)
     reject = os.environ.get("FAKE_PI_REJECT_COMMANDS")
     if os.environ.get("FAKE_PI_UNKNOWN_EVENT"):
         say({"type": "the_dev_invented_this", "note": "an unknown event is data"})
@@ -219,6 +220,10 @@ def main() -> int:
                 # The suite asserts the exec'd argv and counts prompts.
                 with open(log, "a", encoding="utf-8") as handle:
                     handle.write(json.dumps({"argv": sys.argv[1:], "label": label}) + "\n")
+            if prompts_log := os.environ.get("FAKE_PI_PROMPTS"):
+                # The suite asserts what a member's prompt carried: one JSON line per prompt.
+                with open(prompts_log, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"member": session, "index": index, "message": str(command.get("message") or "")}) + "\n")
             say({"type": "response", "id": request_id, "success": True, "data": {"disposition": "accepted"}})
             reply_to(str(command.get("message") or ""), index)
             exit_after = os.environ.get("FAKE_PI_EXIT_AFTER")

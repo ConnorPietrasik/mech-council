@@ -22,6 +22,64 @@ def test_list_shows_every_council_with_its_effective_shape(cli, project):
     assert f"source: {project}/council.toml" in out
 
 
+def test_list_shows_an_implement_councils_crew_knobs_and_builder_roles(cli, project):
+    """The implement knobs differ from the defaults the way the others do: a build council lists
+    its planner and reviewer, a stated fix budget, and a builder seat's non-default role."""
+    write_project_config(
+        project,
+        """\
+[councils.planners]
+mode = "plan"
+goal = "Plan the build"
+
+[councils.planners.chair]
+name = "Plan Chair"
+
+[[councils.planners.agents]]
+name = "P1"
+
+[[councils.planners.agents]]
+name = "P2"
+
+[councils.inspect]
+mode = "review"
+goal = "Review the stage"
+
+[councils.inspect.chair]
+name = "Review Chair"
+
+[[councils.inspect.agents]]
+name = "R1"
+
+[[councils.inspect.agents]]
+name = "R2"
+
+[councils.build]
+mode = "implement"
+goal = "Build it"
+planner = "planners"
+reviewer = "inspect"
+fix_budget = 5
+
+[councils.build.chair]
+name = "Chair"
+
+[[councils.build.agents]]
+name = "Forge"
+
+[[councils.build.agents]]
+name = "Wordsmith"
+role = "prose"
+""",
+    )
+    result = cli(["list"], cwd=project)
+    assert result.returncode == 0, result.console
+    out = result.stdout
+    assert "build · implement" in out
+    assert "roster: Forge, Wordsmith · prose · chair: Chair" in out, "a non-default role is listed with the seat"
+    assert 'knobs: fix_budget = 5 · planner = "planners" · reviewer = "inspect" · in_place = true' in out
+
+
 def test_list_marks_templates_and_broken_councils(cli, project):
     write_project_config(
         project,

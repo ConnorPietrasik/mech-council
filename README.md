@@ -1,6 +1,8 @@
 # mech-council
 
-A council of coding agents that reviews a project or plans a task together.
+A council of coding agents that reviews a project, plans a task, or implements one — the third
+mode takes a direction from a planner crew or a plan document, then has builder seats land it in
+the real tree stage by stage while a reviewer crew watches.
 
 You name a council in `council.toml` — seats and a chair, each a [`pi`](https://github.com/earendil-works/pi)
 session on whatever provider and model you like — and `mech-council` convenes them. The seats
@@ -33,7 +35,7 @@ mech-council init              # writes your user council.toml: $COUNCIL_CONFIG,
                                # else ~/.config/council/council.toml — one config that serves every project
 ```
 
-The starter is a `review` and a `plan` council, each a chair and four seats. No seat states a
+The starter is a `review`, a `plan` and a `build` (implement) council. No seat states a
 `provider` or a `model`, so every seat takes whatever pi is configured with — state them per seat
 to point one somewhere else. `init` refuses to replace a file that is already there;
 `mech-council init --overwrite` replaces it.
@@ -182,7 +184,7 @@ artifact, and the levels exist mostly for debugging:
 
 | File | What's in it |
 |---|---|
-| `report.md` / `plan.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead. `--format html` writes the same content as `report.html` / `plan.html` instead — see below. |
+| `report.md` / `plan.md` / `implementation.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead; implementations get the crews, the adopted plan, the stage ledger, what landed, and the decision points the run recorded. `--format html` writes the same content as `report.html` / `plan.html` instead — see below. |
 | `run.json` (`summary`+) | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
 | `events.jsonl` (`debug`+) | The append-only event log — one JSON object per line, the whole run in order. The run never reads it back; it is there for you. |
 | `human_input.json` (`detail`+) | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
@@ -256,23 +258,80 @@ with `--config`.
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `mode` | `review` | `review`, or `plan` for a task plan instead of a findings report. |
-| `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` council needs one. |
+| `mode` | `review` | `review`, `plan` for a task plan, or `implement` for a build that lands in the real tree — see [below](#implement-plan-build-review-in-place). |
+| `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` or `implement` council needs one. |
 | `max_rounds` | `10` | Round limit. |
 | `grace_rounds` | `1` | How many rounds past the limit an answer may buy. `0` ends the run on the limit with its questions unasked. |
 | `seconding` | `true` | A question reaches you only once a second seat backs it. `false` puts every question the council left open in front of you. |
 | `human` | `blocking` | The run's posture toward the council's questions. `blocking`: it waits where a declared stop reaches the bar. `non_blocking`: it never waits — questions are shown while it keeps working, and you may answer any of them. `none`: the council is never asked; its open questions are recorded in the report. `--human` overrides; a run with no terminal on stdin takes `none` unless a posture is stated, and says so in a note. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
-| `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction). |
+| `planning_rounds` | `4` | implement: rounds the planner crew gets to converge on a direction. |
+| `fix_budget` | `3` | implement: review-fix ladders one stage may spend before it is blocked. |
+| `replans` | `2` | implement: re-structures one stage may spend before it is blocked. |
+| `planner` | — | implement: the name of a `plan` council to convene as the run's planning crew. |
+| `reviewer` | — | implement: the name of a `review` council to convene as the run's per-stage reviewer crew. |
+| `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction, structure, pick). |
 | `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
-| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on. |
+| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; an implement run is always in place. |
 | `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json`), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
 Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi
 will not start a seat configured that way), and `persona`. An unknown model warns rather than
-failing the run.
+failing the run. An implement builder seat also takes `role`: `code`, `prose`, or `both` (the default) —
+`prose` seats are handed prose stages only.
+
+### `implement`: plan, build, review, in place
+
+`mode = "implement"` is a build, not a review: it ends with a changed tree and an
+`implementation.md` report, never a commit — you review the whole diff when the run is done.
+Because it edits the real project, it is always in place, and a dirty git tree is refused
+unless `--dirty` is passed (the stage diffs and the report's diffstat are measured against the
+tree as the run starts, clean or not; a project that is not a git repo runs anyway, with a weaker
+diff and a note).
+
+An implement council is a chair and builder seats, plus at most two borrowed councils:
+`planner` names a `plan` council that convenes first and delivers the direction, and `reviewer`
+names a `review` council whose crew reviews every stage before it passes. Borrowed crews keep
+their own rosters, chairs and personas but inherit the run's knobs; their seats join the one
+roster under crew-suffixed names — `Metic (planner)`, `Metic (reviewer)` — while the builders keep
+their own, `Forge`.
+The run's plan comes from one of two places: a `planner` crew that is convened, or a `--plan`
+document the run's chair structures — a run with neither is refused, and either one lets a
+single builder build.
+
+`--plan <file>` skips the planning phase: the run's chair structures the document into gated
+stages and the run goes straight to building. A stage is a final state with a **gate** — a
+command the project can run that proves it; the gate is re-run by the run itself after each
+stage lands, and the stage only passes when it does and the review crew has nothing left to
+report — it re-reports what it still finds, so a finding outlives the passes until it is fixed or
+withdrawn. A stage that names no gate has nothing to re-run: it passes when the review crew has
+nothing left to report. New text a stage needs (docs, release notes) lands in the same stage —
+the builder writes it and names it as `user_text` — and the report prints it. A `prose`-role
+stage whose whole artifact is user-visible text is handed only to the seats that can take prose.
+
+The repair ladders are finite, so the build half always ends: when a stage's gate fails, its
+findings go to the builder as a fix pass (`fix_budget`), and when nothing works the stage is
+replanned smaller (`replans`) — an unreadable builder reply spends a rung the same way; past
+both, the stage is **blocked** — the run keeps going over the rest of the plan and ends
+`partial` with what landed, where it stopped, and why. Seats may message each other as the
+build goes: `say_to` takes a seat ID, and the roster each prompt carries is how a seat learns
+them. The run's chair is on hand for structure, splits and stuck seats, and with
+`human = "blocking"` a blocked stage asks you whether to carry on or hold. The approval shows the
+adopted plan — every stage's final state and the gate that will run — so a `proceed` agrees to
+a plan, not a yes/no. The run's two calls of
+its own — the approval before the first edit and the carry-on-or-hold on a blocked stage — take
+only an explicit selection: the option's number or its words, nothing else, since the run reads
+one bit from each and a qualifier in your own words is not a decision.
+An approval that does not pick `proceed` is a hold, and a blocked stage carries on unless the
+answer says `hold`.
+
+```sh
+mech-council build                     # plan (if a planner is named), adopt, build, review, report
+mech-council build --plan docs/PLAN.md # skip the planners; structure the document instead
+```
+
 
 ### `extends`: one roster, several councils
 

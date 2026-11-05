@@ -70,6 +70,8 @@ class ReportContext:
     verbosity: int = 0  # what the run directory kept beyond the report
     captions: dict[str, str] = field(default_factory=dict)
     interrupted: Interrupted | None = None
+    #: the implement run's spine, when the mode is implement
+    docket_execution: object = None
 
     def meta(self) -> list[tuple[str, Text]]:
         trust = "no-approve (untrusted)" if self.untrusted else "approve"

@@ -92,12 +92,16 @@ def _goal(goal: str | None) -> str:
     return line if len(line) <= GOAL_WIDTH else line[: GOAL_WIDTH - 1] + "…"
 
 
-def _seat(spec: config_mod.MemberSpec) -> str:
-    return f"{spec.name} ({spec.provider}/{spec.model})" if spec.model else spec.name
+def _seat(spec: config_mod.MemberSpec, *, show_role: bool = False) -> str:
+    seat = f"{spec.name} ({spec.provider}/{spec.model})" if spec.model else spec.name
+    if show_role and spec.role != "both":
+        seat += f" · {spec.role}"
+    return seat
 
 
 def _roster(council: config_mod.Council) -> str:
-    return ", ".join(_seat(spec) for spec in council.agents) + f" · chair: {_seat(council.chair)}"
+    show_role = council.mode == "implement"
+    return ", ".join(_seat(spec, show_role=show_role) for spec in council.agents) + f" · chair: {_seat(council.chair)}"
 
 
 def _knobs(council: config_mod.Council) -> str:
@@ -107,6 +111,11 @@ def _knobs(council: config_mod.Council) -> str:
         "grace_rounds": council.grace_rounds,
         "seconding": council.seconding,
         "watchdog_sec": council.watchdog_sec,
+        "planning_rounds": council.planning_rounds,
+        "fix_budget": council.fix_budget,
+        "replans": council.replans,
+        "planner": council.planner,
+        "reviewer": council.reviewer,
         "chair_timeout_sec": council.chair_timeout_sec,
         "max_concurrency": council.max_concurrency,
         "verbosity": cli.VERBOSITY_LEVELS[council.verbosity],

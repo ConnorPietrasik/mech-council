@@ -854,6 +854,7 @@ def test_a_relative_output_lands_in_the_project_you_invoked_from(cli, project):
     assert os.path.exists(target) and result.manifest["report"] == target
     assert "note: the report lands inside" in result.console, "an ordinary write into the project is said out loud"
 
+
 # ------------------------------------------------------ The report's format
 
 

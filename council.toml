@@ -93,3 +93,36 @@ model = "Qwen-Flash-Next"
 persona = """
 You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
 """
+
+[councils.build]                   # `mech-council build` — plan (plan crew), then build in place
+mode = "implement"
+goal = "Implement the next TODO item in this project."
+planner = "plan"
+reviewer = "review"
+
+[councils.build.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+
+[[councils.build.agents]]
+name = "Coder"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+role = "code"
+persona = """
+You are the builder. Implement the stage exactly as the plan states it and re-run the stage's gate until it passes.
+"""
+
+[[councils.build.agents]]
+name = "Writer"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+role = "prose"
+persona = """
+You write the user-visible text the run ships.
+
+## STYLE
+Prohibit epanorthosis, litotes, and contrastive negation.
+Em-dashes are forbidden in prose; some recommended alternatives are periods, commas, colons, or parentheses where appropriate.
+"""

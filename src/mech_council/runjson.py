@@ -73,6 +73,7 @@ def create(
     project: str,
     orchestrator_pid: int,
     enabled: bool = True,
+    crew_councils: list[tuple[str, Council]] | None = None,
 ) -> RunManifest:
     members: dict[str, MemberRecord] = {}
     roster = []
@@ -94,7 +95,43 @@ def create(
     members[chair.file_base] = MemberRecord(
         file_base=chair.file_base, id=None, name=chair.name, kind="chair", provider=chair.provider, model=chair.model
     )
-    data = {
+    crews = None
+    if crew_councils is not None:
+        crews = []
+        for label, crew_council in crew_councils:
+            crew = {
+                "label": label,
+                "council": crew_council.name,
+                "mode": crew_council.mode,
+                "seats": [[spec.id, spec.name] for spec in crew_council.agents],
+                "chair": {"name": crew_council.chair.name, "file_base": crew_council.chair.file_base},
+            }
+            crews.append(crew)
+            for spec in crew_council.agents:
+                members.setdefault(
+                    spec.file_base,
+                    MemberRecord(
+                        file_base=spec.file_base,
+                        id=spec.id,
+                        name=spec.name,
+                        kind="seat",
+                        provider=spec.provider,
+                        model=spec.model,
+                    ),
+                )
+            chair_base = crew_council.chair.file_base
+            members.setdefault(
+                chair_base,
+                MemberRecord(
+                    file_base=chair_base,
+                    id=None,
+                    name=crew_council.chair.name,
+                    kind="chair",
+                    provider=crew_council.chair.provider,
+                    model=crew_council.chair.model,
+                ),
+            )
+    data: dict[str, object] = {
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "config_path": council.config_path,
         "config_layers": list(council.config_layers),
@@ -127,6 +164,8 @@ def create(
         "members": {base: record.as_dict() for base, record in members.items()},
         "outcome": None,
     }
+    if crews is not None:
+        data["crews"] = crews
     manifest = RunManifest(path=path, data=data, members=members, enabled=enabled)
     _write(manifest)
     return manifest
