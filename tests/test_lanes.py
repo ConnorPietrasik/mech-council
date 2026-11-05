@@ -11,7 +11,7 @@ import pytest
 
 from mech_council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_repair
 from mech_council.chairwork import Chair
-from mech_council.config import Council, MemberSpec
+from mech_council.config import Council, MemberSpec, provider_seat_pool
 from mech_council.console import Console as RunConsole
 from mech_council.deliberation import escalations
 from mech_council.deliberation.state import Docket
@@ -119,14 +119,18 @@ class FakeMembers:
 SPEC = {
     "seat1-one": MemberSpec(name="one", id="Agent1", file_base="seat1-one", provider="anthropic", model="claude-opus-4"),
     "seat2-two": MemberSpec(name="two", id="Agent2", file_base="seat2-two"),
+    "seat3-three": MemberSpec(name="three", id="Agent3", file_base="seat3-three", provider="beta", model="b1"),
+    "seat4-four": MemberSpec(name="four", id="Agent4", file_base="seat4-four", provider="anthropic", model="claude-opus-4"),
     "chair": MemberSpec(name="gavel", file_base="chair"),
 }
 
 
-def council(n=2, *, concurrency=2, watchdog=0):
+def council(n=2, *, providers=None, watchdog=0):
     agents = [
         MemberSpec(name=name, id=f"Agent{i}", file_base=fb, provider=SPEC[fb].provider, model=SPEC[fb].model)
-        for i, (fb, name) in enumerate([("seat1-one", "one"), ("seat2-two", "two")][:n], start=1)
+        for i, (fb, name) in enumerate(
+            [("seat1-one", "one"), ("seat2-two", "two"), ("seat3-three", "three"), ("seat4-four", "four")][:n], start=1
+        )
     ]
     return Council(
         name="t",
@@ -139,13 +143,13 @@ def council(n=2, *, concurrency=2, watchdog=0):
         seconding=True,
         watchdog_sec=watchdog,
         chair_timeout_sec=60,
-        max_concurrency=concurrency,
         verbosity=0,
         sandbox_mib=64,
         pi_cli="pi",
         pi_version="1.4.0",
         config_path="/proj/council.toml",
         project="/proj",
+        provider_concurrency=dict(providers or {}),
     )
 
 
@@ -161,16 +165,16 @@ class Console:
         self.events.append(dict(type=kind, **fields))
 
 
-def lanes(*, n=2, concurrency=2, script=None, watchdog=0, script_defaults=False):
+def lanes(*, n=2, providers=None, script=None, watchdog=0, script_defaults=False):
     """script: file_base → list of replies for FakeRpc."""
     script = dict(script or {})
     if script_defaults:  # a digest lane that has no scripted chair reply keeps everyone
         script.setdefault("chair", [{"text": '{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "n"}]}'}])
     roster = {"chair": FakeMember("chair", None, FakeRpc(script.get("chair", [])))}
-    for i, fb in enumerate(("seat1-one", "seat2-two")[:n], start=1):
+    for i, fb in enumerate(("seat1-one", "seat2-two", "seat3-three", "seat4-four")[:n], start=1):
         roster[fb] = FakeMember(fb, f"Agent{i}", FakeRpc(script.get(fb, [])))
     members = FakeMembers(roster)
-    board = council(n=n, concurrency=concurrency, watchdog=watchdog)
+    board = council(n=n, providers=providers, watchdog=watchdog)
     console = Console()
     # The fakes carry only what the lanes call on them.
     return Lanes(board, cast(Members, members), cast(RunConsole, console)), members, console, board
@@ -207,12 +211,12 @@ def run(coro):
 
 
 def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
-    """With max_concurrency = 1 and one wedged seat, the chair still answers."""
+    """With the provider capped at 1 and one wedged seat, the chair still answers."""
     order: list[str] = []
 
     async def main():
         board, _members, _console, _ = lanes(
-            concurrency=1,
+            providers={"anthropic": 1},
             script={
                 "seat1-one": [{"hang": 5, "text": verdict()}],
                 "chair": [{"text": '{"decisions": [{"agent": "Agent1", "action": "keep", "reason": "reading"}]}'}],
@@ -247,7 +251,6 @@ def test_the_chair_slot_is_outside_the_pool_a_wedged_agent_cannot_hold_it():
 def test_the_seat_pool_lets_the_two_seats_answer_together():
     async def main():
         board, _members, _console, _ = lanes(
-            concurrency=2,
             script={
                 "seat1-one": [{"hang": 0.3, "text": verdict()}],
                 "seat2-two": [{"hang": 0.3, "text": verdict()}],
@@ -267,11 +270,51 @@ def test_the_seat_pool_lets_the_two_seats_answer_together():
     run(main())
 
 
+def test_the_seat_pool_is_the_provider_limit_minus_the_chairs_share():
+    board = council(providers={"anthropic": 3})
+    assert provider_seat_pool(board, "anthropic") == 3, "the chair sits elsewhere"
+    board.chair = MemberSpec(name="gavel", file_base="chair", provider="anthropic")
+    assert provider_seat_pool(board, "anthropic") == 2, "the chair keeps one of the provider's slots"
+    assert provider_seat_pool(council(providers={"anthropic": 1}), "anthropic") == 1, "one, with the chair: clamped, never zero"
+    assert provider_seat_pool(council(), "anthropic") == 1, "uncapped: every seat on the provider"
+    assert provider_seat_pool(council(), None) == 1, "and the default provider's"
+
+
+def test_a_provider_cap_binds_only_its_own_seats():
+    """anthropic capped at 1: while its first seat is wedged, the second anthropic seat waits and beta still answers."""
+    script = {
+        "seat1-one": [{"hang": 0.6, "text": verdict()}],
+        "seat3-three": [{"text": verdict()}],
+        "seat4-four": [{"text": verdict()}],
+    }
+
+    async def main():
+        board, _members, _console, _ = lanes(n=4, providers={"anthropic": 1, "beta": 1}, script=script)
+
+        async def seat(agent):
+            await board.ask_agent(
+                agent, "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": agent, "known_items": set()}, phase="round"
+            )
+
+        first = asyncio.create_task(seat("Agent1"))  # anthropic, wedged
+        await asyncio.sleep(0.1)
+        beta = asyncio.create_task(seat("Agent3"))
+        second = asyncio.create_task(seat("Agent4"))  # anthropic, must wait
+        await asyncio.wait_for(beta, 3)
+        in_flight = set(board.in_flight.values())
+        assert "seat1-one" in in_flight, "the wedged seat still holds its provider's slot"
+        assert "seat4-four" not in in_flight, "the second anthropic seat waits for the pool; it was never prompted"
+        await asyncio.wait_for(first, 5)
+        await asyncio.wait_for(second, 5)
+
+    run(main())
+
+
 def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
     """The chair judges wedging from these rows: a seat that is not being asked is absent, and one that has moved reads as moved."""
 
     async def main():
-        board, members, _console, _ = lanes(concurrency=2, script={"seat1-one": [{"hang": 5, "text": verdict()}]})
+        board, members, _console, _ = lanes(script={"seat1-one": [{"hang": 5, "text": verdict()}]})
         task = asyncio.create_task(
             board.ask_agent("Agent1", "go", round_=1, kind="verdict", parse_kw={"mode": "review", "me": "seat1-one", "known_items": set()})
         )
@@ -323,7 +366,6 @@ def test_the_crews_digest_labels_each_row_with_the_seats_global_id():
             seconding=True,
             watchdog_sec=0,
             chair_timeout_sec=60,
-            max_concurrency=2,
             verbosity=0,
             sandbox_mib=64,
             pi_cli="pi",

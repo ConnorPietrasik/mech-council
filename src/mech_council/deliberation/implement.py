@@ -881,9 +881,7 @@ class Implement:
             sections += [
                 f"- {item['id']}: {item['claim']}" + (f" — {item['evidence']}" if item["evidence"] else "") for item in open_findings
             ]
-            sections.append(
-                "Re-report any that are still wrong, with the same claim: the re-report joins the standing item."
-            )
+            sections.append("Re-report any that are still wrong, with the same claim: the re-report joins the standing item.")
         sections += [
             "",
             "## What the builder did since the last review",

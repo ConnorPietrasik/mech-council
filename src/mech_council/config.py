@@ -18,7 +18,6 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "seconding": True,
     "watchdog_sec": 600,
     "chair_timeout_sec": 300,
-    "max_concurrency": 4,
     "verbosity": "quiet",
     "report_format": "md",
     "pi_cli": None,
@@ -40,7 +39,6 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "seconding": ("bool", True),
     "watchdog_sec": ("int>=0", True),
     "chair_timeout_sec": ("int>=1", True),
-    "max_concurrency": ("int>=1", True),
     "sandbox_mib": ("int>=1", True),
     "in_place": ("bool", True),
     "verbosity": ("verbosity", True),
@@ -60,6 +58,12 @@ PATCH_KEYS = AGENT_KEYS | {"drop": "bool"}
 
 #: A builder seat's `role`: who it writes. `code` writes code, `prose` writes user-visible text, `both` writes either.
 BUILDER_ROLES: tuple[str, ...] = ("code", "prose", "both")
+
+#: The `max_concurrency` value that reads the limit from the provider itself at convene.
+AUTO = "auto"
+
+#: What a `[providers.<name>]` table states.
+PROVIDER_KEYS: dict[str, str] = {"max_concurrency": "concurrency"}
 
 #: The keys a council table (or a template, which is one too) may state.
 COUNCIL_KEYS = set(SCALAR_KEYS) | {"agents", "chair", "extends"}
@@ -95,7 +99,6 @@ class Council:
     seconding: bool
     watchdog_sec: int
     chair_timeout_sec: int
-    max_concurrency: int
     verbosity: int  # index into cli.VERBOSITY_LEVELS: what the run directory keeps beyond the report
     sandbox_mib: int
     pi_cli: str
@@ -121,6 +124,10 @@ class Council:
     #: implement: the council that writes the plan, and the one that reviews each stage.
     planner: str | None = None
     reviewer: str | None = None
+    #: This roster's providers, by the total requests each takes at once, the chair's included; absent means uncapped.
+    provider_concurrency: dict[str, int] = field(default_factory=dict)
+    #: One line per `auto` provider the probe resolved or fell back on.
+    provider_notes: list[str] = field(default_factory=list)
 
     @property
     def adapter(self):
@@ -193,6 +200,18 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
         hint = suggest.suggest(str(value), HUMAN_MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
         raise ConfigError(f"config key {where}.human is 'blocking', 'non_blocking' or 'none', got {value!r}{extra}")
+    elif kind == "concurrency":
+        if value == AUTO:
+            return value
+        if isinstance(value, str):
+            hint = suggest.suggest(value, [AUTO])
+            extra = f" (did you mean {hint!r}?)" if hint else ""
+            raise ConfigError(f"config key {where}.{key} is an integer ≥ 1 or 'auto', got {value!r}{extra}")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"config key {where}.{key} is an integer ≥ 1 or 'auto', got {type(value).__name__}: {value!r}")
+        if value < 1:
+            raise ConfigError(f"config key {where}.{key} must be ≥ 1, got {value}")
+        return value
     return value
 
 
@@ -395,6 +414,7 @@ class ConfigFile:
     path: str
     defaults: dict = field(default_factory=dict)
     councils: dict[str, dict] = field(default_factory=dict)
+    providers: dict[str, dict] = field(default_factory=dict)
     #: Every file read, lowest precedence first.
     paths: list[str] = field(default_factory=list)
     project_layer: str | None = None
@@ -434,6 +454,7 @@ def load_layers(paths: list[str], *, project_layer: str | None = None) -> Config
         layer = _read(path, require_councils=False)
         merged.defaults = {**merged.defaults, **layer.defaults}
         merged.councils = {**merged.councils, **layer.councils}
+        merged.providers = {**merged.providers, **layer.providers}
         merged.raw.update(layer.raw)
     if not merged.councils:
         raise ConfigError(f"{merged.where} declare no councils: add a [councils.<name>] table")
@@ -454,7 +475,7 @@ def _read(path: str, *, require_councils: bool) -> ConfigFile:
         raise ConfigError(f"cannot read the config file {path}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"config file {path} is not valid TOML: {exc}") from None
-    _reject_unknown(raw, {"defaults", "councils"}, path)
+    _reject_unknown(raw, {"defaults", "councils", "providers"}, path)
     defaults = dict(raw.get("defaults") or {})
     _reject_unknown(defaults, {k for k, (_t, ok) in SCALAR_KEYS.items() if ok}, "[defaults]")
     for key, value in defaults.items():
@@ -470,7 +491,21 @@ def _read(path: str, *, require_councils: bool) -> ConfigFile:
             raise ConfigError(f"{path}: the council name {key!r} is reserved for the mech-council {key} subcommand")
         if not isinstance(table, dict):
             raise ConfigError(f"council {key!r} must be a table")
-    return ConfigFile(path=path, defaults=defaults, councils=councils_raw, paths=[path], raw={path: raw})
+    providers = raw.get("providers") or {}
+    if not isinstance(providers, dict):
+        raise ConfigError(f"{path} states [providers] as {type(providers).__name__}, not a table")
+    for name, table in providers.items():
+        if not str(name).strip():
+            raise ConfigError(f"{path}: a provider name (a [providers.<name>] table key) must not be empty")
+        if not isinstance(table, dict):
+            raise ConfigError(f"{path} states [providers.{name}] as {type(table).__name__}, not a table")
+        _reject_unknown(table, set(PROVIDER_KEYS), f"[providers.{name}]")
+        if "max_concurrency" not in table:
+            raise ConfigError(f"{path}: [providers.{name}] states no max_concurrency: state the limit or drop the table")
+        for key, kind in PROVIDER_KEYS.items():
+            if key in table:
+                _check(table[key], kind, f"[providers.{name}]", key)
+    return ConfigFile(path=path, defaults=defaults, councils=councils_raw, providers=providers, paths=[path], raw={path: raw})
 
 
 def select_council(config: ConfigFile, name: str | None) -> str:
@@ -550,7 +585,26 @@ def convene(
     stated = _pi_cli_stated_by_project(config, [name, *council.extends])
     pi_cli, pi_version = resolve_pi(council.pi_cli or None, project, from_project=stated)
     council.pi_cli, council.pi_version = pi_cli, pi_version
+    _auto_providers(config, council)
     return council
+
+
+def _auto_providers(config: ConfigFile, council: Council) -> None:
+    """`auto`: ask each used provider its limit; a provider that answers none runs uncapped, with a note."""
+    from . import probe
+
+    used = {spec.provider for spec in (*council.agents, council.chair) if spec.provider}
+    for name, table in config.providers.items():
+        if table.get("max_concurrency") != AUTO or name not in used or name in council.provider_concurrency:
+            continue
+        limit, reason = probe.probe(name)
+        if limit is None:
+            council.provider_notes.append(
+                f"provider {name!r} is max_concurrency = 'auto' but reports no limit ({reason}); it runs uncapped"
+            )
+            continue
+        council.provider_concurrency[name] = limit
+        council.provider_notes.append(f"provider {name!r} takes {limit} request(s) at once (read from the provider, 'auto')")
 
 
 def convene_without_pi(
@@ -662,7 +716,6 @@ def convene_without_pi(
         seconding=bool(flat["seconding"]),
         watchdog_sec=int(flat["watchdog_sec"]),
         chair_timeout_sec=int(flat["chair_timeout_sec"]),
-        max_concurrency=int(flat["max_concurrency"]),
         verbosity=VERBOSITY_LEVELS.index(args.verbosity or str(flat["verbosity"])),
         sandbox_mib=int(flat["sandbox_mib"]),
         pi_cli=str(flat["pi_cli"] or ""),
@@ -680,10 +733,29 @@ def convene_without_pi(
         replans=int(flat["replans"]),
         planner=flat["planner"],
         reviewer=flat["reviewer"],
+        provider_concurrency=_provider_limits(config, agents, chair),
     )
     if council.max_rounds < 1:
         raise ConfigError(f"--rounds must be ≥ 1, got {council.max_rounds}")
     return council
+
+
+def _provider_limits(config: ConfigFile, agents: list[MemberSpec], chair: MemberSpec) -> dict[str, int]:
+    """The stated limits for the providers this roster uses; `auto` awaits the probe, so it is absent here."""
+    used = {spec.provider for spec in (*agents, chair) if spec.provider}
+    return {
+        name: int(table["max_concurrency"])
+        for name, table in config.providers.items()
+        if name in used and isinstance(table.get("max_concurrency"), int)
+    }
+
+
+def provider_seat_pool(council: Council, provider: str | None) -> int:
+    """The seats of one provider that ask at once: the provider's limit, the chair's share reserved, or every seat when uncapped."""
+    if provider is not None and provider in council.provider_concurrency:
+        share = 1 if council.chair.provider == provider else 0
+        return max(1, council.provider_concurrency[provider] - share)
+    return sum(1 for agent in council.agents if agent.provider == provider)
 
 
 def _crew_reference(config: ConfigFile, name: str, flat: dict) -> None:
@@ -725,6 +797,11 @@ def resolve_crews(config: ConfigFile, council: Council, args: Args) -> list[tupl
     crews.append(("builder", council))
     if council.reviewer:
         crews.append(("reviewer", _borrow(config, council, council.reviewer)))
+    for _label, crew in crews:
+        if crew is not council:
+            # a crew's auto lines are the run's: its notes and run.json carry them; a line the run
+            # already has (its own failed probe of the same provider) is not repeated
+            council.provider_notes += [note for note in crew.provider_notes if note not in council.provider_notes]
     counter = 0
     for label, crew in crews:
         borrowed = crew is not council
@@ -752,7 +829,13 @@ def _borrow(config: ConfigFile, run: Council, name: str) -> Council:
     crew.seconding = run.seconding
     crew.watchdog_sec = run.watchdog_sec
     crew.chair_timeout_sec = run.chair_timeout_sec
-    crew.max_concurrency = run.max_concurrency
+    # the run's chair stays live through the crew's phase too: it keeps its share of every limit, the
+    # crew's re-probed limits included — a failed run probe stores nothing, so the share is applied last
+    crew.provider_concurrency = {**crew.provider_concurrency, **run.provider_concurrency}
+    _auto_providers(config, crew)  # the run's resolutions are already there: only what the run never probed is asked
+    crew.provider_concurrency = {
+        name: max(0, limit - (1 if run.chair.provider == name else 0)) for name, limit in crew.provider_concurrency.items()
+    }
     crew.verbosity = run.verbosity
     crew.human = run.human
     crew.in_place = True

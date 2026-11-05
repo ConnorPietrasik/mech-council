@@ -77,6 +77,8 @@ def _block(name: str, loaded: config_mod.ConfigFile, project: str) -> list[str]:
     lines = [f"{name} · {council.mode}" + (" · template (extended, never convened)" if template else "")]
     lines.append(f"  goal: {_goal(council.goal)}")
     lines.append(f"  roster: {_roster(council)}")
+    if providers := _providers(loaded, council):
+        lines.append(f"  providers: {providers}")
     if knobs := _knobs(council):
         lines.append(f"  knobs: {knobs}")
     if council.extends:
@@ -104,6 +106,13 @@ def _roster(council: config_mod.Council) -> str:
     return ", ".join(_seat(spec, show_role=show_role) for spec in council.agents) + f" · chair: {_seat(council.chair)}"
 
 
+def _providers(loaded: config_mod.ConfigFile, council: config_mod.Council) -> str | None:
+    """The `[providers]` entries the roster uses, as stated — `list` never probes, so `auto` reads as `auto`."""
+    used = {spec.provider for spec in (*council.agents, council.chair) if spec.provider}
+    stated = [f"{name} = {_toml(loaded.providers[name].get('max_concurrency'))}" for name in sorted(loaded.providers) if name in used]
+    return " · ".join(stated) if stated else None
+
+
 def _knobs(council: config_mod.Council) -> str:
     """The effective knobs that differ from the built-in defaults, as a config would state them."""
     effective = {
@@ -117,7 +126,6 @@ def _knobs(council: config_mod.Council) -> str:
         "planner": council.planner,
         "reviewer": council.reviewer,
         "chair_timeout_sec": council.chair_timeout_sec,
-        "max_concurrency": council.max_concurrency,
         "verbosity": cli.VERBOSITY_LEVELS[council.verbosity],
         "pi_cli": council.pi_cli or None,
         "sandbox_mib": council.sandbox_mib,

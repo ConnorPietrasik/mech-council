@@ -5,7 +5,7 @@ import contextlib
 import time
 from dataclasses import dataclass, field
 
-from .config import Council
+from .config import Council, provider_seat_pool
 from .console import Console
 from .extraction import extract
 from .members import Members
@@ -73,7 +73,10 @@ class Lanes:
         self.council = council
         self.members = members
         self.console = console
-        self.pool = asyncio.Semaphore(max(1, council.max_concurrency))
+        self.pools: dict[str | None, asyncio.Semaphore] = {}
+        for agent in council.agents:
+            if agent.provider not in self.pools:
+                self.pools[agent.provider] = asyncio.Semaphore(max(1, provider_seat_pool(council, agent.provider)))
         self.chair_slot = asyncio.Semaphore(1)
         #: label → file_base while an ask is in flight
         self.in_flight: dict[str, str] = {}
@@ -83,7 +86,8 @@ class Lanes:
     async def ask_agent(
         self, agent_id: str, message: str, *, round_: int, kind: str, parse_kw: dict, phase: str = "round", classify_unusable: bool = False
     ) -> Outcome:
-        async with self.pool:
+        spec = self.members.spec_for(self.members.file_base_for(agent_id))
+        async with self.pools[spec.provider]:
             return await self._mediated(
                 agent_id,
                 message,

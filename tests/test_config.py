@@ -16,7 +16,6 @@ REFERENCE_CONFIG = '''# council.toml — the reference config, taken verbatim by
 [defaults]
 max_rounds = 6
 watchdog_sec = 600
-max_concurrency = 3
 sandbox_mib = 32768
 
 [councils.review]
@@ -95,6 +94,9 @@ extends = "_planners"
 mode = "plan"
 goal = "Make a plan for the implementation of the next TODO item"
 max_rounds = 3
+
+[providers.omnissiah]
+max_concurrency = 8
 '''
 
 
@@ -165,7 +167,7 @@ def test_the_reference_config_loads_and_convenes_every_council(tmp_path, pi_on_p
     assert "fake-pi" in review.pi_version
     assert [a.name for a in review.agents] == ["Metic", "Senior", "Coworker"]
     assert review.chair.provider == "omnissiah"
-    assert review.max_rounds == 6 and review.max_concurrency == 3
+    assert review.max_rounds == 6 and review.provider_concurrency == {"omnissiah": 8}
     assert review.in_place is False, "the reference council states no sandbox decision and takes the built-in"
     assert review.extends == []
     staged = config_mod.convene(loaded, "review-staged", Args(), str(tmp_path))
@@ -253,7 +255,7 @@ def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
     assert leaf.chair.name == "Chairman" and leaf.chair.persona == "pc", "the chair merges key by key"
     assert leaf.watchdog_sec == 90, "a knob stated two hops up still reaches the leaf"
     assert leaf.max_rounds == 4, "an ancestor beats [defaults], and the leaf inherits that"
-    assert leaf.mode == "review" and leaf.max_concurrency == 4, "unstated everywhere: [defaults], then the built-in"
+    assert leaf.mode == "review" and leaf.provider_concurrency == {}, "a chain stating no providers leaves every provider uncapped"
     assert convene_chain(tmp_path, "mid").extends == ["_base"]
     # Slots and file bases are assigned after the merge, so an inherited roster needs no bookkeeping.
     assert [a.file_base for a in leaf.agents] == ["slot01-a", "slot02-b"]
@@ -262,6 +264,217 @@ def test_a_deep_chain_inherits_the_roster_the_knobs_and_the_chair(tmp_path):
 def test_flags_still_beat_the_whole_chain(tmp_path):
     leaf = convene(tmp_path, chain(), "leaf", goal="--goal wins", rounds=1, verbosity="full")
     assert (leaf.goal, leaf.max_rounds, leaf.verbosity) == ("--goal wins", 1, 4)
+
+
+# ------------------------------------------------------------- providers: the per-provider cap
+
+
+def _anthropic_body() -> str:
+    """The smallest council with one seat naming a provider, so a [providers] table has a target."""
+    return body().replace('name = "A"', 'name = "A"\nprovider = "anthropic"\nmodel = "m"', 1)
+
+
+def test_a_provider_table_caps_only_the_providers_its_roster_uses(tmp_path):
+    text = _anthropic_body() + "\n[providers.anthropic]\nmax_concurrency = 2\n\n[providers.ghost]\nmax_concurrency = 9\n"
+    council = convene(tmp_path, text)
+    assert council.provider_concurrency == {"anthropic": 2}, "a provider no seat uses is not resolved"
+
+
+def test_auto_stays_offline_in_convene_without_pi_and_reads_the_provider_in_convene(tmp_path, monkeypatch):
+    from mech_council import probe
+
+    path = write(tmp_path, _anthropic_body() + '\n[providers.anthropic]\nmax_concurrency = "auto"\n')
+    loaded = config_mod.load_config(path)
+    offline = config_mod.convene_without_pi(loaded, "review", Args(), str(tmp_path))
+    assert offline.provider_concurrency == {}, "no probe offline: the provider runs uncapped"
+    monkeypatch.setattr(probe, "probe", lambda name: (7, None))
+    full = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert full.provider_concurrency == {"anthropic": 7}, "the reported limit stands"
+    assert any("7" in note and "auto" in note for note in full.provider_notes)
+
+
+def test_auto_falls_back_to_uncapped_with_a_note_when_the_provider_answers_none(tmp_path, monkeypatch):
+    from mech_council import probe
+
+    path = write(tmp_path, _anthropic_body() + '\n[providers.anthropic]\nmax_concurrency = "auto"\n')
+    loaded = config_mod.load_config(path)
+    reason = "no models.json entry states its baseUrl, so there is no endpoint to ask"
+    monkeypatch.setattr(probe, "probe", lambda name: (None, reason))
+    council = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert council.provider_concurrency == {}
+    assert any("uncapped" in note for note in council.provider_notes)
+
+
+def test_a_provider_table_the_later_layer_states_replaces_the_whole_table(tmp_path):
+    roster = _anthropic_body()
+    user = layer(tmp_path, "user", roster + "\n[providers.anthropic]\nmax_concurrency = 3\n")
+    project = layer(tmp_path, "proj", "[providers.anthropic]\nmax_concurrency = 5\n")
+    council = convene_layers(tmp_path, [user, project], "review")
+    assert council.provider_concurrency == {"anthropic": 5}
+
+
+def test_a_borrowed_crews_pool_keeps_the_run_chairs_share(tmp_path):
+    text = """\
+[defaults]
+pi_cli = "{pi}"
+
+[councils.plan]
+mode = "plan"
+goal = "g"
+
+[councils.plan.chair]
+name = "Chair"
+provider = "anthropic"
+model = "m"
+
+[[councils.plan.agents]]
+name = "A"
+provider = "anthropic"
+model = "m"
+
+[[councils.plan.agents]]
+name = "B"
+provider = "anthropic"
+model = "m"
+
+[councils.build]
+mode = "implement"
+goal = "g"
+planner = "plan"
+
+[councils.build.chair]
+name = "Chair"
+provider = "anthropic"
+model = "m"
+
+[[councils.build.agents]]
+name = "C"
+provider = "anthropic"
+model = "m"
+role = "code"
+
+[providers.anthropic]
+max_concurrency = 3
+"""
+    path = write(tmp_path, text.format(pi=PI))
+    loaded = config_mod.load_config(path)
+    council = config_mod.convene(loaded, "build", Args(), str(tmp_path))
+    crews = dict(config_mod.resolve_crews(loaded, council, Args()))
+    assert crews["planner"].provider_concurrency == {"anthropic": 2}, (
+        "3 − the run chair's share; the planner's own chair takes its share at pool time"
+    )
+    assert crews["builder"].provider_concurrency == {"anthropic": 3}, "the builder is the run's own council: no second chair"
+
+
+def test_a_crews_auto_provider_is_probed_even_when_the_run_never_uses_it(tmp_path, monkeypatch):
+    """The run's roster is on the default provider, the planner's is on an `auto` one: the crew is probed, capped and noted."""
+    from mech_council import probe
+
+    text = """\
+[defaults]
+pi_cli = "{pi}"
+
+[councils.plan]
+mode = "plan"
+goal = "g"
+
+[councils.plan.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "m"
+
+[[councils.plan.agents]]
+name = "A"
+provider = "omnissiah"
+model = "m"
+
+[[councils.plan.agents]]
+name = "B"
+model = "m"
+
+[councils.build]
+mode = "implement"
+goal = "g"
+planner = "plan"
+
+[councils.build.chair]
+name = "Chair"
+model = "m"
+
+[[councils.build.agents]]
+name = "C"
+model = "m"
+role = "code"
+
+[providers.omnissiah]
+max_concurrency = "auto"
+"""
+    path = write(tmp_path, text.format(pi=PI))
+    loaded = config_mod.load_config(path)
+    council = config_mod.convene(loaded, "build", Args(), str(tmp_path))
+    assert council.provider_concurrency == {}, "the run's roster names no provider: convene probes nothing"
+    monkeypatch.setattr(probe, "probe", lambda name: (8, None))
+    crews = dict(config_mod.resolve_crews(loaded, council, Args()))
+    assert crews["planner"].provider_concurrency == {"omnissiah": 8}, "the crew's auto provider is probed, not skipped"
+    assert config_mod.provider_seat_pool(crews["planner"], "omnissiah") == 7, "the crew's own chair keeps its slot"
+    assert crews["planner"].provider_notes, "the probe's line is noted, not silent"
+    assert council.provider_notes == crews["planner"].provider_notes, "the run's notes carry the crew's line: startup and run.json print it"
+
+
+def test_a_reprobe_after_a_failed_run_probe_still_reserves_the_run_chairs_share(tmp_path, monkeypatch):
+    """The run and the crew share the auto provider, the run's probe fails, the crew's re-probe answers."""
+    from mech_council import probe
+
+    text = """\
+[defaults]
+pi_cli = "{pi}"
+
+[councils.plan]
+mode = "plan"
+goal = "g"
+
+[councils.plan.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "m"
+
+[[councils.plan.agents]]
+name = "A"
+provider = "omnissiah"
+model = "m"
+
+[[councils.plan.agents]]
+name = "B"
+provider = "omnissiah"
+model = "m"
+
+[councils.build]
+mode = "implement"
+goal = "g"
+planner = "plan"
+
+[councils.build.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "m"
+
+[[councils.build.agents]]
+name = "C"
+provider = "omnissiah"
+model = "m"
+role = "code"
+
+[providers.omnissiah]
+max_concurrency = "auto"
+"""
+    path = write(tmp_path, text.format(pi=PI))
+    loaded = config_mod.load_config(path)
+    answers = iter([(None, "it answers no limit report at http://x"), (8, None)])
+    monkeypatch.setattr(probe, "probe", lambda name: next(answers))
+    council = config_mod.convene(loaded, "build", Args(), str(tmp_path))
+    crews = dict(config_mod.resolve_crews(loaded, council, Args()))
+    assert crews["planner"].provider_concurrency == {"omnissiah": 7}, "the re-probe answers 8, the run chair keeps one"
+    assert config_mod.provider_seat_pool(crews["planner"], "omnissiah") == 6, "and the crew chair keeps one: 1 + 1 + 6 = 8"
 
 
 # ------------------------------------------------------------- in place: the knob, and who stated it
@@ -453,6 +666,11 @@ def test_a_real_council_is_an_ordinary_parent(tmp_path):
             "'chairTimeoutSec' in [councils.review] (did you mean chair_timeout_sec?",
         ),
         (body().replace("[defaults]", "[defaults]\nmaxrounds = 4"), "unknown config key 'maxrounds'"),
+        (body() + "\n[providers.p]\nmax_concurrency = 0\n", "must be ≥ 1"),
+        (body() + "\n[providers.p]\nmax_concurrency = true\n", "is an integer ≥ 1 or 'auto', got bool"),
+        (body() + '\n[providers.p]\nmax_concurrency = "aut"\n', "did you mean 'auto'"),
+        (body() + "\n[providers.p]\nmax_rounds = 2\n", "unknown config key 'max_rounds'"),
+        (body() + "\n[providers.p]\n", "states no max_concurrency"),
         (
             body().replace('goal = "g"', 'goal = "g"\nextends = "rewiew"', 1),
             "extends 'rewiew', which is not a council in",

@@ -101,6 +101,9 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
                 raise UsageError(f"--plan is not a file: {args.plan!r}")
             # absolute: the orchestrator's cwd moves to the runs dir before the document is read
             launch.plan_file = os.path.abspath(args.plan)
+    # after the crews: a crew's auto lines have joined the run's in resolve_crews
+    notes += council.provider_notes
+    if council.mode == "implement":
         notes += _implement_notes(council, args)
     return args, launch
 

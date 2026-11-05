@@ -271,7 +271,6 @@ with `--config`.
 | `planner` | — | implement: the name of a `plan` council to convene as the run's planning crew. |
 | `reviewer` | — | implement: the name of a `review` council to convene as the run's per-stage reviewer crew. |
 | `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction, structure, pick). |
-| `max_concurrency` | `4` | Seats asked at once. The chair has its own slot. |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
 | `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; an implement run is always in place. |
 | `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json`), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
@@ -281,6 +280,18 @@ Seats and the chair also take `provider`, `model` (`provider` without `model` is
 will not start a seat configured that way), and `persona`. An unknown model warns rather than
 failing the run. An implement builder seat also takes `role`: `code`, `prose`, or `both` (the default) —
 `prose` seats are handed prose stages only.
+
+### Per-provider `max_concurrency`
+
+`[providers.<name>]` caps one provider: `max_concurrency = N` is the total requests the provider
+takes at once, the chair's included — the chair keeps its own slot, so a provider that takes N runs
+the seats at N−1 when the chair sits on it. `max_concurrency = "auto"` reads the number the provider
+reports: the orchestrator takes the provider's endpoint from pi's `models.json` and reads the limit
+it serves (`max_num_seqs` on a radiance server); `mech-council doctor` checks it without convening.
+A provider no `[providers]` table names is uncapped: every seat on it may be in flight at once, and
+the provider queues the rest. A seat that names no provider (pi's default) can be neither capped nor
+probed — name the provider on the seat to cap it. When `auto` reads no limit, the provider runs
+uncapped and the run says so in a note.
 
 ### `implement`: plan, build, review, in place
 

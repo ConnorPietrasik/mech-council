@@ -1,11 +1,12 @@
-"""`mech-council doctor`: what a run needs on this host. Pi is probed with `--version`; no council is convened and no prompt is spent."""
+"""`mech-council doctor`: what a run needs on this host. Pi is probed with `--version`, the `auto`
+providers with their own limit report; no council is convened and no prompt is spent."""
 
 from __future__ import annotations
 
 import os
 import sys
 
-from . import cli
+from . import cli, probe
 from . import config as config_mod
 
 OK = "ok:   "
@@ -16,9 +17,10 @@ FAIL = "fail: "
 HELP = """\
 usage: mech-council doctor [flags]
 
-Check what a run needs on this host: fork, the config, pi, the namespaces the sandbox
-stands on, and the runs root. No council is convened and no prompt is spent: pi is probed with
-`--version`, the namespaces in a throwaway child.
+Check what a run needs on this host: fork, the config, pi, the auto providers, the
+namespaces the sandbox stands on, and the runs root. No council is convened and no prompt is
+spent: pi is probed with `--version`, an auto provider with its limit report, the namespaces in
+a throwaway child.
 
 flags:
   -p, --project <path>   project directory (default: the invoking cwd)
@@ -75,6 +77,7 @@ def _checks(project: str, parsed: cli.InspectArgs) -> list[str]:
             shape = _convene_all(loaded, project)
             lines.extend(_config(loaded, shape))
     lines.extend(_pi(loaded, shape, project))
+    lines.extend(_providers(loaded, shape))
     lines.extend(_namespaces())
     lines.extend(_runs_root(project))
     if nested := cli.check_nested_guard(False, environ):
@@ -135,6 +138,29 @@ def _pi(loaded: config_mod.ConfigFile | None, shape: list[tuple[str, config_mod.
         else:
             shown = f" — pi_cli = {value!r}" if value else ""
             lines.append(OK + f"pi {version} ({pi_cli}){shown}")
+    return lines
+
+
+def _providers(
+    loaded: config_mod.ConfigFile | None,
+    shape: list[tuple[str, config_mod.Council | None, str | None]],
+) -> list[str]:
+    """The `auto` providers a run would read, and whether they answer right now."""
+    if loaded is None:
+        return []
+    used: set[str] = set()
+    for _name, council, _refusal in shape:
+        if council is not None:
+            used.update(spec.provider for spec in (*council.agents, council.chair) if spec.provider)
+    lines: list[str] = []
+    for name, table in sorted(loaded.providers.items()):
+        if table.get("max_concurrency") != config_mod.AUTO or name not in used:
+            continue
+        limit, reason = probe.probe(name)
+        if limit is None:
+            lines.append(NOTE + f"provider {name!r} (auto): reports no limit ({reason}) — a run would leave it uncapped")
+        else:
+            lines.append(OK + f"provider {name!r} (auto): takes {limit} request(s) at once")
     return lines
 
 

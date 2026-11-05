@@ -18,6 +18,13 @@ STARTER = '''\
 # end — and `[chair]` merges key by key.  Precedence: built-in, `[defaults]`, the extended
 # chain nearest-first, this council, the flags.  A `_` name is a template: something to
 # extend, never something you convene.
+#
+# `[providers.<name>]` caps one provider: max_concurrency is the total requests it takes at
+# once, the chair's included, or "auto" to read the number the provider reports.  A provider
+# the table never names is uncapped: every seat on it may be in flight at once.
+#
+# [providers.omnissiah]
+# max_concurrency = "auto"
 
 [councils.review]                   # `mech-council review`
 mode = "review"
