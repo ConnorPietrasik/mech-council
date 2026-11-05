@@ -81,6 +81,14 @@ class Port:
         except ChairUnusable as failure:
             raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
 
+    async def chair_gate_check(self, message: str, *, round_: int = 0) -> tuple[bool, str, str]:
+        """The run's chair verifying a stage's gate: the crew's verdicts did not read, or there is no crew."""
+        try:
+            data = await self.chair.gate_check(message, round_=round_)
+        except ChairUnusable as failure:
+            raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
+        return bool(data.get("ok")), str(data.get("ran") or ""), str(data.get("evidence") or "")
+
     async def chair_merge(self, listing: str, *, round_: int) -> dict:
         try:
             return await self.chair.merge(listing, round_=round_)

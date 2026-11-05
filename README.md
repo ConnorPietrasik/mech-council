@@ -302,12 +302,14 @@ document the run's chair structures — a run with neither is refused, and eithe
 single builder build.
 
 `--plan <file>` skips the planning phase: the run's chair structures the document into gated
-stages and the run goes straight to building. A stage is a final state with a **gate** — a
-command the project can run that proves it; the gate is re-run by the run itself after each
-stage lands, and the stage only passes when it does and the review crew has nothing left to
+stages and the run goes straight to building. A stage is a final state with a **gate** — the
+check that proves it: a command, or a statement of what must be true. The review crew runs and
+verifies the gate at every review — the run never runs it itself, so a gate that is prose still
+works — and the stage only passes when the crew's verdict is pass and it has nothing left to
 report — it re-reports what it still finds, so a finding outlives the passes until it is fixed or
-withdrawn. A stage that names no gate has nothing to re-run: it passes when the review crew has
-nothing left to report. New text a stage needs (docs, release notes) lands in the same stage —
+withdrawn. When the crew's verdicts do not read, the run's chair verifies the gate itself. A
+stage that names no gate has nothing to verify: it passes when the review crew has nothing left
+to report. New text a stage needs (docs, release notes) lands in the same stage —
 the builder writes it and names it as `user_text` — and the report prints it. A `prose`-role
 stage whose whole artifact is user-visible text is handed only to the seats that can take prose.
 
@@ -319,8 +321,8 @@ both, the stage is **blocked** — the run keeps going over the rest of the plan
 build goes: `say_to` takes a seat ID, and the roster each prompt carries is how a seat learns
 them. The run's chair is on hand for structure, splits and stuck seats, and with
 `human = "blocking"` a blocked stage asks you whether to carry on or hold. The approval shows the
-adopted plan — every stage's final state and the gate that will run — so a `proceed` agrees to
-a plan, not a yes/no. The run's two calls of
+adopted plan — every stage's final state and the gate that will be checked — so a
+`proceed` agrees to a plan, not a yes/no. The run's two calls of
 its own — the approval before the first edit and the carry-on-or-hold on a blocked stage — take
 only an explicit selection: the option's number or its words, nothing else, since the run reads
 one bit from each and a qualifier in your own words is not a decision.

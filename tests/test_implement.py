@@ -386,37 +386,6 @@ def test_the_dirty_check_measures_only_the_project_tree(tmp_path):
         startup._implement_notes(council, Args())
 
 
-def test_the_gate_runs_off_the_loop_and_a_dead_run_kills_it(tmp_path):
-    """A long gate must not hold the loop — the watchdog and the second signal stay free while it
-    runs — and a run that ends leaves no gate behind: the command is its own session, and the run
-    kills that session."""
-    import asyncio
-    import types
-
-    from mech_council.deliberation.implement import Implement
-
-    host = types.SimpleNamespace(project=str(tmp_path), _gates=[])
-    for name in ("_run_gate", "_run_gate_thread", "_kill_gate", "_kill_gates"):
-        setattr(host, name, types.MethodType(getattr(Implement, name), host))
-
-    async def main():
-        gate = asyncio.ensure_future(host._run_gate("sleep 300"))
-        await asyncio.sleep(0.5)
-        assert host._gates, "the live gate is tracked while it runs"
-        heartbeats = 0
-        for _ in range(5):
-            await asyncio.sleep(0.2)  # a gate run on the loop would hold these
-            heartbeats += 1
-        host._kill_gates()
-        ok, _tail = await asyncio.wait_for(gate, 10)
-        return heartbeats, ok, len(host._gates)
-
-    heartbeats, ok, remaining = asyncio.run(main())
-    assert heartbeats == 5, "the loop stayed free while the gate ran"
-    assert ok is False, "a killed gate is a failed gate"
-    assert remaining == 0, "the run's exit leaves no gate tracked"
-
-
 # ------------------------------------------------------------ crew resolution
 
 
@@ -896,7 +865,14 @@ def test_a_fix_passs_user_text_gets_the_prose_rewrite(cli, project):
                 },
                 "write": [{"path": "fixed.txt", "text": "fixed\n"}, {"path": "docs.md", "text": "# raw docs by the coder\n"}],
             },
-            # the work pass names no user text: the gate fails, and the docs land on the fix pass
+            # the work pass names no user text: the chair re-verifies the gate each rung, failing once and
+            # passing after the fix lands — the docs land on the fix pass
+            {
+                "contains": "# Verify the stage's gate",
+                "once": True,
+                "reply": {"ok": False, "ran": "test -f fixed.txt", "evidence": "no such file"},
+            },
+            {"contains": "# Verify the stage's gate", "reply": {"ok": True, "ran": "test -f fixed.txt", "evidence": "ok"}},
             {
                 "contains": "# Your work",
                 "reply": {"summary": "built the app", "changed": ["app.py"], "open_issues": []},
@@ -1041,6 +1017,7 @@ def test_a_gate_that_never_passes_blocks_the_stage_and_the_run_ends_partial(cli,
                 "contains": "# Structure the plan",
                 "reply": {"stages": [{"state": "write the never file", "gate": "test -f never.md"}]},
             },
+            {"contains": "# Verify the stage's gate", "reply": {"ok": False, "ran": "test -f never.md", "evidence": "no such file"}},
             {
                 "contains": "# Your work",
                 "reply": {"summary": "tried", "changed": ["never.md"], "open_issues": []},
@@ -1440,6 +1417,7 @@ def test_a_blocked_stage_holds_when_the_human_says_hold(cli, project):
                     ]
                 },
             },
+            {"contains": "# Verify the stage's gate", "reply": {"ok": False, "ran": "test -f never.md", "evidence": "no such file"}},
             {"contains": "# Your work", "reply": {"summary": "tried", "changed": [], "open_issues": []}},
         ]
     )
@@ -1485,6 +1463,115 @@ def test_a_stage_with_no_gate_passes_on_the_review_alone(cli, project):
     assert "(no gate)" in report and "blocked" not in report
 
 
+def test_a_prose_gate_is_verified_by_the_review_crew_not_a_shell(cli, project):
+    """A gate that is prose — no shell could run it — still gates: the review crew verifies the
+    condition itself, and its verdict is what the run reads, not a shell's exit code."""
+    write_project_config(project, CONFIG.format(pi=PI))
+    commit_all(project)
+    script = json.dumps(
+        [
+            {
+                "contains": "## The stage",
+                "reply": {
+                    "new_items": [],
+                    "summary": "clean",
+                    "gate": {"ok": True, "ran": "the docs and the suite, checked by hand", "evidence": "all green"},
+                },
+            },
+            {
+                "contains": "Phase 0",
+                "reply": {
+                    "approach": {
+                        "claim": "the simple plan",
+                        "stages": [
+                            {
+                                "state": "write the hello module",
+                                "gate": "check that the docs mention the flag and the suite still passes",
+                            }
+                        ],
+                    }
+                },
+            },
+            {"contains": "Round ", "reply": {"positions": [], "signoff": True, "backing": "Agent1"}},
+            {"contains": "# Classify the stages", "reply": {"stages": [{"kind": "code"}]}},
+            {
+                "contains": "# Your work",
+                "reply": {"summary": "done", "changed": ["hello.py"], "open_issues": []},
+                "write": [{"path": "hello.py", "text": "print('hello')\n"}],
+            },
+        ]
+    )
+    result = cli(["build"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["outcome"] == "implemented"
+    report = result.artifact("implementation.md")
+    assert "check that the docs mention the flag" in report, "the prose gate is the stage's gate in the report"
+    passed = [record for record in result.events if record.get("event") == "implement_stage_passed"]
+    assert passed and "all green" in passed[0]["gate"], "the crew's verdict is what the run recorded, not a shell output"
+
+
+def test_gate_verdicts_aggregate_across_the_review_crew_and_the_chair_steps_in_when_none_read():
+    """One dissenting seat holds the stage open, and a crew with no readable verdict at all leaves
+    the gate to the run's chair — the orchestrator itself never runs the gate."""
+    import asyncio
+    import types
+    from typing import cast
+
+    from mech_council.deliberation.engine import RawAsk
+    from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.state import StageRecord
+    from mech_council.extraction import Extraction
+
+    def host_for():
+        host = types.SimpleNamespace(names={"Agent1": "Metic", "Agent2": "Senior"})
+        host._close_gate_item = lambda rec: None
+        host._ensure_gate_item = lambda rec: None
+        return host
+
+    def settled(gate_data):
+        return RawAsk(text="", failure=None, rejected=False, data=Extraction(data={"gate": gate_data}))
+
+    stage = {"state": "s", "gate": "pytest"}
+
+    rec = StageRecord(index=1, state="s", gate="pytest")
+    asyncio.run(
+        Implement._settle_gate(
+            cast("Implement", host_for()),
+            rec,
+            stage,
+            {
+                "Agent1": settled({"ok": True, "ran": "pytest", "evidence": "42 passed"}),
+                "Agent2": settled({"ok": False, "ran": "pytest", "evidence": "2 failed"}),
+            },
+        )
+    )
+    assert rec.gate_ok is False, "a dissenting seat vetoes the gate"
+    assert "Metic" in rec.gate_rerun and "Senior" in rec.gate_rerun, "the evidence carries both seats' accounts"
+
+    calls: list[dict] = []
+
+    async def chair_check(the_stage: dict):
+        calls.append(the_stage)
+        return False, "the chair ran pytest: 2 failed"
+
+    rec = StageRecord(index=2, state="s", gate="pytest")
+    host = host_for()
+    host._chair_gate_check = chair_check
+    asyncio.run(
+        Implement._settle_gate(
+            cast("Implement", host),
+            rec,
+            stage,
+            {
+                "Agent1": settled(None),  # the reply carried no gate slot: it is no verdict, not a pass
+                "Agent2": RawAsk(text="prose only", failure=None, rejected=True, data=None),
+            },
+        )
+    )
+    assert calls == [stage], "the chair checked the gate when the crew's verdicts did not read"
+    assert rec.gate_ok is False and rec.gate_rerun == "the chair ran pytest: 2 failed"
+
+
 def test_an_unreadable_builder_spends_the_ladder_instead_of_aborting_the_run(cli, project):
     """A builder reply that survives its repair re-asks unreadable does not abort the run: it spends
     a rung of the stage's ladders, and the stage blocks when they are spent."""
@@ -1497,6 +1584,7 @@ def test_an_unreadable_builder_spends_the_ladder_instead_of_aborting_the_run(cli
     script = json.dumps(
         [
             {"contains": "# Structure the plan", "reply": {"stages": [{"state": "write the never file", "gate": "test -f never.md"}]}},
+            {"contains": "# Verify the stage's gate", "reply": {"ok": False, "ran": "test -f never.md", "evidence": "no such file"}},
             {"contains": "# Fix pass", "reply": garble},
             {"contains": "# Replan", "reply": garble},
             {"contains": "# Your work", "reply": garble},
@@ -1570,8 +1658,9 @@ def test_a_standing_finding_is_re_reported_not_duplicated(cli, project):
 
 
 def test_a_stage_passes_on_its_gate_when_the_review_crew_is_unreadable(cli, project):
-    """Every reviewer unreadable after its repair re-asks: the stage still passes when its gate does,
-    but the run says so — the event, the console, and the report all name the missing check."""
+    """Every reviewer unreadable after its repair re-asks: the chair steps in to verify the gate, and
+    the stage still passes when the chair says it does — the run says so, the event, the console
+    and the report naming who checked."""
     write_project_config(project, CONFIG.format(pi=PI))
     commit_all(project)
     script = json.dumps(
@@ -1599,7 +1688,7 @@ def test_a_stage_passes_on_its_gate_when_the_review_crew_is_unreadable(cli, proj
     assert "implement_stage_review_unreadable" in result.kinds()
     assert "the final review was unreadable" in result.console
     report = result.artifact("implementation.md")
-    assert "the final review was unreadable" in report and "it passed on its gate alone" in report
+    assert "the final review was unreadable" in report and "the chair verified the gate, and it passed" in report
 
 
 def test_a_held_back_ask_ends_marked_unseconded_not_unasked():

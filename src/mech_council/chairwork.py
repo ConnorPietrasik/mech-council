@@ -42,6 +42,10 @@ class Chair:
         """The implement run's chair picking a direction the rules did not adopt: the message is already brief."""
         return await self._publication(message, kind="pick", phase="pick", round_=round_)
 
+    async def gate_check(self, message: str, *, round_: int) -> dict:
+        """The implement run's chair verifying a stage's gate: the reply must carry an explicit `ok`."""
+        return await self._publication(message, kind="gate_check", phase="gate_check", round_=round_)
+
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:
         refusal = "no JSON object"
         for attempt in (0, 1):

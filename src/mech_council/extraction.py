@@ -155,6 +155,7 @@ VERDICT_FIELDS = (
     "summary",
     "positions",
     "new_items",
+    "gate",
     "questions",
     "answers",
     "human_input",
@@ -188,6 +189,8 @@ PHASE0_FIELDS = (
 )
 MERGE_FIELDS = ("groups",)
 DIRECTION_FIELDS = ("question", "context")
+#: the chair's gate verification: the verdict, and what it saw
+GATE_CHECK_FIELDS = ("ok", "ran", "evidence")
 COMPARISON_FIELDS = ("agreed", "conflicts", "uncovered", "summary")
 WATCHDOG_FIELDS = ("decisions",)
 #: the builder's work and fix replies: the stage's result, as the orchestrator re-checks it
@@ -389,6 +392,32 @@ def map_severity(value: object) -> str:
     return "minor"
 
 
+def _gate_verdict(value: object, refused: list[dict[str, str]]) -> dict | None:
+    """A seat's verdict on a stage's gate: {ok, ran, evidence}, or None when it reported none."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        if pick(value, "ok") is None:
+            refused.append({"field": "gate", "why": "must carry an ok verdict", "counts": "not counted"})
+            return None
+        return {
+            "ok": _flag(pick(value, "ok"), "gate.ok", refused),
+            "ran": text_of(pick(value, "ran")),
+            "evidence": text_of(pick(value, "evidence")),
+        }
+    word = fold(text_of(value))
+    if word.startswith("pass") or word in YES_TOKENS:
+        ok = True
+    elif word.startswith("fail") or word in NO_TOKENS:
+        ok = False
+    else:
+        refused.append(
+            {"field": "gate", "said": text_of(value).strip(), "why": "must say whether the gate passed", "counts": "not counted"}
+        )
+        return None
+    return {"ok": ok, "ran": "", "evidence": text_of(value).strip()}
+
+
 def parse_verdict(
     payload: str,
     *,
@@ -461,6 +490,7 @@ def parse_verdict(
             }
         )
     out.data["new_items"] = clean_new
+    out.data["gate"] = _gate_verdict(pick(data, "gate"), out.refused)
 
     out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"), text=("answer", "text", "reply"))
     out.data["questions"] = _entries(pick(data, "questions"), ("to",), text=("question", "text", "ask"))
@@ -860,6 +890,21 @@ def parse_watchdog(payload: str) -> tuple[list[dict], list[str]]:
     return out, []
 
 
+def parse_gate_check(payload: str) -> Extraction:
+    """The chair's gate verification: the verdict, and what it ran and saw."""
+    data, error = find_json(payload, GATE_CHECK_FIELDS)
+    if data is None:
+        return Extraction(invalid=True, errors=[error or "no JSON object found"])
+    out = Extraction(data={})
+    if pick(data, "ok") is None:
+        out.errors.append("the gate check carries no `ok` verdict")
+    else:
+        out.data["ok"] = _flag(pick(data, "ok"), "ok", out.refused)
+    out.data["ran"] = text_of(pick(data, "ran"))
+    out.data["evidence"] = text_of(pick(data, "evidence"))
+    return out
+
+
 def parse_work(payload: str) -> Extraction:
     """A builder's work, fix or prose-pass reply: the stage's state as the builder reports it."""
     data, error = find_json(payload, WORK_FIELDS)
@@ -999,6 +1044,8 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
     if kind == "structure":
         plan, errors = parse_structure(text)
         return Extraction(data=(plan or {"stages": []}), invalid=plan is None, errors=errors)
+    if kind == "gate_check":
+        return parse_gate_check(text)
     if kind == "pick":
         picked, errors = parse_pick(text)
         return Extraction(data=(picked or {"backing": ""}), invalid=picked is None, errors=errors)

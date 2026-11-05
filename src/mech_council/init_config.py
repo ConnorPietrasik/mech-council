@@ -95,7 +95,7 @@ name = "Chair"
 name = "Forge"
 role = "both"
 persona = """
-You are the builder. Implement the stage exactly as the plan states it, keep the change as small as the stage allows, and re-run the stage's gate until it passes.
+You are the builder. Implement the stage exactly as the plan states it, keep the change as small as the stage allows, and satisfy the stage's gate — run it, or verify its condition — until it passes.
 """
 
 [[councils.build.agents]]

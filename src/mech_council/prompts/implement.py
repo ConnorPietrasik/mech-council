@@ -66,7 +66,7 @@ def work_schema() -> str:
 ```json
 {
   "summary": "what you did, in a few lines",
-  "gate_command": "the exact gate command you ran",
+  "gate_command": "what you ran (or checked) to satisfy the gate",
   "gate_output": "its last lines, as it printed them",
   "changed": ["the paths you created or modified"],
   "user_text": ["the paths of user-visible text you touched: help strings, docs, error messages"],
@@ -98,7 +98,7 @@ def structure_schema() -> str:
     return """\
 ```json
 {"stages": [{"state": "what is true when this stage is done",
-             "gate": "the command the project can run that proves it",
+             "gate": "the check that proves it — a command, or a statement of what must be true; the review crew runs and verifies it",
              "scope": "what it touches",
              "exceptions": ["where the obvious change is wrong"],
              "kind": "code|prose"}]}
@@ -145,14 +145,14 @@ def work_task(
     seats: list[tuple[str, str]] | None = None,
     human: str = "blocking",
 ) -> str:
-    """The builder's work ask: implement the stage, run its gate, report."""
+    """The builder's work ask: implement the stage, satisfy its gate, report."""
     from . import common
 
     parts = [
         "# Your work — one stage of the adopted plan",
         "",
         "You are the builder: the seat holding the baton. Implement the stage's final state,",
-        "run its gate, and report what you did.",
+        "satisfy its gate, and report what you did.",
         "",
         f"Goal: {goal}",
     ]
@@ -169,7 +169,10 @@ def work_task(
         parts += ["", messages_section(messages)]
     steps = [f"1. Implement stage {index} until its final state is reached."]
     if stage.get("gate"):
-        steps.append("2. Run its gate and let it pass; a gate you cannot make pass is an `open_issue`, not a lie.")
+        steps.append(
+            "2. Satisfy its gate — run it, or verify its condition — and let it pass; a gate you cannot make pass is an `open_issue`, "
+            "not a lie. The review crew re-verifies it independently."
+        )
     steps.append(f"{len(steps) + 1}. Report with the work shape.")
     parts += [
         "",
@@ -206,14 +209,14 @@ def fix_task(
         "# Fix pass — stage is not done",
         "",
         f"You built stage {index} of {total}; the review crew found what is still wrong. This is fix pass "
-        f"{pass_number}. Address the items, re-run the gate, and report.",
+        f"{pass_number}. Address the items, satisfy the gate again, and report.",
         "",
         f"Goal: {goal}",
         "",
         stage_block(index, total, stage),
     ]
     if gate_output:
-        parts += ["", "The gate's last output:", "```", gate_output, "```"]
+        parts += ["", "The last gate verdict:", "```", gate_output, "```"]
     parts += ["", "## The findings"]
     for item in items:
         line = f"- {item['id']}: {item['claim']}"
@@ -226,7 +229,7 @@ def fix_task(
         parts += ["", messages_section(messages)]
     steps = ["1. Address every finding — or show, with cited evidence, that it is wrong."]
     if stage.get("gate"):
-        steps.append("2. Re-run the stage's gate; it must pass.")
+        steps.append("2. Satisfy the stage's gate again — re-run it, or re-verify its condition; it must pass.")
     steps.append(f"{len(steps) + 1}. Report with the work shape: `addressed` names each item and what you did about it.")
     parts += [
         "",
@@ -276,7 +279,7 @@ def replan_task(
                 line += f" — {item['evidence']}"
             parts.append(line)
     if gate_output:
-        parts += ["", "The gate's last output:", "```", gate_output, "```"]
+        parts += ["", "The last gate verdict:", "```", gate_output, "```"]
     if seats:
         parts += ["", seat_roster(seats)]
     if messages:
@@ -329,7 +332,7 @@ def prose_task(
         parts += ["", messages_section(messages)]
     steps = ["1. Rewrite only the user-visible text of the listed surfaces."]
     if stage.get("gate"):
-        steps.append("2. Re-run the stage's gate; it must still pass.")
+        steps.append("2. Satisfy the stage's gate again — re-run it, or re-verify its condition; it must still pass.")
     steps.append(f"{len(steps) + 1}. Report with the work shape: `changed` names the surfaces you rewrote.")
     parts += [
         "",
@@ -370,6 +373,26 @@ def pick_task(goal: str, directions: list[tuple[str, str]]) -> str:
     )
 
 
+def chair_gate_task(*, gate: str, state: str, project: str) -> str:
+    """The run's chair, verifying a stage's gate when the review crew's verdicts did not read."""
+    from . import common
+
+    return "\n".join(
+        [
+            "# Verify the stage's gate",
+            "",
+            f"You are the chair of an implement run over `{project}`. The stage's final state is: {state}",
+            f"Its gate is: {gate}",
+            "",
+            "Run the gate — or verify its condition by other means — yourself, in the project, and report the",
+            "verdict. Do not edit anything: you only check.",
+            "",
+            common.ANSWER_SHAPE,
+            '```json\n{"ok": true, "ran": "what you ran or checked", "evidence": "its last lines"}\n```\n',
+        ]
+    )
+
+
 def structure_task(document: str, goal: str) -> str:
     """The run's chair, structuring a `--plan` document into the gated stages the run builds."""
     from . import common
@@ -380,8 +403,9 @@ def structure_task(document: str, goal: str) -> str:
             "",
             "You are the chair of an implement run. The human gave a plan document instead of convening the",
             "planners; structure it into the gated stages the run builds, in the document's order. Keep the",
-            "document's scope. A gate is a command the project can run — give a stage that lacks one a gate,",
-            "and say so where you had to invent it.",
+            "document's scope. A gate is the check that proves the stage's final state — a command, or a",
+            "statement of what must be true; the review crew runs and verifies it. Give a stage that lacks",
+            "one a gate, and say so where you had to invent it.",
             "",
             f"Goal: {goal}",
             "",

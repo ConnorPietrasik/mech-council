@@ -13,7 +13,7 @@ added, because a key it does not mention is a key a test author will not find:
 {"contains": "Phase 0", "index": 0, "reply": {...} or "raw text", "text": "...", "wrap": true, "sidechain": true,
  "thinking": "...", "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}],
  "write": [{"path": "f.py", "text": "..."}],
- "sleep": 30, "stderr": "...", "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...",
+ "once": true, "sleep": 30, "stderr": "...", "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...",
  "no_settle": true, "aborted": true}
 """
 
@@ -39,6 +39,7 @@ DEFAULT_CHAIR: tuple[tuple[str, dict[str, object]], ...] = (
     ("# Deduplicate", {"groups": []}),
     ("# Fold the asks", {"groups": []}),
     ("# Compare the plans", {"agreed": [], "conflicts": [], "uncovered": []}),
+    ("# Verify the stage's gate", {"ok": True, "ran": "the gate", "evidence": "ok"}),
 )
 
 
@@ -57,6 +58,10 @@ def say(record: dict) -> None:
     sys.stdout.flush()
 
 
+#: a `once` entry fires for one prompt only: consumed, and gone from later matches.
+CONSUMED: set[int] = set()
+
+
 def scripted(prompt: str, index: int):
     """The first script entry whose `contains` matches, or the index-default reply."""
     default = {"reply": default_reply(prompt)}
@@ -68,8 +73,12 @@ def scripted(prompt: str, index: int):
     except json.JSONDecodeError:
         return default
     entries = script if isinstance(script, list) else script.get("behaviours", [])
-    for entry in entries:
+    for pos, entry in enumerate(entries):
+        if pos in CONSUMED:
+            continue
         if index >= int(entry.get("index", 0)) and (entry.get("contains") or "") in prompt:
+            if entry.get("once"):
+                CONSUMED.add(pos)
             return entry
     return default
 

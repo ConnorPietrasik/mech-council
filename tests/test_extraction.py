@@ -11,6 +11,7 @@ from mech_council.extraction import (
     parse_ask_merge,
     parse_comparison,
     parse_direction,
+    parse_gate_check,
     parse_merge_plan,
     parse_phase0,
     parse_verdict,
@@ -329,6 +330,39 @@ def test_the_verdict_names_the_asks_it_wants_the_run_to_wait_for():
     assert out.data["blocking_for"] == ["H1", "H2"]
     spelled = parse(verdict(**positions(("F1", "agree")), blocking=["H3"]))
     assert spelled.data["blocking_for"] == ["H3"], "`blocking` at the top level is the stop, not the entry's flag"
+
+
+def test_the_verdict_carries_the_gate_verdict_when_the_seat_reports_one():
+    """The stage review's gate slot: the crew's verdict on the stage's gate, or None when it is no verdict."""
+    out = parse(verdict(**positions(("F1", "agree")), gate={"ok": True, "ran": "pytest -x", "evidence": "42 passed"}))
+    assert out.data["gate"] == {"ok": True, "ran": "pytest -x", "evidence": "42 passed"}
+    silent = parse(verdict(**positions(("F1", "agree"))))
+    assert silent.data["gate"] is None, "a reply with no gate slot is no verdict, not a pass"
+
+
+def test_a_gate_verdict_without_an_ok_is_refused_not_guessed():
+    out = parse(verdict(**positions(("F1", "agree")), gate={"ran": "pytest -x", "evidence": "42 passed"}))
+    assert out.data["gate"] is None
+    assert any(entry["field"] == "gate" for entry in out.refused)
+
+
+def test_a_bare_word_gate_verdict_reads_as_a_verdict():
+    passed = parse(verdict(**positions(("F1", "agree")), gate="passed: 42 tests ok"))
+    assert passed.data["gate"] == {"ok": True, "ran": "", "evidence": "passed: 42 tests ok"}
+    failed = parse(verdict(**positions(("F1", "agree")), gate="failed: 2 errors"))
+    assert failed.data["gate"]["ok"] is False
+    vague = parse(verdict(**positions(("F1", "agree")), gate="hmm, probably fine"))
+    assert vague.data["gate"] is None, "a shrug is no verdict"
+    assert any(entry["field"] == "gate" for entry in vague.refused)
+
+
+def test_the_gate_check_reads_the_verdict_and_what_the_chair_saw():
+    out = parse_gate_check(verdict(ok=True, ran="ruff check .", evidence="All checks passed"))
+    assert not out.invalid and out.data == {"ok": True, "ran": "ruff check .", "evidence": "All checks passed"}
+    worded = parse_gate_check(verdict(ok="no", ran="pytest", evidence="boom"))
+    assert worded.data["ok"] is False
+    missing = parse_gate_check(verdict(ran="pytest", evidence="boom"))
+    assert missing.errors, "no `ok` is an unreadable gate check, not a silent no"
 
 
 def test_an_ask_answer_written_as_a_bare_object_still_names_its_ask():

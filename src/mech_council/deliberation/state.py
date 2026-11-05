@@ -208,12 +208,12 @@ class StageRecord:
     scope: str = ""
     kind: str = "code"  # code | prose
     builder: str = ""  # the global id that held the baton
-    review_blind: bool = False  # the last review pass was unreadable: the stage passed on its gate alone
+    review_blind: bool = False  # the last review pass was unreadable: the gate's chair check is the only verdict
     prose_pass: bool = False
     status: str = "pending"  # pending | passed | blocked
     gate_output: str = ""  # what the builder reported
-    gate_rerun: str = ""  # what the orchestrator's re-run said
-    gate_ok: bool = False  # the last orchestrator re-run
+    gate_rerun: str = ""  # what the gate's verifier last said
+    gate_ok: bool = False  # the last gate verdict
     findings: list[str] = field(default_factory=list)  # the stage's review item ids, in the order raised
     gate_item: str = ""  # the synthetic "the gate fails" item, while it stands
     open_items: list[str] = field(default_factory=list)  # what the builder left open

@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import signal
 import subprocess
 
 from ..console import Console
@@ -19,7 +18,7 @@ from ..extraction import Extraction, parse_replan, parse_work
 from ..humaninput import Checkpoint
 from ..port import Port
 from ..prompts import implement as impl_text
-from .engine import Abort, CheckpointOutcome, Engine
+from .engine import Abort, CheckpointOutcome, Engine, RawAsk
 from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
 from .notes import mark_shown, raise_note, unshown
 from .state import (
@@ -42,12 +41,12 @@ from .state import (
 )
 from .termination import direction_rule, unsettled_questions
 
-_GATE_TIMEOUT_S = 1800
-_GATE_OUTPUT_CAP = 4000
 _DIFF_CAP = 12000
 _FILE_CAP = 4000
 #: the snapshot's git calls walk the worktree, so they get a long leash
 _SNAPSHOT_TIMEOUT_S = 600
+#: how much of the verifier's account of the gate a stage carries: the prompts and the report
+_GATE_EVIDENCE_CAP = 2000
 
 #: a work reply that carried nothing: what the run reads of a pass that was unreadable after its repairs
 _NO_WORK: dict = {
@@ -65,7 +64,7 @@ _NO_WORK: dict = {
 
 def blind_note(rec: StageRecord) -> str:
     """The line the console and the report share for a stage that passed while the review was unreadable."""
-    tail = "it passed on its gate alone" if rec.gate else "it named no gate, so nothing else checked the tree"
+    tail = "the chair verified the gate, and it passed" if rec.gate else "it named no gate, so nothing else checked the tree"
     return f"stage {rec.index}: the final review was unreadable — {tail}"
 
 
@@ -80,7 +79,7 @@ def _fold(text: object, cap: int) -> str:
 
 def approval_context(stages: list[dict]) -> str:
     """The approval's context: the no-commit line and the adopted plan, stage by stage, so the
-    human agrees to a plan — what lands and which gates run — not a bare yes/no."""
+    human agrees to a plan — what lands and which gates will be checked — not a bare yes/no."""
     lines = [
         "the run will edit the project in place, stage by stage, and never commits; you review the diff when it is done",
         " " * 13 + f"the adopted plan, in build order — {len(stages)} stage(s):",
@@ -140,7 +139,6 @@ class Implement:
         self.execution = execution
         self.stages: list[dict] = []
         self._asked_of_human: set[str] = set()  # asks a checkpoint put in front of the human
-        self._gates: list[subprocess.Popen] = []  # live gate subprocesses, each in its own session
         self.run_dir = crews["builder"].run_dir
         self.baseline: str | None = None  # the tree the run starts from, or None without git
         self.last_tree: str | None = None  # the previous review's snapshot
@@ -153,7 +151,6 @@ class Implement:
             return await self._run()
         finally:
             self._unsent_messages()
-            self._kill_gates()
 
     def _unsent_messages(self) -> None:
         """A say_to line whose target never got another prompt: said out loud, kept in the report."""
@@ -588,20 +585,12 @@ class Implement:
         )
         data = await self._work_pass(rec, stage)
         await self._maybe_prose_pass(rec, stage, data)
-        rec.gate_ok, rec.gate_rerun = await self._run_gate(stage.get("gate", ""))
-        if rec.gate_ok:
-            self._close_gate_item(rec)
         findings = await self._stage_review(rec, stage=stage, changed=[*data["changed"], *data["user_text"]])
         fix_pass = 0
         while (findings or not rec.gate_ok) and fix_pass < self.fix_budget:
             fix_pass += 1
-            if not rec.gate_ok:
-                self._ensure_gate_item(rec)
             data = await self._fix_pass(rec, stage, self._stage_items(rec), fix_pass)
             await self._maybe_prose_pass(rec, stage, data)
-            rec.gate_ok, rec.gate_rerun = await self._run_gate(stage.get("gate", ""))
-            if rec.gate_ok:
-                self._close_gate_item(rec)
             findings = await self._stage_review(rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"))
         replan = 0
         while (findings or not rec.gate_ok) and replan < self.replans:
@@ -615,11 +604,6 @@ class Implement:
                 sub["kind"] = stage.get("kind") or "code"
             data = await self._fix_pass(rec, stage, self._stage_items(rec), fix_pass + replan, revised=revised)
             await self._maybe_prose_pass(rec, stage, data)
-            if not rec.gate_ok:
-                self._ensure_gate_item(rec)
-            rec.gate_ok, rec.gate_rerun = await self._run_gate(stage.get("gate", ""))
-            if rec.gate_ok:
-                self._close_gate_item(rec)
             findings = await self._stage_review(rec, stage=stage, changed=data["changed"], addressed=data.get("addressed"))
         if findings or not rec.gate_ok:
             return await self._block_stage(rec)
@@ -685,7 +669,7 @@ class Implement:
                 "# The revised stage — one fix pass of its own",
                 "",
                 f"Stage {rec.index}/{len(self.stages)} is stuck, so it was replanned into a smaller breakdown. Implement it, address the",
-                "standing findings, and re-run the stage's gate.",
+                "standing findings, and satisfy the stage's gate again.",
                 "",
                 f"Goal: {self.goal}",
                 "",
@@ -696,7 +680,7 @@ class Implement:
             parts += ["", "## The findings still standing"]
             parts += [f"- {item['id']}: {item['claim']}" + (f" — {item['evidence']}" if item.get("evidence") else "") for item in items]
             if rec.gate_rerun:
-                parts += ["", "The gate's last output:", "```", rec.gate_rerun, "```"]
+                parts += ["", "The last gate verdict:", "```", rec.gate_rerun, "```"]
             parts += ["", impl_text.seat_roster(seats)]
             if messages:
                 parts += ["", impl_text.messages_section(messages)]
@@ -705,7 +689,7 @@ class Implement:
                 "2. Address every standing finding — or show, with cited evidence, that it is wrong.",
             ]
             if stage.get("gate"):
-                steps.append(f"{len(steps) + 1}. Re-run the stage's gate; it must pass.")
+                steps.append(f"{len(steps) + 1}. Satisfy the stage's gate again — re-run it, or re-verify its condition; it must pass.")
             steps.append(f"{len(steps) + 1}. Report with the work shape: `addressed` names each item and what you did about it.")
             parts += [
                 "",
@@ -822,7 +806,7 @@ class Implement:
             index=rec.index,
             total=len(self.stages),
             surfaces=surfaces,
-            gate_output=rec.gate_output,  # the builder's last run of it: the orchestrator's re-run has not happened yet
+            gate_output=rec.gate_output,  # the builder's report of the gate from its last pass
             messages=self._drain(prose) or None,
             seats=self._seats(prose),
         )
@@ -849,9 +833,11 @@ class Implement:
         changed: list[str],
         addressed: list[dict] | None = None,
     ) -> list[str]:
-        """The review crew's scoped pass: one review round over the stage's diff, the findings onto the shared docket."""
+        """The review crew's scoped pass: one review round over the stage's diff — and the gate, which the crew runs —
+        the findings onto the shared docket, the gate verdict onto the stage record."""
         crew = self.crews.reviewer
         if crew is None or crew.brief is None:
+            await self._settle_gate(rec, stage, {})
             return []
         brief = crew.brief
         diff = await self._stage_diff(changed)
@@ -860,7 +846,7 @@ class Implement:
             "## The stage",
             "",
             f"Stage {rec.index}/{len(self.stages)} — final state: {stage.get('state', '')}",
-            self._review_gate_line(rec, stage),
+            self._review_gate_section(rec, stage),
         ]
         open_findings = self._standing_items(rec)
         if open_findings:
@@ -937,10 +923,11 @@ class Implement:
                 raise_note(self.docket, by=agent, text=str(note)[:600], item_id=None, round_=rec.index)
             for line in parsed.data.get("say_to") or []:
                 self.docket.queue_message(to=line["to"], from_=agent, text=line["text"], stage=rec.index)
-        # every seat's verdict came back unreadable: the review saw nothing, so the gate is the only check
+        # every seat's verdict came back unreadable: the review saw nothing, and the gate with it
         rec.review_blind = all(result.rejected for result in results.values())
         if rec.review_blind:
             self.emit("implement_stage_review_unreadable", stage=rec.index)
+        await self._settle_gate(rec, stage, results)
         if new_ids:
             rec.findings.extend(new_ids)
             self.emit("implement_stage_findings", stage=rec.index, findings=new_ids)
@@ -963,11 +950,67 @@ class Implement:
         return None
 
     @staticmethod
-    def _review_gate_line(rec: StageRecord, stage: dict) -> str:
+    def _review_gate_section(rec: StageRecord, stage: dict) -> str:
+        """The review's gate ask: run the stage's gate yourself, and report the verdict in the reply."""
         gate = stage.get("gate", "")
         if not gate:
-            return "Gate: none named — nothing to re-run, the review is the check"
-        return f"Gate: {gate}" + (f" — last output:\n```\n{rec.gate_rerun}\n```" if rec.gate_rerun else "")
+            return "Gate: none named — the review is the check"
+        parts = [
+            f"Gate: {gate}",
+            "",
+            "Run the gate yourself — or verify its condition by other means — and report the verdict in your reply:",
+            '```json\n"gate": {"ok": true, "ran": "what you ran or checked", "evidence": "its last lines"}\n```',
+        ]
+        if rec.gate_output:
+            parts += ["", f"The builder says it saw: {_fold(rec.gate_output, 1000)}"]
+        if rec.gate_rerun:
+            parts += ["", "The last verdict:", "```", rec.gate_rerun, "```"]
+        return "\n".join(parts)
+
+    async def _settle_gate(self, rec: StageRecord, stage: dict, results: dict[str, RawAsk]) -> None:
+        """The stage's gate, as its verifier read it: the crew's verdicts, or the chair's when none read.
+
+        The gate item follows the verdict: closed when it passes, standing while it fails.
+        """
+        gate = stage.get("gate", "")
+        if not gate:
+            rec.gate_ok, rec.gate_rerun = True, ""
+            self._close_gate_item(rec)
+            return
+        verdicts: list[tuple[str, bool, str, str]] = []
+        for agent, result in results.items():
+            if result.rejected or result.data is None:
+                continue
+            parsed = result.data.data.get("gate") if isinstance(result.data, Extraction) else None
+            if not isinstance(parsed, dict):
+                continue
+            verdicts.append(
+                (
+                    self.names.get(agent, agent),
+                    bool(parsed["ok"]),
+                    str(parsed.get("ran") or ""),
+                    str(parsed.get("evidence") or ""),
+                )
+            )
+        if verdicts:
+            rec.gate_ok = all(passed for _, passed, _, _ in verdicts)
+            lines = [f"{who}: {ran or 'no run reported'}" + (f" — {evidence}" if evidence else "") for who, _, ran, evidence in verdicts]
+            rec.gate_rerun = _fold("\n".join(lines), _GATE_EVIDENCE_CAP)
+        else:
+            rec.gate_ok, rec.gate_rerun = await self._chair_gate_check(stage)
+        if rec.gate_ok:
+            self._close_gate_item(rec)
+        else:
+            self._ensure_gate_item(rec)
+
+    async def _chair_gate_check(self, stage: dict) -> tuple[bool, str]:
+        """The gate's fallback verifier: the run's chair, when the crew's verdicts did not read."""
+        port = self._port(self.crews["builder"])
+        ok, ran, evidence = await port.chair_gate_check(
+            impl_text.chair_gate_task(gate=stage.get("gate", ""), state=stage.get("state", ""), project=self.project),
+            round_=self.docket.round,
+        )
+        return ok, _fold(" ".join(part for part in (ran, evidence) if part), _GATE_EVIDENCE_CAP)
 
     def _drain(self, agent_id: str) -> list[dict]:
         return [{"to": m.to, "from_": m.from_, "text": m.text} for m in self.docket.drain_messages(agent_id)]
@@ -1065,7 +1108,7 @@ class Implement:
         item = Item(
             id=self._new_c(),
             claim=f"the stage's gate fails: {rec.gate or '(none named)'}",
-            detail="the orchestrator re-ran the stage's gate and it did not pass",
+            detail="the stage's gate was verified and it did not pass",
             evidence=rec.gate_rerun,
             severity="major",
             raised_by=[CHAIR_ID],
@@ -1105,56 +1148,7 @@ class Implement:
                 item.disposition = AGREED
                 item.closed_round = rec.index
 
-    # ------------------------------------------------------------- the gate and the diff
-
-    async def _run_gate(self, command: str) -> tuple[bool, str]:
-        """The stage's gate, off the loop: a long gate must not hold the watchdog, the human's
-        lines or the second signal. It runs in its own session, so the run's exit can kill the
-        whole tree the command spawned."""
-        return await asyncio.to_thread(self._run_gate_thread, command)
-
-    def _run_gate_thread(self, command: str) -> tuple[bool, str]:
-        if not (command or "").strip():
-            return True, ""  # a stage that names no gate has nothing to prove: the review crew is the check
-        try:
-            proc = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=self.project,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-            )
-        except OSError as failure:
-            return False, f"(the gate could not run: {failure})"
-        self._gates.append(proc)
-        try:
-            out, err = proc.communicate(timeout=_GATE_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            self._kill_gate(proc)
-            with contextlib.suppress(TimeoutError, OSError):
-                proc.wait(timeout=5)
-            return False, f"(the gate timed out after {_GATE_TIMEOUT_S}s)"
-        finally:
-            if proc in self._gates:
-                self._gates.remove(proc)
-        tail = ((out or "") + (err or "")).strip()[-_GATE_OUTPUT_CAP:]
-        if not tail:
-            tail = f"(exit {proc.returncode})"
-        return proc.returncode == 0, tail
-
-    def _kill_gate(self, proc: subprocess.Popen) -> None:
-        """The gate is the session leader, so its pid is the pgid of everything it spawned."""
-        if proc.poll() is None:
-            with contextlib.suppress(OSError):
-                os.killpg(proc.pid, signal.SIGKILL)
-
-    def _kill_gates(self) -> None:
-        """The run is ending: no gate outlives it."""
-        for proc in self._gates:
-            self._kill_gate(proc)
-        self._gates.clear()
+    # ------------------------------------------------------------- the diff
 
     def _git(self, *args: str, env: dict | None = None, timeout: float = 60) -> tuple[bool, str]:
         try:
