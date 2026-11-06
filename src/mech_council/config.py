@@ -787,7 +787,6 @@ def _crew_reference(config: ConfigFile, name: str, flat: dict) -> None:
 def resolve_crews(config: ConfigFile, council: Council, args: Args) -> list[tuple[str, Council]]:
     """The implement run's crews in crew order: `(label, council)` — planner, builder, reviewer.
 
-    A borrowed council contributes its roster, chairs and personas — the run's knobs and posture apply to it.
     Seats take global `AgentN` ids in crew order; borrowed seats are shown with a crew suffix.
     """
     crews: list[tuple[str, Council]] = []
@@ -820,8 +819,8 @@ def resolve_crews(config: ConfigFile, council: Council, args: Args) -> list[tupl
 def _borrow(config: ConfigFile, run: Council, name: str) -> Council:
     """The referenced council as a crew: its roster, chair and personas under the run's knobs.
 
-    The run's goal rides in on the convene, not a patch after it: a plan council that states no goal
-    of its own is refused at convening before one could be set.
+    The goal rides in on the convene, not a patch after: a plan council that states no goal of its
+    own is refused at convening before one could be set.
     """
     crew = convene_without_pi(config, name, Args(goal=run.goal), run.project, untrusted=run.untrusted)
     crew.max_rounds = run.max_rounds

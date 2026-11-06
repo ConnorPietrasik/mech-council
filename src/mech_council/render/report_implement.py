@@ -172,7 +172,7 @@ def _landed(context: ReportContext, run_dir: str) -> list[Block]:
         env = {**os.environ, **snapshot_env(run_dir)} if run_dir else None
         try:
             proc = subprocess.run(args, check=False, capture_output=True, text=True, timeout=60, env=env)
-            # one code line: the report's inline code is single-line, and the stat's alignment padding and + - bar read as noise
+            # one code line: inline code is single-line, and the stat's padding and + - bar read as noise
             stat = " · ".join(_stat_line(line) for line in (proc.stdout or "").splitlines() if line.strip())[:_DIFFSTAT_CAP]
             if proc.returncode == 0 and stat:
                 blocks.append(Paragraph(T((stat, "code"))))

@@ -28,7 +28,7 @@ def _write_map(pid: int) -> None:
 def spawn_orchestrator(body, *, name: str = "orchestrator", in_place: bool = False) -> int:
     ack_read, ack_write = os.pipe()  # child → parent: "I am inside"
     go_read, go_write = os.pipe()  # parent → child: "you are mapped"
-    # a fork copies unflushed buffers; both processes would write the parent's
+    # a fork copies unflushed buffers; both processes would write them
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(Exception):
             stream.flush()

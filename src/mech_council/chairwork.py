@@ -64,7 +64,7 @@ class Chair:
                 self.console.event("chair_unreadable", phase=phase, round=round_, reason=refusal, restart=True)
                 self.console.say(f"chair {phase} pass unreadable ({refusal}) — a digest, then a restart, then one re-run")
                 await self.digest(self.lanes.digest())
-                # a borrowed crew's chair sits under a crew-suffixed base; `chair` is a different crew's member
+                # a borrowed crew's chair is crew-suffixed; `chair` alone would name the run's own
                 await self.lanes.restart_member(self.council.chair.file_base, why=f"unreadable {phase} pass")
         raise ChairUnusable(phase, round_, f"{refusal} — unreadable after repair re-asks, a digest, a restart and one re-run")
 

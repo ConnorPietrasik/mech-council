@@ -280,7 +280,7 @@ async def orchestrate(launch, sandbox) -> int:
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
     finally:
-        # prompt counts while the lanes are still reachable; a disposed crew's counts were stashed at dispose
+        # prompt counts while the lanes are still reachable; a disposed crew stashed its counts at dispose
         crew_prompts: list[tuple[str, dict]] = []
         if is_implement and crews is not None:
             for label in crews.order:

@@ -1,9 +1,7 @@
-"""Crews: the implement run's multiple rosters, each with its own members, lanes and chair.
+"""The implement run's rosters: the builder's own council plus the borrowed planner and reviewer crews.
 
-A crew is a council of its own — spawn, track and dispose at phase boundaries. The run's
-crews hold the implement council's own seats (the builders, with the run's chair) and the
-borrowed councils' (the planners, the reviewers). Seats wear the run's global `AgentN` ids;
-`Lanes` span the live crews through `CrewLanes`.
+A crew is a council of its own, spawned and disposed at phase boundaries. Seats wear the run's
+global `AgentN` ids; `CrewLanes` spans the live crews' `Lanes`.
 """
 
 from __future__ import annotations
@@ -201,9 +199,8 @@ class Crews:
     async def send_message(self, key: str, message: str, *, round_: int, phase: str) -> Outcome:
         """The human's direct message, routed across the run: a crew's chair by file_base, a seat by its global id.
 
-        The checkpoint is shown every crew's names, so the target may sit in a crew that is not up yet
-        (the builders before the build, the reviewers before their first stage) or has disposed already
-        (the planners after the plan): refusing is the cheap path, waking a crew is not.
+        The checkpoint is shown every crew's names, so the target may sit in a crew not up yet or already
+        disposed: refusing is the cheap path, waking a crew is not.
         """
         who = self.names().get(key, key)
         for label in self.order:

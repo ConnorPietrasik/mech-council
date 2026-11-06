@@ -1,8 +1,7 @@
 """The report's document: the content every presenter formats.
 
 A report is a title, the run's metadata, and a flat list of blocks. Inline text is a list of
-styled segments, so a document never carries one format's markup — the presenters apply their
-own styling and their own escaping.
+styled segments, so a document carries no format's markup: the presenters style and escape.
 """
 
 from __future__ import annotations

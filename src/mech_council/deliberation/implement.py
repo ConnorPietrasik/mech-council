@@ -1,8 +1,7 @@
 """The implement run's spine: plan, approval, staged build with the baton, and the outcome.
 
 The crews stay up and down at phase boundaries; this class decides when. The shared docket
-holds the run's items (the stage reviews' findings), its questions and its `say_to` lines,
-so the report reads one docket for the whole run.
+holds the run's items, its questions and its `say_to` lines, so the report reads one docket.
 """
 
 from __future__ import annotations
@@ -415,8 +414,8 @@ class Implement:
                 question.markers.append(NO_HUMAN)
             self.execution.approval = "recorded"
             return True
-        # the run's own gate, raised by the chair: the seconding bar is for the seats' asks, so the
-        # question is shown whether or not it would clear it; a hold still lands in the report, not a refusal
+        # the run's own gate: the seconding bar is for the seats' asks, so the question is shown
+        # whether or not it would clear it; a hold still lands in the report, not a refusal
         await self._checkpoint(terminal=False, waiting=self.human == "blocking", forced=question)
         if self.human != "blocking":
             if NOT_WAITED not in question.markers:
@@ -429,12 +428,9 @@ class Implement:
 
     @staticmethod
     def _picked(question: Question, option_number: int) -> bool:
-        """The explicit pick of option N: its number, its own words and nothing else, or on a
-        two-option question a bare yes-word, which picks the first option.
-
-        A number is stored as the option's words, so the words are all there is to compare. A
-        free-text qualifier is not a decision: the run reads one bit from its own gates and
-        applies nothing else, so anything that does not say the option is no pick of it.
+        """The explicit pick of option N: its own words, or on a two-option question a bare
+        yes-word, which picks the first option. A number is stored as the option's words, so the
+        words are all there is to compare; a free-text qualifier is no pick of it.
         """
         answer = (question.answer or "").strip().casefold()
         if not answer:
@@ -452,7 +448,7 @@ class Implement:
 
         `forced` is the run's own gate (the approval): shown whether or not the seconding bar holds it back.
         A stage boundary is the run's round boundary: what the human typed while the build worked is
-        drained here, the way the engine drains at its own.
+        drained here, as the engine drains at its rounds.
         """
         drained = await self.checkpoint.drain()
         if drained.answers or drained.skipped or drained.recommendations:
@@ -865,8 +861,8 @@ class Implement:
         pass_number: int,
         addressed: list[dict] | None = None,
     ) -> list[str]:
-        """The review crew's scoped pass: one review round over the stage's diff — and the gate, which the crew runs —
-        the findings onto the shared docket, the gate verdict onto the stage record. `pass_number` is the
+        """The review crew's scoped pass: one review round over the stage's diff, the gate run by the crew.
+        The findings land on the shared docket, the gate verdict on the stage record. `pass_number` is the
         builder pass just reviewed: a finding holds the stage open only while its severity holds it there."""
         crew = self.crews.reviewer
         if crew is None or crew.brief is None:
@@ -966,7 +962,7 @@ class Implement:
         if held_new:
             rec.findings.extend(held_new)
         for item_id in [i for i in new_ids + re_reported if i not in held_new + held_standing]:
-            # the finding is on the docket and in the report, but it no longer holds the stage: out of the stage's own record
+            # it stays on the docket and in the report, but no longer holds the stage: out of the stage's record
             if item_id in rec.findings:
                 rec.findings.remove(item_id)
             item = self.docket.items[item_id]
@@ -1092,8 +1088,7 @@ class Implement:
             options=["carry on", "hold"],
             context="the stage's findings are on the docket; the later stages still build on top of what has landed",
         )
-        # the run's own gate, like the approval: the seconding bar is for the seats' asks, so the
-        # question is shown whether or not it would clear it
+        # the run's own gate, like the approval: shown whether or not the seconding bar would clear it
         await self._checkpoint(terminal=False, waiting=True, forced=question)
         held = question.state == ANSWERED and self._picked(question, 2)
         if held:
@@ -1226,10 +1221,10 @@ class Implement:
     def _snapshot_tree(self) -> str | None:
         """The project's worktree as a tree object, in the run directory's private index and object store.
 
-        The add is scoped to the project directory: a project that is a subdirectory of a larger
-        repo snapshots only what the run may touch. The index persists across the run's snapshots,
-        so the stat cache skips files the builder did not touch; the cache compares ctime as well,
-        and a restore cannot carry one, so an old mtime cannot hide a change.
+        The add is scoped to the project: a subdirectory of a larger repo snapshots only what the run
+        may touch. The index persists across snapshots, so the stat cache skips files the builder did
+        not touch; it compares ctime as well, and a restore cannot carry one, so an old mtime cannot
+        hide a change.
         """
         env = snapshot_env(self.run_dir)
         # git refuses a repo whose object directory does not exist yet, so the private store is created first

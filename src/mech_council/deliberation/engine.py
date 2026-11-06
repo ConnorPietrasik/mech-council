@@ -1143,7 +1143,7 @@ class Engine:
             return None
         at_ceiling = round_ >= self._ceiling
         blocking = any(effective_class(self.docket, q) == "blocking" for q in ask)
-        # the ceiling asks too, on the grace budget — or when an off-cycle answer has already bought one more round
+        # the ceiling asks too, on the grace budget — or once an off-cycle answer has bought a round
         waiting = (
             self.docket.human == "blocking" and (terminal or blocking) and (not at_ceiling or self._grace_left > 0 or self.checkpoint_moved)
         )

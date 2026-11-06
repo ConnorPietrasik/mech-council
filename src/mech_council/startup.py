@@ -111,8 +111,8 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
 def _output_target(args: cli.Args, council: config_mod.Council) -> str:
     """Where `--output` sends the report, resolved against the invoking cwd.
 
-    A directory keeps the mode's report name (one file, or both for `both`); a file is the report itself
-    and must wear the format's extension. `both` with a file names the use: two reports, one name.
+    A directory keeps the mode's report name (one file, or both for `both`); a file is the report
+    itself and must wear the format's extension, which `both` cannot wear: it writes two.
     """
     raw = args.output
     if raw is None:
