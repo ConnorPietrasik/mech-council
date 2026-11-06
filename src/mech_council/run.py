@@ -629,6 +629,7 @@ def _report(
     run keeps no markdown file).
     """
     from .render import html as html_render
+    from .render import json_report as json_render
     from .render import markdown as markdown_render
     from .render import report_implement, report_plan, report_review
 
@@ -638,6 +639,9 @@ def _report(
         paths = [report_at] if len(files) == 1 else [os.path.join(report_at, name) for name in files]
     else:
         paths = [os.path.join(run_dir, name) for name in files]
+    context = None
+    doc = None
+    page_title = ""
     try:
         context = _report_context(
             council,
@@ -668,9 +672,6 @@ def _report(
             else:
                 doc = report_review.build(docket, context, run_dir=run_dir)
         page_title = f"{council.name} · {council.project}"
-        texts = {
-            name: html_render.render_html(doc, page_title) if name.endswith(".html") else markdown_render.render_md(doc) for name in files
-        }
         markdown_text = markdown_render.render_md(doc)  # the console copy is always the markdown of the same document
     except Exception as failure:
         console.say(f"the report could not be rendered ({type(failure).__name__}: {failure}) — writing what can be said instead")
@@ -686,7 +687,33 @@ def _report(
             f"({aborted or outcome or 'no outcome'}). The report renderer failed: "
             f"{type(failure).__name__}: {failure}. {held}\n"
         )
-        texts = {files[0]: markdown_text}
+    texts: dict[str, str] = {}
+    for name in files:
+        if name.endswith(".json"):
+            if context is None:
+                texts[name] = json_render.fallback(outcome, "the run's own context could not be read")
+            else:
+                try:
+                    texts[name] = json_render.render(docket, context, reason=aborted or outcome)
+                except Exception as failure:  # the report still lands, as valid JSON
+                    texts[name] = json_render.fallback(outcome, f"{type(failure).__name__}: {failure}")
+        elif doc is None:
+            if name == files[0]:  # the fallback lands in the primary file only
+                texts[name] = markdown_text
+        elif name.endswith(".html"):
+            try:
+                texts[name] = html_render.render_html(doc, page_title)
+            except Exception as failure:  # the report still lands, as markdown
+                console.say(f"the report could not be rendered ({type(failure).__name__}: {failure}) — writing what can be said instead")
+                console.event(
+                    "report_render_failed",
+                    kind=type(failure).__name__,
+                    reason=str(failure),
+                    frames=traceback.format_exc(limit=4).strip().splitlines()[-3:],
+                )
+                texts[name] = markdown_text
+        else:
+            texts[name] = markdown_text
     primary = paths[0]
     for name, path in zip(files, paths):
         text = texts.get(name)

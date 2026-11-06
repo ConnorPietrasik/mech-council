@@ -468,6 +468,31 @@ def test_a_renderer_that_raises_still_leaves_a_report_and_a_finalized_manifest(p
     assert finalized["outcome"] == "consensus", "the manifest still finalizes"
 
 
+def test_an_html_renderer_that_raises_still_leaves_a_report(project, tmp_path):
+    """The page is one of the report's files: its failure degrades that file to markdown, not the run."""
+    from unittest import mock
+
+    from mech_council import run as run_mod
+    from mech_council.deliberation.state import Docket, Item
+
+    council, console, manifest, run_dir = _report_bits(project, tmp_path)
+    council.report_format = "html"
+    docket = Docket(mode="review", goal="g", roster=["Agent1", "Agent2"])
+    docket.add_item(Item(id="F1", claim="a finding", evidence="src/app.py:1"))
+
+    with mock.patch("mech_council.render.html.render_html", side_effect=RuntimeError("the page renderer had a bug")):
+        path, text = run_mod._report(council, docket, console, str(run_dir), "consensus", [], manifest, "")
+
+    assert path.endswith("report.html") and os.path.exists(path), "a failed page renderer must not cost the report too"
+    with open(path, encoding="utf-8") as handle:
+        assert "a finding" in handle.read(), "the file lands with the markdown the page could not style"
+    assert "a finding" in text, "the console copy keeps the run's substance"
+    events = console.events()
+    assert any(e.get("event") == "report_render_failed" for e in events), (
+        "the event stream: the failure is an event, not only a console line"
+    )
+
+
 def test_a_report_that_cannot_be_replaced_into_place_leaves_no_tmp_behind(project, tmp_path):
     from mech_council import run as run_mod
     from mech_council.deliberation.state import Docket, Item

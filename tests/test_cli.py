@@ -906,7 +906,7 @@ def test_format_from_the_config_not_the_flag(cli, project, tmp_path):
 @pytest.mark.parametrize(
     "argv, wanted",
     [
-        (["review", "--format", "hmtl"], "--format is one of md|html|both"),
+        (["review", "--format", "hmtl"], "--format is one of md|html|json|both"),
         (["review", "-o", "PLAN.md", "--format", "both"], "--output names a file, but 'both' writes two reports"),
     ],
 )
@@ -942,3 +942,62 @@ def test_both_into_a_directory_writes_the_pair_there(cli, project):
     assert "report.md" not in written and "report.html" not in written, "nothing was left behind in the run directory"
     assert result.manifest["reports"] == {"md": md, "html": html}, "run.json names the pair where it stands"
     assert f"the reports to {out}" in result.console
+
+
+def test_format_json_writes_the_docket_instead_of_markdown(cli, project):
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "json"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "report.json" in written and "report.md" not in written, "json writes the document, not the markdown"
+    document = json.loads(result.artifact("report.json"))
+    assert document["run"]["council"] == "review" and document["run"]["mode"] == "review"
+    agreed = [item for item in document["items"] if item["state"] == "agreed"]
+    assert [item["claim"] for item in agreed] == ["the cache ignores tenants"], "the consensus finding stands in the docket"
+    item = agreed[0]
+    assert item["severity"] == "major"
+    assert item["evidence"] == "src/app.py:1"
+    assert item["stances"]["Agent1"]["stance"] == "agree", "the seat's stance is the docket's, not the report's words"
+    assert {row["id"] for row in document["roster"]} == {"Agent1", "Agent2"}
+    assert result.manifest["report"].endswith("report.json"), "the manifest points at the document that exists"
+    assert result.manifest["settings"]["report_format"] == "json"
+    assert "the cache ignores tenants" in result.console, "the console copy still carries the run's substance"
+
+
+def test_format_json_names_the_mode_file(cli, project):
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
+    result = cli(["plan", "--format", "json"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "plan.json" in written and "plan.md" not in written, "plan mode writes plan.json, not report.json"
+    document = json.loads(result.artifact("plan.json"))
+    assert document["run"]["mode"] == "plan"
+    assert document["backing"], "the plan run's backing stands in the document"
+    assert {agent: approach["original"] for agent, approach in document["approaches"].items()}, "each seat's approach is recorded"
+
+
+def test_format_json_of_a_run_that_recorded_nothing_keeps_the_reason(cli, project):
+    script = json.dumps([{"contains": "", "stop_reason": "error", "error_message": "429 provider quota exhausted"}])
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
+    result = cli(["review", "--format", "json"], cwd=project, env=env, timeout=120)
+    assert result.returncode == 1, "no result was recorded, but the report still lands"
+    document = json.loads(result.artifact("report.json"))
+    assert document["reason"], "the blank run says why nothing ran"
+    assert document["items"] == [], "nothing is invented for a run that recorded nothing"
+    assert "Why nothing ran" in result.console, "the console copy says the same"
+
+
+def test_output_with_json_keeps_the_json_name_and_rejects_the_wrong_extension(cli, project, canary):
+    out = output_dir(project)
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=_one_finding_script())
+    result = cli(["review", "--format", "json", "-o", out], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    target = os.path.join(out, "report.json")
+    assert os.path.exists(target), "a directory keeps the format's name"
+    assert not os.path.exists(os.path.join(out, "report.md"))
+    with open(target, encoding="utf-8") as handle:
+        assert json.loads(handle.read())["run"]["mode"] == "review"
+    result = cli(["review", "--format", "json", "-o", os.path.join(out, "PLAN.md")], cwd=project)
+    assert result.returncode == 2
+    assert "extension must match" in result.console, "a json report cannot land as a .md file"
+    assert canary_entries(canary) == []

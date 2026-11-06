@@ -104,7 +104,8 @@ class Council:
     pi_cli: str
     pi_version: str
     human: str = "blocking"
-    #: The report's format: `md` the markdown file, `html` one self-contained page, `both` the pair.
+    #: The report's format: `md` the markdown file, `html` one self-contained page, `json` the docket for a program,
+    #: `both` the pair.
     report_format: str = "md"
     #: The councils whose tables merged into this one, nearest first.
     extends: list[str] = field(default_factory=list)
@@ -218,8 +219,8 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
 #: The mode names config validation accepts.
 MODES: tuple[str, ...] = ("review", "plan", "implement")
 
-#: The report's format: the markdown file, one self-contained HTML page, or the pair.
-REPORT_FORMATS: tuple[str, ...] = ("md", "html", "both")
+#: The report's format: the markdown file, one self-contained HTML page, the machine-readable docket, or the pair.
+REPORT_FORMATS: tuple[str, ...] = ("md", "html", "json", "both")
 
 #: The human's posture toward the council's questions: the run waits at the bar, never waits, or never asks.
 HUMAN_MODES: tuple[str, ...] = ("blocking", "non_blocking", "none")

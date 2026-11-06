@@ -184,7 +184,7 @@ artifact, and the levels exist mostly for debugging:
 
 | File | What's in it |
 |---|---|
-| `report.md` / `plan.md` / `implementation.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead; implementations get the crews, the adopted plan, the stage ledger, what landed, and the decision points the run recorded. `--format html` writes the same content as `report.html` / `plan.html` instead — see below. |
+| `report.md` / `plan.md` / `implementation.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead; implementations get the crews, the adopted plan, the stage ledger, what landed, and the decision points the run recorded. `--format html` writes the same content as `report.html` / `plan.html` instead, and `--format json` the docket as `report.json` / `plan.json` for a program to read back — see below. |
 | `run.json` (`summary`+) | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
 | `events.jsonl` (`debug`+) | The append-only event log — one JSON object per line, the whole run in order. The run never reads it back; it is there for you. |
 | `human_input.json` (`detail`+) | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
@@ -210,17 +210,23 @@ This is the way to keep a result out of a container that is about to go away.
 When the target already exists, the run asks before replacing it. With no
 terminal to answer from the run refuses and says so; `--overwrite` skips the asking.
 
-### `--format`: the report as a page
+### `--format`: the report's format
 
-`--format <md|html|both>` (config key `report_format`) picks the report's format. The default,
-`md`, is what every run has always written. `html` writes the same content as one self-contained
-page — `report.html` / `plan.html` instead of the `.md` file: inline styles, a contents list,
-an outcome badge, no scripts, nothing to fetch. It opens offline and prints cleanly. `both`
-writes the markdown and the page side by side; at `summary` or higher, `run.json` names both
-(`report` is the markdown, `reports` the pair).
+`--format <md|html|json|both>` (config key `report_format`) picks the report's format. The
+default, `md`, is what every run has always written. `html` writes the same content as one
+self-contained page — `report.html` / `plan.html` instead of the `.md` file: inline styles, a
+contents list, an outcome badge, no scripts, nothing to fetch. It opens offline and prints
+cleanly. `json` writes the docket as one machine-readable document — `report.json` /
+`plan.json` / `implementation.json` instead of the `.md` file: every item with its stances,
+severity and disposition, every question and what became of it, the notes and messages, and the
+mode's own record (a plan's approaches and backing, an implementation's crews and stages).
+Nothing is styled or worded; a program reads it back. `both` writes the markdown and the page
+side by side; at `summary` or higher, `run.json` names both (`report` is the markdown,
+`reports` the pair).
 
 ```sh
 mech-council review --format html          # -> report.html
+mech-council review --format json          # -> report.json
 mech-council plan --format both -o docs/   # -> docs/plan.md and docs/plan.html
 ```
 

@@ -836,6 +836,51 @@ def test_a_plan_file_drives_a_full_implement_run(cli, project):
     assert "never asked" in report and "never settled" not in report, "a recorded approval is reported as never asked, not standing"
 
 
+def test_a_plan_file_drives_a_full_implement_run_in_json(cli, project):
+    """The implement run's spine — crews, adoption, the stage ledger — stands in the document."""
+    write_project_config(project, solo_config())
+    commit_all(project)
+    plan = os.path.join(os.path.dirname(project), "plan.md")
+    with open(plan, "w", encoding="utf-8") as handle:
+        handle.write("# Plan\n\n1. Write the hello module. 2. Document it.\n")
+    script = json.dumps(
+        [
+            {
+                "contains": "# Structure the plan",
+                "reply": {
+                    "stages": [
+                        {"state": "write the hello module", "gate": "test -f hello.py"},
+                        {"state": "document the tool", "gate": "test -f docs.md", "kind": "prose"},
+                    ]
+                },
+            },
+            {
+                "contains": "# Your work",
+                "reply": {
+                    "summary": "built the stage",
+                    "changed": ["hello.py", "docs.md"],
+                    "user_text": ["docs.md"],
+                    "open_issues": [],
+                },
+                "write": [{"path": "docs.md", "text": "# Docs\n"}],
+            },
+        ]
+    )
+    result = cli(
+        ["build", "--plan", plan, "--format", "json"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150
+    )
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert "implementation.json" in written and "implementation.md" not in written, "implement mode writes implementation.json"
+    document = json.loads(result.artifact("implementation.json"))
+    assert document["run"]["mode"] == "implement" and document["run"]["outcome"] == "implemented"
+    execution = document["execution"]
+    assert [crew["label"] for crew in execution["crews"]] == ["builder"]
+    assert [stage["state"] for stage in execution["stages"]] == ["write the hello module", "document the tool"]
+    assert all(stage["status"] == "passed" for stage in execution["stages"]), "the ledger records what landed"
+    assert result.manifest["report"].endswith("implementation.json")
+
+
 def test_the_prose_seat_rewrites_the_code_builders_user_text(cli, project):
     """D4: a code stage that touched user-visible text hands the baton to the prose seat; its rewrite is what ships."""
     text = solo_config().replace(

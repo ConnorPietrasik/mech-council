@@ -40,7 +40,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("plan", None, note="a plan document to structure into stages (implement runs only)"),
     Flag("output", "o", note="where the report is written"),
     Flag("verbosity", None, choices=VERBOSITY_LEVELS, note="artifact level"),
-    Flag("format", None, choices=("md", "html", "both"), note="report format"),
+    Flag("format", None, choices=("md", "html", "json", "both"), note="report format"),
     Flag("human", None, choices=("blocking", "non_blocking", "none"), note="the human's posture toward the council's questions"),
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
@@ -98,15 +98,16 @@ flags:
       --verbosity <lvl>    quiet (default) < summary < detail < debug < full: what the run directory keeps beyond
                            the report — summary adds run.json, detail adds human_input.json, debug adds events.jsonl,
                            full adds the verbatim transcripts under agents/
-      --format <fmt>       md (default), html or both: the report's format. html is one self-contained page —
-                           inline styles, no scripts, nothing to fetch; both writes the .md and the .html side by
-                           side. The report_format key in council.toml sets it; this flag overrides it
+      --format <fmt>       md (default), html, json or both: the report's format. html is one self-contained
+                           page — inline styles, no scripts, nothing to fetch; json is the docket as one
+                           machine-readable document; both writes the .md and the .html side by side.
+                           The report_format key in council.toml sets it; this flag overrides it
   --human <posture>        blocking (default), non_blocking or none: whether the run waits on the
                            council's questions, and whether the human answers them at all. Unstated with
                            no terminal on stdin, the run takes none
   -o, --output <path>      write the report here instead of into the run directory: an existing
-                           directory keeps the mode's name (report.md / plan.md / implementation.md, or the .html
-                           equivalents with --format html), anything else is the file itself.
+                           directory keeps the mode's name (report.md / plan.md / implementation.md, or the
+                           .html and .json equivalents), anything else is the file itself.
                            Nothing else follows it there; run.json names it
                            when the verbosity keeps run.json (summary or higher)
       --overwrite          replace an existing --output target without being asked first

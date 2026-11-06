@@ -42,6 +42,8 @@ class BaseAdapter:
     def report_files(self, report_format: str) -> tuple[str, ...]:
         if report_format == "html":
             return (self.report_base + ".html",)
+        if report_format == "json":
+            return (self.report_base + ".json",)
         if report_format == "both":
             return (self.report_base + ".md", self.report_base + ".html")
         return (self.report_base + ".md",)
