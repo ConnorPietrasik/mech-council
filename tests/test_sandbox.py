@@ -152,7 +152,8 @@ PROBE(cwd=os.getcwd(), wrote=os.path.exists("written.txt"))
     assert row["seen"]["wrote"], "a write at the canonical path returns success by design"
     assert _inventory(tree["project"]) == before, "the lower is byte-identical afterwards"
     entries = row["journal"]
-    assert "written.txt" in entries["created"] and "dir" in entries["created"]
+    assert "written.txt" in entries["created"]
+    assert "dir" not in entries["created"] + entries["modified"] + entries["deleted"], "pure directory entries are not journaled"
     assert "hello.py" in entries["deleted"]
     assert "src/renamed.py" in entries["created"]
     assert os.path.join("src", "mod.py") in entries["deleted"]
@@ -675,7 +676,7 @@ def test_created_and_modified_are_decided_by_the_lower_and_a_whiteout_is_a_delet
 
     entries = in_mapped_child(probe_dir)
     assert entries["created"] == ["new"]
-    assert entries["modified"] == ["dir", "file"]
+    assert entries["modified"] == ["file"]
     assert entries["deleted"] == ["gone"]
 
 

@@ -28,10 +28,10 @@ def listing(upper: str, *, skip: str = SCRATCH_NAME) -> dict[str, str]:
                 info = os.lstat(path)
             except OSError:
                 continue
+            if stat.S_ISDIR(info.st_mode):
+                continue  # copy-up dirs are noise; deletes surface as whiteouts
             if stat.S_ISCHR(info.st_mode) and os.major(info.st_rdev) == 0 and os.minor(info.st_rdev) == 0:
                 out[relative] = "deleted"
-            elif stat.S_ISDIR(info.st_mode):
-                out[relative] = "dir"
             else:
                 out[relative] = "touched"
     return out
