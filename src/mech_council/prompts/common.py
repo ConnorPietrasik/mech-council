@@ -141,7 +141,12 @@ def question_shape(human: str) -> str:
         if human == "blocking"
         else ""
     )
-    filed = "A note about one item opens with its id and sets its `item`, so the report files it under that item."
+    filed = (
+        "A note about one item opens with its id and sets its `item`, so the report files it under that item. An item whose "
+        "claim or detail names the mechanism wrong is corrected, not disagreed with: file a note under it with "
+        '`kind: "correction"` — `{"note": "F2: the mechanism is actually …", "item": "F2", "kind": "correction"}` — '
+        "and the item's text stands corrected by it in the report."
+    )
     if human == "blocking":
         notes = (
             "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats "

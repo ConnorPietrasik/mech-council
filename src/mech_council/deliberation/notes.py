@@ -4,21 +4,28 @@ from .state import RETRACTED, STANDING, Docket, Item, Note, note_key
 
 NOTE_MAX_CHARS = 600
 NOTE_MAX_PER_REPLY = 6
+NOTE_KINDS = ("info", "correction")
 
 
-def raise_note(docket: Docket, *, by: str, text: str, item_id: str | None, round_: int) -> tuple[Note, bool]:
+def raise_note(docket: Docket, *, by: str, text: str, item_id: str | None, round_: int, kind: str = "info") -> tuple[Note, bool]:
     """Record what a seat wants the human to know.
 
     A seat repeating itself updates its note; one it retracted is a fresh claim and id.
+    A correction names the item it corrects; without one it is no correction.
     """
+    kind = kind if kind in NOTE_KINDS else "info"
+    if kind == "correction" and item_id is None:
+        kind = "info"
     key = note_key(text)
     for nid in docket.note_order:
         note = docket.human_notes[nid]
         if note.by == by and note.state == STANDING and note.key == key:
             note.updated_round = round_
             note.item_id = note.item_id or item_id
+            if kind == "correction" and note.item_id is not None:
+                note.kind = "correction"
             return note, True
-    note = Note(id=f"N{docket.next_note}", by=by, text=text, item_id=item_id, round=round_, updated_round=round_)
+    note = Note(id=f"N{docket.next_note}", by=by, text=text, kind=kind, item_id=item_id, round=round_, updated_round=round_)
     docket.next_note += 1
     docket.human_notes[note.id] = note
     docket.note_order.append(note.id)

@@ -727,7 +727,14 @@ class Fix:
         for ask in data.get("human_input") or []:
             self._raise_ask(rec.builder, ask, round_=rec.index)
         for note in data.get("notes") or []:
-            raise_note(self.docket, by=rec.builder, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
+            raise_note(
+                self.docket,
+                by=rec.builder,
+                text=note["text"],
+                item_id=resolve_note_item(self.docket, note),
+                round_=rec.index,
+                kind=note.get("kind", "info"),
+            )
         for line in data.get("say_to") or []:
             self.docket.queue_message(to=line["to"], from_=rec.builder, text=line["text"], stage=rec.index)
         rec.changed.extend(dict.fromkeys(str(p) for p in data.get("changed") or [] if str(p).strip()))
@@ -836,7 +843,14 @@ class Fix:
             for ask in parsed.data.get("human_input") or []:
                 self._raise_ask(agent, ask, round_=rec.index)
             for note in parsed.data.get("notes") or []:
-                raise_note(self.docket, by=agent, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
+                raise_note(
+                    self.docket,
+                    by=agent,
+                    text=note["text"],
+                    item_id=resolve_note_item(self.docket, note),
+                    round_=rec.index,
+                    kind=note.get("kind", "info"),
+                )
             for line in parsed.data.get("say_to") or []:
                 self.docket.queue_message(to=line["to"], from_=agent, text=line["text"], stage=rec.index)
         rec.review_blind = all(result.rejected for result in results.values())

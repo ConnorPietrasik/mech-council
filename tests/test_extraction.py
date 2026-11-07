@@ -400,18 +400,33 @@ def test_open_questions_read_whether_written_as_lines_or_as_objects():
 
 
 def test_notes_read_whether_written_as_lines_or_objects_in_both_modes():
-    text = verdict(**positions(("F1", "agree")), notes=["retention is a contract", {"note": "the key lives in env", "item": "F1"}])
+    text = verdict(
+        **positions(("F1", "agree")),
+        notes=[
+            "retention is a contract",
+            {"note": "the key lives in env", "item": "F1"},
+            {"note": "F1: the mechanism is a race", "item": "F1", "kind": "correction"},
+        ],
+    )
     for mode in ("review", "plan"):
         out = parse_verdict(text, mode=mode, me="Agent1", known_items=set(KNOWN))
         assert out.data["notes"] == [
-            {"text": "retention is a contract", "item": None},
-            {"text": "the key lives in env", "item": "F1"},
+            {"text": "retention is a contract", "item": None, "kind": "info"},
+            {"text": "the key lives in env", "item": "F1", "kind": "info"},
+            {"text": "F1: the mechanism is a race", "item": "F1", "kind": "correction"},
         ]
+
+
+def test_a_note_kind_reads_folded_and_reaches_the_ledger_as_said():
+    out = parse(
+        verdict(**positions(("F1", "agree")), notes=[{"note": "a claim", "kind": "apology"}, {"note": "typed", "kind": "Correction"}])
+    )
+    assert [n["kind"] for n in out.data["notes"]] == ["apology", "correction"], "extraction folds and passes through; the ledger coerces"
 
 
 def test_a_note_that_says_nothing_is_dropped_and_owes_no_repair():
     out = parse(verdict(**positions(("F1", "agree")), notes=["", "   ", 7, {"item": "F1"}, {"note": "kept"}]))
-    assert out.data["notes"] == [{"text": "kept", "item": None}]
+    assert out.data["notes"] == [{"text": "kept", "item": None, "kind": "info"}]
     assert not out.errors and not out.invalid
 
 
@@ -448,12 +463,12 @@ def test_a_top_level_note_is_a_note_while_a_finding_s_is_still_its_detail():
     payload = json.dumps({"findings": [{"claim": "x", "notes": "keys are global"}], "notes": ["the human should know"]})
     out = parse_phase0(payload, mode="review")
     assert out.data["findings"][0]["detail"] == "keys are global"
-    assert out.data["notes"] == [{"text": "the human should know", "item": None}]
+    assert out.data["notes"] == [{"text": "the human should know", "item": None, "kind": "info"}]
 
 
 def test_phase_0_reads_notes_and_has_nothing_to_retract():
     out = parse_phase0(json.dumps({"findings": [], "notes": [{"note": "env holds the key"}], "retract_note": ["n1"]}), mode="review")
-    assert out.data["notes"] == [{"text": "env holds the key", "item": None}]
+    assert out.data["notes"] == [{"text": "env holds the key", "item": None, "kind": "info"}]
     assert out.data["retract_note"] == [], "phase 0 mints the first notes: it reads no retraction, and the field keeps the round's shape"
 
 

@@ -154,6 +154,8 @@ class Note:
     id: str
     by: str
     text: str
+    #: info | correction — a correction restates an item's claim or detail, and the item's text stands corrected by it
+    kind: str = "info"
     item_id: str | None = None
     round: int = 0
     updated_round: int = 0

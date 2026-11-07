@@ -161,6 +161,7 @@ def _note(note: Note) -> dict:
         "id": note.id,
         "seat": note.by,
         "item": note.item_id,
+        "kind": note.kind,
         "raised_round": note.round,
         "note": note.text,
         "state": note.state,

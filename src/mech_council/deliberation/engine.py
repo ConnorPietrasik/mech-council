@@ -563,7 +563,9 @@ class Engine:
                 item_id = None
             if item_id is None:
                 item_id = item_named(entry["text"], self.docket.items)
-            note, updated = raise_note(self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_)
+            note, updated = raise_note(
+                self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_, kind=entry.get("kind", "info")
+            )
             self.emit(
                 "note_updated" if updated else "note_raised",
                 id=note.id,

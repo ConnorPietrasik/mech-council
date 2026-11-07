@@ -120,7 +120,8 @@ def _notes_section(docket: Docket, viewer: str) -> list[str]:
     out = [f"## Notes for the human — nothing to answer ({len(fresh)})"]
     for note in fresh:
         where = f" (on {note.item_id})" if note.item_id else ""
-        out.append(f"- {note.id}{where} {_who([note.by], viewer)}, round {note.round}: {note.text}")
+        kind = " [correction]" if note.kind == "correction" else ""
+        out.append(f"- {note.id}{where}{kind} {_who([note.by], viewer)}, round {note.round}: {note.text}")
     if len(fresh) < len(standing):
         out.append(f"- +{len(standing) - len(fresh)} older note(s), in the report")
     if any(note.by == viewer for note in fresh):

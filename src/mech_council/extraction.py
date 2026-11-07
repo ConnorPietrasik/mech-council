@@ -548,7 +548,10 @@ def _strings(value: object) -> list[str]:
 
 
 def _notes(value: object) -> list[dict]:
-    """`notes` lines, written as strings or as `{"note": …, "item": "F2"}` objects. Junk is dropped, never an error."""
+    """`notes` lines, written as strings or as `{"note": …, "item": "F2", "kind": "correction"}` objects.
+
+    Junk is dropped, never an error.
+    """
     raw = [value] if isinstance(value, (dict, str)) else value if isinstance(value, list) else []
     out: list[dict] = []
     for entry in raw:
@@ -561,7 +564,8 @@ def _notes(value: object) -> list[dict]:
         if not text:
             continue
         item = text_of(pick(entry, "item")).strip() or None
-        out.append({"text": text[:NOTE_MAX_CHARS], "item": item})
+        kind = text_of(pick(entry, "kind", ("type",))).casefold() or "info"
+        out.append({"text": text[:NOTE_MAX_CHARS], "item": item, "kind": kind})
     return out[:NOTE_MAX_PER_REPLY]
 
 

@@ -157,7 +157,8 @@ def render_notes(notes: Sequence[tuple[Note, str]], *, names: dict[str, str]) ->
             continue
         items = {note.item_id for note in group}
         where = f" on {first.item_id}" if len(items) == 1 and first.item_id else ""
-        lines.append(f"  {ids}{where} {who} (round {min(note.round for note in group)}): {first.text}")
+        tag = ", correction" if any(note.kind == "correction" for note in group) else ""
+        lines.append(f"  {ids}{where} {who} (round {min(note.round for note in group)}{tag}): {first.text}")
     return "\n".join(lines)
 
 

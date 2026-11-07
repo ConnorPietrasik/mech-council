@@ -812,7 +812,14 @@ def test_docket_shows_you_and_yours_to_the_viewer():
 
 
 def noted(docket: Docket, text: str, by: str = "Agent1", **kw) -> str:
-    note, _updated = notes.raise_note(docket, by=by, text=text, item_id=kw.pop("item_id", None), round_=kw.pop("round_", 1))
+    note, _updated = notes.raise_note(
+        docket,
+        by=by,
+        text=text,
+        item_id=kw.pop("item_id", None),
+        round_=kw.pop("round_", 1),
+        kind=kw.pop("kind", "info"),
+    )
     return note.id
 
 
@@ -870,3 +877,29 @@ def test_an_id_from_the_other_ledger_moves_nothing_in_either_ledger():
     assert (docket.human_notes["N1"].state, ask.state) == (STANDING, ASKED), "a crossed id changes neither ledger"
     notes.retract_note(docket, nid="N1", agent="Agent1", round_=3)
     assert escalations.second(docket, qid="N1", agent="Agent2", round_=4)[0] is None, "a retracted note is not an open ask either"
+
+
+def test_a_correction_names_the_item_it_corrects():
+    docket = docket_with(3)
+    noted(docket, "F1: the mechanism is a race in the writer", item_id="F1", kind="correction")
+    assert docket.human_notes["N1"].kind == "correction" and docket.human_notes["N1"].item_id == "F1"
+
+
+def test_a_correction_that_names_no_item_is_just_a_note():
+    docket = docket_with(3)
+    noted(docket, "the mechanism is a race", kind="correction")
+    assert docket.human_notes["N1"].kind == "info", "with no item to correct, the kind cannot stand"
+
+
+def test_a_note_kind_outside_the_two_kinds_is_info():
+    docket = docket_with(3)
+    noted(docket, "the human should know", kind="apology")
+    assert docket.human_notes["N1"].kind == "info"
+
+
+def test_repeating_a_note_with_a_kind_upgrades_it_instead_of_forking():
+    docket = docket_with(3)
+    first = noted(docket, "the mechanism is a race", item_id="F1", round_=1)
+    again = noted(docket, "the mechanism is a race", item_id="F1", kind="correction", round_=3)
+    assert first == again and docket.note_order == ["N1"], "the repeat updates the note, as always"
+    assert docket.human_notes["N1"].kind == "correction", "the later kind is the one that stands"

@@ -80,7 +80,8 @@ def work_schema() -> str:
 }
 ```
 `addressed` is for fix passes only: one line per item you addressed. A `notes` entry about a docket item opens with the
-item's id and carries it as `item`, so the report files the note under that item.
+item's id and carries it as `item`, so the report files the note under that item. A note that corrects a docket item's
+claim or detail is a correction: set `kind: "correction"`, and the item's text stands corrected by it in the report.
 """
 
 

@@ -330,7 +330,9 @@ def _notes(docket: Docket, context: ReportContext, *, under: set[str]) -> list[B
 
 def note_line(note: Note, context: ReportContext) -> ListItem:
     """A note filed under an item: the one line the item's section prints for it."""
-    parts: list[Part] = ["note: ", (note.id, "bold"), f" ({_names([note.by], context)}"]
+    who = _names([note.by], context)
+    label = f"correction, {who}" if note.kind == "correction" else who
+    parts: list[Part] = ["note: ", (note.id, "bold"), f" ({label}"]
     if note.state == RETRACTED:
         reason = f": {note.retract_reason}" if note.retract_reason else ""
         parts.append(f", retracted in round {note.retracted_round}{reason}")

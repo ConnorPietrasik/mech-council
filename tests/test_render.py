@@ -547,10 +547,10 @@ def test_a_long_preview_keeps_both_ends_because_the_tail_is_the_part_that_bites(
 # --------------------------------------------------------------------------- the note ledger
 
 
-def noted(docket, text, by="Agent1", round_=1, item_id=None):
+def noted(docket, text, by="Agent1", round_=1, item_id=None, kind="info"):
     from mech_council.deliberation import notes
 
-    note, _updated = notes.raise_note(docket, by=by, text=text, item_id=item_id, round_=round_)
+    note, _updated = notes.raise_note(docket, by=by, text=text, item_id=item_id, round_=round_, kind=kind)
     return note
 
 
@@ -620,6 +620,18 @@ def test_a_note_whose_item_is_not_on_the_docket_stays_in_the_flat_ledger():
     noted(docket, "the fix should extend the conditional write", by="Agent2", item_id="F9")
     body = section(report_review.render(docket, context()), "Notes for the human")
     assert "N1" in body and "F9" in body, "a dangling link cannot lose the note from the report"
+
+
+def test_a_correction_prints_marked_under_the_finding_it_corrects():
+    docket = build()
+    entry = item(docket, "F1", "the cache ignores tenants", detail="the read path skips the tenant key")
+    entry.disposition, entry.closed_round = state.AGREED, 1
+    noted(docket, "F1: the mechanism is a race in the writer, not the read path", by="Agent2", item_id="F1", kind="correction")
+    noted(docket, "the lease renews in march", by="Agent3", item_id="F1")
+    finding = section(report_review.render(docket, context()), "Consensus findings (1)")
+    assert "correction, Senior" in finding, "the tag marks the note that supersedes the finding's own text"
+    assert finding.count("correction") == 1, "an ordinary filed note carries no such tag"
+    assert "[correction]" in section(docket_render.render(docket, "Agent1"), "Notes for the human"), "the seats read the tag too"
 
 
 def test_the_plan_report_files_notes_under_their_item_not_the_flat_ledger():
