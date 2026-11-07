@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import NO_HUMAN, SETTLED, UNBACKED, effective_class, held_back, stop_holders
-from ..deliberation.notes import report_notes
+from ..deliberation.notes import item_notes, report_notes
 from ..deliberation.state import (
     ABSTAIN,
     AGREE,
@@ -26,6 +26,7 @@ from ..sandbox.journal import printable
 from .context import ReportContext
 from .doc import Block, Group, Heading, List, ListItem, Paragraph, Part, Report, T
 from .markdown import render_md
+from .report_plan import note_line
 from .text import caption, severity_key
 
 
@@ -119,6 +120,8 @@ def _consensus(docket: Docket, items: list[Item], context: ReportContext) -> lis
             out.append(ListItem(T("caveat — ", question.id, " was ", said, f": {question.text}")))
         for note in item.history:
             out.append(ListItem(T("history: ", note)))
+        for item_note in item_notes(docket, item.id):
+            out.append(note_line(item_note, context))
         for marker in item.markers:
             out.append(ListItem(T((marker, "code"))))
         group.append(List(tuple(out)))
@@ -161,6 +164,8 @@ def _not_fully_vetted(docket: Docket, items: list[Item], context: ReportContext)
                 )
         for note in item.history:
             out.append(ListItem(T("history: ", note)))
+        for item_note in item_notes(docket, item.id):
+            out.append(note_line(item_note, context))
         group.append(List(tuple(out)))
         blocks.append(Group(tuple(group)))
     return blocks
@@ -189,6 +194,8 @@ def _disputed(docket: Docket, items: list[Item], context: ReportContext) -> list
                     )
                 )
             )
+        for item_note in item_notes(docket, item.id):
+            out.append(note_line(item_note, context))
         group.append(List(tuple(out)))
         blocks.append(Group(tuple(group)))
     return blocks
@@ -216,6 +223,8 @@ def _rejected(docket: Docket, items: list[Item], context: ReportContext) -> list
                 )
         for note in item.history:
             out.append(ListItem(T("history: ", note)))
+        for item_note in item_notes(docket, item.id):
+            out.append(note_line(item_note, context))
         group.append(List(tuple(out)))
         blocks.append(Group(tuple(group)))
     return blocks
@@ -236,7 +245,12 @@ def _never_vetted(docket: Docket, items: list[Item], context: ReportContext) -> 
             else (f"every seat declined to engage — {_names(declined, context)}" if declined else "no seat recorded a stance")
         )
         marker_parts: list[Part] = [part for m in item.markers for part in ("  ", (m, "code"))]
-        items_list.append(ListItem(T((item.id, "bold"), f" ({item.severity}) {item.claim} — {why}", *marker_parts)))
+        items_list.append(
+            ListItem(
+                T((item.id, "bold"), f" ({item.severity}) {item.claim} — {why}", *marker_parts),
+                sub=tuple(note_line(item_note, context) for item_note in item_notes(docket, item.id)),
+            )
+        )
     blocks.append(List(tuple(items_list)))
     return blocks
 
@@ -296,11 +310,17 @@ def _sandbox_limits(docket: Docket, context: ReportContext) -> list[Block]:
 
 
 def _notes(docket: Docket, context: ReportContext) -> list[Block]:
-    """The whole ledger, including what no checkpoint showed."""
-    notes = report_notes(docket)
+    """The notes that belong to no finding; a note filed under a finding prints with that finding."""
+    ledger = report_notes(docket)
+    filed_ids = {note.id for note in ledger if note.item_id and note.item_id in docket.items}
+    notes = [note for note in ledger if note.id not in filed_ids]
     blocks: list[Block] = [Heading(2, T(f"Notes for the human ({len(notes)})"))]
+    if filed_ids:
+        blocks.append(Paragraph(T(f"Notes about an item print with it — {len(filed_ids)} filed.")))
     if not notes:
-        return blocks + [Paragraph(T("Nothing the council wanted you to know without asking."))]
+        if not filed_ids:
+            blocks.append(Paragraph(T("Nothing the council wanted you to know without asking.")))
+        return blocks
     for note in notes:
         group: list[Block] = [Heading(3, T(f"{note.id} · {'retracted' if note.state == RETRACTED else 'standing'} · {note.text}"))]
         out: list[ListItem] = [ListItem(T("from: ", _names([note.by], context)))]

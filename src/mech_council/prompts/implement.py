@@ -74,12 +74,13 @@ def work_schema() -> str:
   "human_input": [{"question": "the decision, one line", "item": null, "blocking": false,
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
-  "notes": ["what the human should know and need not answer"],
+  "notes": ["what the human should know and need not answer", {"note": "C1: …", "item": "C1"}],
   "say_to": [{"to": "Agent2", "text": "…"}],
   "addressed": [{"id": "C1", "how": "what you did about it"}]
 }
 ```
-`addressed` is for fix passes only: one line per item you addressed.
+`addressed` is for fix passes only: one line per item you addressed. A `notes` entry about a docket item opens with the
+item's id and carries it as `item`, so the report files the note under that item.
 """
 
 

@@ -680,6 +680,7 @@ def test_the_review_file_run_fixes_its_agreed_findings_without_a_gate(cli, proje
                     "gate_output": "ok",
                     "changed": ["src/mod.py"],
                     "open_issues": [],
+                    "notes": ["F1: the gate re-run is the real proof"],
                 },
                 "write": [{"path": "src/mod.py", "text": "VALUE = 2\n"}],
             },
@@ -698,6 +699,8 @@ def test_the_review_file_run_fixes_its_agreed_findings_without_a_gate(cli, proje
         assert handle.read() == "VALUE = 2\n"
     report = result.artifact("fix.md")
     assert "No gate was taken" in report
+    assert "the gate re-run is the real proof" in report, "the builder's note is its words, not a parse artifact"
+    assert "Notes for the human (0)" in report, "a note that opens with the finding's id is filed under it, not the flat ledger"
 
 
 def test_the_review_file_must_be_a_review_report(cli, project):

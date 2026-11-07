@@ -135,11 +135,16 @@ def question_shape(human: str) -> str:
         if human == "blocking"
         else ""
     )
-    notes = (
-        "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats nothing a finding already says."
-        if human == "blocking"
-        else "`notes` tells the human what they need only *know*: it replaces an ask and repeats nothing a finding already says."
-    )
+    filed = "A note about one item opens with its id and sets its `item`, so the report files it under that item."
+    if human == "blocking":
+        notes = (
+            "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats "
+            f"nothing a finding already says. {filed}"
+        )
+    else:
+        notes = (
+            f"`notes` tells the human what they need only *know*: it replaces an ask and repeats nothing a finding already says. {filed}"
+        )
     return f"""\
 # Asking well
 

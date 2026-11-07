@@ -6,6 +6,7 @@ import os
 import subprocess
 
 from ..deliberation.implement import blind_note
+from ..deliberation.notes import item_notes
 from ..deliberation.state import Docket, Execution, StageRecord
 from ..deliberation.tree import snapshot_env
 from . import report_plan
@@ -40,7 +41,7 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "") -> Repor
     blocks += _decision_points(docket, context)
     blocks += _unsent(docket, context)
     blocks += report_plan._human_input(docket, context)
-    blocks += report_plan._notes(docket, context)
+    blocks += report_plan._notes(docket, context, under=set(docket.order))
     blocks += context.artifacts(run_dir)
     return Report(title=T("Implementation"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
 
@@ -234,6 +235,8 @@ def _decision_points(docket: Docket, context: ReportContext) -> list[Block]:
         how = addressed.get(item.id)
         if how:
             subs.append(ListItem(T(f"the builder addressed it: {how}")))
+        for note in item_notes(docket, item.id):
+            subs.append(report_plan.note_line(note, context))
         items.append(ListItem(T(f"{item_id} [{item.severity}] {item.claim} — {state}"), sub=tuple(subs)))
     blocks.append(List(tuple(items)))
     return blocks

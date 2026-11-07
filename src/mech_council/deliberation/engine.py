@@ -34,7 +34,7 @@ from .escalations import (
     showable,
     stop_for,
 )
-from .notes import mark_shown, raise_note, retract_note, unshown
+from .notes import item_named, mark_shown, raise_note, retract_note, unshown
 from .stalemate import signature, stalemate
 from .state import (
     ABSTAIN,
@@ -555,12 +555,14 @@ class Engine:
             self.docket.qa_order.append(qa.id)
 
     def _notes(self, entries: list[dict], asker: str, round_: int) -> None:
-        """An unknown item drops the link, keeps the note."""
+        """An unknown item drops the link, keeps the note; a note that opens with an item id is filed under it."""
         for entry in entries:
             item_id = entry.get("item")
             if item_id and item_id not in self.docket.items:
                 self.emit("verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a note named an unknown item")
                 item_id = None
+            if item_id is None:
+                item_id = item_named(entry["text"], self.docket.items)
             note, updated = raise_note(self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_)
             self.emit(
                 "note_updated" if updated else "note_raised",

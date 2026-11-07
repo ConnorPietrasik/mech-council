@@ -24,7 +24,7 @@ from ..prompts import fix as fix_text
 from ..render.text import severity_key
 from .engine import Abort, CheckpointOutcome, Engine
 from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
-from .notes import mark_shown, raise_note, unshown
+from .notes import mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
     ANSWERED,
@@ -727,7 +727,7 @@ class Fix:
         for ask in data.get("human_input") or []:
             self._raise_ask(rec.builder, ask, round_=rec.index)
         for note in data.get("notes") or []:
-            raise_note(self.docket, by=rec.builder, text=str(note)[:600], item_id=None, round_=rec.index)
+            raise_note(self.docket, by=rec.builder, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
         for line in data.get("say_to") or []:
             self.docket.queue_message(to=line["to"], from_=rec.builder, text=line["text"], stage=rec.index)
         rec.changed.extend(dict.fromkeys(str(p) for p in data.get("changed") or [] if str(p).strip()))
@@ -836,7 +836,7 @@ class Fix:
             for ask in parsed.data.get("human_input") or []:
                 self._raise_ask(agent, ask, round_=rec.index)
             for note in parsed.data.get("notes") or []:
-                raise_note(self.docket, by=agent, text=str(note)[:600], item_id=None, round_=rec.index)
+                raise_note(self.docket, by=agent, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
             for line in parsed.data.get("say_to") or []:
                 self.docket.queue_message(to=line["to"], from_=agent, text=line["text"], stage=rec.index)
         rec.review_blind = all(result.rejected for result in results.values())

@@ -3,6 +3,7 @@ committed, what was blocked and rolled back, and the final check."""
 
 from __future__ import annotations
 
+from ..deliberation.notes import item_notes
 from ..deliberation.state import Docket
 from ..deliberation.tree import Tree
 from . import report_plan
@@ -22,7 +23,9 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "") -> Repor
     blocks += _final_check(docket)
     blocks += _unsent(docket, context)
     blocks += report_plan._human_input(docket, context)
-    blocks += report_plan._notes(docket, context)
+    execution = docket.execution
+    # only the findings with a detail section print their notes; a note about any other item stays in the ledger
+    blocks += report_plan._notes(docket, context, under={rec.finding_id for rec in execution.findings} if execution is not None else set())
     blocks += context.artifacts(run_dir)
     return Report(title=T("Fix"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
 
@@ -119,7 +122,8 @@ def _findings(docket: Docket, context: ReportContext) -> list[Block]:
 
 def _finding_detail(docket: Docket, rec, context: ReportContext) -> list[Block]:
     blocks: list[Block] = []
-    if not rec.plan and not rec.changed and not rec.blocked_reasons:
+    notes = item_notes(docket, rec.finding_id)
+    if not rec.plan and not rec.changed and not rec.blocked_reasons and not notes:
         return blocks
     blocks.append(Heading(3, T(f"Finding {rec.index}: {rec.finding_id} — {rec.status}")))
     if rec.plan.get("state"):
@@ -132,6 +136,8 @@ def _finding_detail(docket: Docket, rec, context: ReportContext) -> list[Block]:
         blocks.append(Paragraph(T(rec.verify_note), wrapped=True))
     if rec.changed:
         blocks.append(Paragraph(T("Changed: " + ", ".join(rec.changed)), wrapped=True))
+    if notes:
+        blocks.append(List(tuple(report_plan.note_line(note, context) for note in notes)))
     if rec.fix_passes:
         for fix_pass in rec.fix_passes:
             addressed = "; ".join(f"{line.get('id')}: {line.get('how')}" for line in fix_pass.get("addressed") or [])

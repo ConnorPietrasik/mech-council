@@ -2751,6 +2751,30 @@ def test_a_note_about_an_item_that_does_not_exist_keeps_the_note_and_drops_the_l
     assert any(r["event"] == "verdict_unknown_findings" for r in records), "the bad id is said, not silently obeyed"
 
 
+def test_a_note_that_opens_with_an_item_id_files_under_it_without_being_asked():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                findings=[finding("the cache ignores tenants")],
+                notes=["F1: the fix should extend the conditional write", "the lease renews in march, like F1 does"]
+                if ask.who == "Agent1"
+                else [],
+            )
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, _records = engine(reply=reply)
+        return await built.run(), built
+
+    _outcome, built = asyncio.run(main())
+    assert built.docket.human_notes["N1"].item_id == "F1", "a note that opens with the item's id is filed under it"
+    assert built.docket.human_notes["N2"].item_id is None, "an id mentioned away from the start is not a link"
+
+
 def test_the_last_pass_reaches_the_human_because_the_asking_follows_it():
     """A peer's answer that proves a note wrong is read on the last pass, so the human is shown the correction."""
     import asyncio

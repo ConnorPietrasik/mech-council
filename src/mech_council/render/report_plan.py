@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, SETTLED, UNBACKED, effective_class, held_back
-from ..deliberation.notes import report_notes
+from ..deliberation.notes import item_notes, report_notes
 from ..deliberation.state import (
     ANSWERED,
     ASKED,
@@ -13,10 +13,11 @@ from ..deliberation.state import (
     SKIPPED,
     WITHDRAWN,
     Docket,
+    Note,
     Question,
 )
 from .context import ReportContext
-from .doc import Block, Group, Heading, List, ListItem, Paragraph, Report, T
+from .doc import Block, Group, Heading, List, ListItem, Paragraph, Part, Report, T
 from .markdown import render_md
 from .text import caption
 
@@ -38,7 +39,7 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converge
     blocks += _agreed_points(docket, context)
     blocks += _decision_points(docket, context)
     blocks += _human_input(docket, context)
-    blocks += _notes(docket, context)
+    blocks += _notes(docket, context, under=set(docket.items))
     blocks += _qa(docket, context)
     blocks += _alternatives(docket, context)
     blocks += _rounds(docket, context)
@@ -241,6 +242,8 @@ def _decision_points(docket: Docket, context: ReportContext) -> list[Block]:
             after.append(ListItem(T(who, tag, *([T(f" — {record.note}")] if record.note else []))))
         for note in item.history:
             after.append(ListItem(T("history: ", note)))
+        for item_note in item_notes(docket, item.id):
+            after.append(note_line(item_note, context))
         if after:
             group.append(List(tuple(after)))
         blocks.append(Group(tuple(group)))
@@ -298,14 +301,20 @@ def _human_input(docket: Docket, context: ReportContext) -> list[Block]:
     return blocks
 
 
-def _notes(docket: Docket, context: ReportContext) -> list[Block]:
-    """The whole ledger, including what no checkpoint showed."""
+def _notes(docket: Docket, context: ReportContext, *, under: set[str]) -> list[Block]:
+    """The ledger minus the notes that print under their item in this report."""
     notes = report_notes(docket)
-    blocks: list[Block] = [Heading(2, T("Notes for the human"))]
-    if not notes:
-        return blocks + [Paragraph(T("Nothing was said to you that needed no answer."))]
+    filed = {note.id for note in notes if note.item_id in under}
+    flat = [note for note in notes if note.id not in filed]
+    blocks: list[Block] = [Heading(2, T(f"Notes for the human ({len(flat)})"))]
+    if filed:
+        blocks.append(Paragraph(T(f"Notes about an item print with it — {len(filed)} filed.")))
+    if not flat:
+        if not filed:
+            blocks.append(Paragraph(T("Nothing was said to you that needed no answer.")))
+        return blocks
     items: list[ListItem] = []
-    for note in notes:
+    for note in flat:
         where = f" (on {note.item_id})" if note.item_id else ""
         state = "retracted" if note.state == RETRACTED else "standing"
         shown = f"shown to you in round {note.shown_round}" if note.shown_round is not None else "report only: no checkpoint showed it"
@@ -317,6 +326,18 @@ def _notes(docket: Docket, context: ReportContext) -> list[Block]:
         items.append(ListItem(T(f"{note.id} ({state}){where} ", _names([note.by], context), f": {note.text}"), sub=tuple(subs)))
     blocks.append(List(tuple(items)))
     return blocks
+
+
+def note_line(note: Note, context: ReportContext) -> ListItem:
+    """A note filed under an item: the one line the item's section prints for it."""
+    parts: list[Part] = ["note: ", (note.id, "bold"), f" ({_names([note.by], context)}"]
+    if note.state == RETRACTED:
+        reason = f": {note.retract_reason}" if note.retract_reason else ""
+        parts.append(f", retracted in round {note.retracted_round}{reason}")
+    parts.append(f"): {note.text}")
+    if note.shown_round is None:
+        parts.append(" (report only: no checkpoint showed it)")
+    return ListItem(T(*parts))
 
 
 def _qa(docket: Docket, context: ReportContext) -> list[Block]:

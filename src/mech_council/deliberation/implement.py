@@ -18,7 +18,7 @@ from ..port import Port
 from ..prompts import implement as impl_text
 from .engine import Abort, CheckpointOutcome, Engine, RawAsk
 from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
-from .notes import mark_shown, raise_note, unshown
+from .notes import mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
     ANSWERED,
@@ -936,7 +936,7 @@ class Implement:
             for ask in parsed.data.get("human_input") or []:
                 self._raise_ask(agent, ask, round_=rec.index)
             for note in parsed.data.get("notes") or []:
-                raise_note(self.docket, by=agent, text=str(note)[:600], item_id=None, round_=rec.index)
+                raise_note(self.docket, by=agent, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
             for line in parsed.data.get("say_to") or []:
                 self.docket.queue_message(to=line["to"], from_=agent, text=line["text"], stage=rec.index)
         # every seat's verdict came back unreadable: the review saw nothing, and the gate with it
@@ -1118,7 +1118,7 @@ class Implement:
         for ask in data.get("human_input") or []:
             self._raise_ask(rec.builder, ask, round_=rec.index)
         for note in data.get("notes") or []:
-            raise_note(self.docket, by=rec.builder, text=str(note)[:600], item_id=None, round_=rec.index)
+            raise_note(self.docket, by=rec.builder, text=note["text"], item_id=resolve_note_item(self.docket, note), round_=rec.index)
         for line in data.get("say_to") or []:
             self.docket.queue_message(to=line["to"], from_=rec.builder, text=line["text"], stage=rec.index)
         rec.open_items = [str(o) for o in data.get("open_issues") or []]

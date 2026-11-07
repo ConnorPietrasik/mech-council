@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .state import RETRACTED, STANDING, Docket, Note, note_key
+from .state import RETRACTED, STANDING, Docket, Item, Note, note_key
 
 NOTE_MAX_CHARS = 600
 NOTE_MAX_PER_REPLY = 6
@@ -44,6 +44,25 @@ def retract_note(docket: Docket, *, nid: str, agent: str, round_: int, reason: s
     return note, ""
 
 
+def item_named(text: str, items: dict[str, Item]) -> str | None:
+    """The docket item a note names up front, when its first word is one."""
+    words = text.split(None, 1)
+    if not words:
+        return None
+    first = words[0].strip(".:;,!?()[]\"'`-")
+    return first if first in items else None
+
+
+def resolve_note_item(docket: Docket, entry: dict) -> str | None:
+    """The item a note links to: its `item` field when that is a docket item, else the item its text opens with."""
+    item_id = entry.get("item")
+    if item_id and item_id not in docket.items:
+        item_id = None
+    if item_id is None:
+        item_id = item_named(entry["text"], docket.items)
+    return item_id
+
+
 def unshown(docket: Docket) -> list[tuple[Note, str]]:
     """What the next checkpoint tells the human: each note once, each retraction once."""
     out: list[tuple[Note, str]] = []
@@ -73,3 +92,8 @@ def report_notes(docket: Docket) -> list[Note]:
         for note in (docket.human_notes[nid] for nid in docket.note_order)
         if not (note.state == RETRACTED and note.shown_round is None)
     ]
+
+
+def item_notes(docket: Docket, item_id: str) -> list[Note]:
+    """The ledger's notes filed under one docket item."""
+    return [note for note in report_notes(docket) if note.item_id == item_id]

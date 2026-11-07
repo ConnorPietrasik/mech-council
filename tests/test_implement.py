@@ -1711,6 +1711,55 @@ def test_a_stage_with_no_gate_passes_on_the_review_alone(cli, project):
     assert "(no gate)" in report and "blocked" not in report
 
 
+def test_a_reviewer_note_lands_as_written_and_files_under_its_item(cli, project):
+    """A crew note is the seat's words, not a parse artifact: it lands on the shared docket and
+    files under the docket item it opens with."""
+    write_project_config(project, CONFIG.format(pi=PI))
+    commit_all(project)
+    plan = os.path.join(os.path.dirname(project), "plan.md")
+    with open(plan, "w", encoding="utf-8") as handle:
+        handle.write("# Plan\n\n1. Write the hello module.\n")
+    script = json.dumps(
+        [
+            {"contains": "# Structure the plan", "reply": {"stages": [{"state": "write the hello module", "gate": "test -f hello.py"}]}},
+            {
+                "contains": "# Your work — one stage",
+                "reply": {"summary": "done", "changed": ["hello.py"], "open_issues": []},
+                "write": [{"path": "hello.py", "text": "print('hello')\n"}],
+            },
+            {
+                "contains": "## The findings still standing",
+                "reply": {"findings": [], "summary": "clean", "open_questions": []},
+            },
+            {
+                "contains": "## The stage",
+                "reply": {
+                    "findings": [{"claim": "the hello module is bare", "severity": "trivial", "evidence": "hello.py:1"}],
+                    "summary": "one finding",
+                    "notes": ["C1: the suite is skipped on this box"],
+                    "open_questions": [],
+                },
+            },
+            {
+                "contains": "# Fix pass",
+                "reply": {
+                    "summary": "dressed it up",
+                    "changed": ["hello.py"],
+                    "addressed": [{"id": "C1", "how": "added the docstring"}],
+                    "open_issues": [],
+                },
+                "write": [{"path": "hello.py", "text": "print('hello')  # the hello tool\n"}],
+            },
+        ]
+    )
+    result = cli(["build", "--plan", plan], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["outcome"] == "implemented"
+    report = result.artifact("implementation.md")
+    assert "the suite is skipped on this box" in report, "the note is the seat's words, not a parse artifact"
+    assert "Notes for the human (0)" in report, "a note that opens with the item's id is filed under it, not the flat ledger"
+
+
 def test_a_prose_gate_is_verified_by_the_review_crew_not_a_shell(cli, project):
     """A gate that is prose — no shell could run it — still gates: the review crew verifies the
     condition itself, and its verdict is what the run reads, not a shell's exit code."""

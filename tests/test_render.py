@@ -6,7 +6,7 @@ import re
 
 from mech_council.deliberation import dispositions, escalations, state
 from mech_council.render import docket as docket_render
-from mech_council.render import preview, report_plan, report_review
+from mech_council.render import preview, report_fix, report_plan, report_review
 from mech_council.render.context import Interrupted, ReportContext, RosterRow, minimal_report
 
 
@@ -599,3 +599,58 @@ def test_a_note_no_checkpoint_showed_still_reaches_the_report():
     noted(docket, "retention is a contract, not a config choice")
     body = section(report_plan.render(docket, context(), converged="Agent1"), "Notes for the human")
     assert "N1" in body and "retention is a contract" in body, "the report holds the ledger, shown or not"
+
+
+def test_a_note_about_a_finding_prints_under_the_finding_not_the_flat_ledger():
+    docket = build()
+    entry = item(docket, "F1", "the cache ignores tenants")
+    entry.disposition, entry.closed_round = state.AGREED, 1
+    noted(docket, "the fix should extend the conditional write", by="Agent2", item_id="F1")
+    noted(docket, "the lease renews in march", by="Agent3")
+    text = report_review.render(docket, context())
+    finding = section(text, "Consensus findings (1)")
+    assert "N1" in finding and "the fix should extend the conditional write" in finding, "the note prints with its finding"
+    body = section(text, "Notes for the human")
+    assert "the lease renews in march" in body, "an item-agnostic note stays in the flat ledger"
+    assert "the fix should extend the conditional write" not in body, "a filed note leaves the flat ledger"
+
+
+def test_a_note_whose_item_is_not_on_the_docket_stays_in_the_flat_ledger():
+    docket = build()
+    noted(docket, "the fix should extend the conditional write", by="Agent2", item_id="F9")
+    body = section(report_review.render(docket, context()), "Notes for the human")
+    assert "N1" in body and "F9" in body, "a dangling link cannot lose the note from the report"
+
+
+def test_the_plan_report_files_notes_under_their_item_not_the_flat_ledger():
+    docket = build()
+    item(docket, "T1", "the cache ignores tenants")
+    noted(docket, "the fix should extend the conditional write", by="Agent2", item_id="T1")
+    text = report_plan.render(docket, context(), converged="Agent1")
+    points = section(text, "Decision points (1)")
+    assert "the fix should extend the conditional write" in points, "a note about an item prints with that item"
+    body = section(text, "Notes for the human (0)")
+    assert "the fix should extend the conditional write" not in body, "a filed note leaves the flat ledger"
+    assert "1 filed" in body, "the ledger says where the filed notes went"
+
+
+def test_the_fix_report_files_notes_under_its_findings_and_keeps_the_rest():
+    docket = build()
+    item(docket, "F1", "the value is wrong")
+    item(docket, "V1", "the verify pass found a smell")
+    noted(docket, "the gate re-run is the real proof", by="Agent1", item_id="F1")
+    noted(docket, "the smell needs no action", by="Agent2", item_id="V1")
+    docket.execution = state.Execution(
+        source={"how": "file", "path": "report.json"},
+        findings=[
+            state.FindingRecord(
+                index=1, finding_id="F1", severity="blocker", claim="the value is wrong", status="fixed", changed=["src/mod.py"]
+            )
+        ],
+    )
+    text = report_fix.render(docket, context())
+    finding = section(text, "Findings")
+    assert "the gate re-run is the real proof" in finding, "a note on a run finding prints with the finding"
+    body = section(text, "Notes for the human (1)")
+    assert "the smell needs no action" in body and "on V1" in body, "a note on an item the report does not print stays in the ledger"
+    assert "the gate re-run is the real proof" not in body, "a filed note leaves the flat ledger"

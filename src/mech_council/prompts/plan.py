@@ -36,7 +36,7 @@ def phase0_schema(human: str) -> str:
         + """,
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
-  "notes": ["what the human should know and need not answer"]
+  "notes": ["what the human should know and need not answer", {"note": "T1: …", "item": "T1"}]
 }
 ```
 """
@@ -107,7 +107,7 @@ def round_schema(human: str) -> str:
         + claim
         + """ "retract": ["H2"], "insist": ["H3"],
   "answer_question": [{"id": "H3", "answer": "what the workspace shows, so the human is not asked"}],
-  "notes": ["what the human should know and need not answer"],
+  "notes": ["what the human should know and need not answer", {"note": "T1: …", "item": "T1"}],
   "retract_note": [{"id": "N1", "reason": "what was wrong"}],
   "signoff": false
 }
