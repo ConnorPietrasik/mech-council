@@ -68,15 +68,16 @@ def test_the_written_file_is_a_default_provider_starter(cli, child_env, ground):
     path = user_config_path(child_env["XDG_CONFIG_HOME"])
     with open(path, "rb") as handle:
         data = tomllib.load(handle)
-    assert set(data["councils"]) == {"review", "plan", "build"}
+    assert set(data["councils"]) == {"review", "plan", "build", "fixit"}
     for table in data["councils"].values():
         chair = table["chair"]
         assert chair.get("name")
         agents = table["agents"]
-        assert len(agents) >= 2
+        assert len(agents) >= 1
         for seat in [chair, *agents]:  # the whole roster: default provider, nothing pinned
             assert "provider" not in seat and "model" not in seat
     assert data["councils"]["build"]["planner"] == "plan" and data["councils"]["build"]["reviewer"] == "review"
+    assert data["councils"]["fixit"]["review"] == "review" and data["councils"]["fixit"]["reviewer"] == "review"
 
 
 PLAN_SCRIPT = json.dumps(

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import subprocess
 
 from ..console import Console
 from ..crews import Crew, Crews
@@ -39,11 +38,10 @@ from .state import (
     normalize_text,
 )
 from .termination import direction_rule, unsettled_questions
+from .tree import DIFF_CAP, Tree
 
-_DIFF_CAP = 12000
+_DIFF_CAP = DIFF_CAP
 _FILE_CAP = 4000
-#: the snapshot's git calls walk the worktree, so they get a long leash
-_SNAPSHOT_TIMEOUT_S = 600
 #: how much of the verifier's account of the gate a stage carries: the prompts and the report
 _GATE_EVIDENCE_CAP = 2000
 #: the builder passes on which a `trivial` finding still holds the stage open: the work pass and the first fix pass
@@ -111,15 +109,6 @@ def approval_context(stages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def snapshot_env(run_dir: str) -> dict[str, str]:
-    """The git env the run's tree snapshots run under: a private index and object directory in the
-    run directory, so the run's trees never enter the repo's object store."""
-    return {
-        "GIT_INDEX_FILE": os.path.join(run_dir, "review_index"),
-        "GIT_OBJECT_DIRECTORY": os.path.join(run_dir, "review_objects"),
-    }
-
-
 class Implement:
     def __init__(
         self,
@@ -156,6 +145,7 @@ class Implement:
         self.run_dir = crews["builder"].run_dir
         self.baseline: str | None = None  # the tree the run starts from, or None without git
         self.last_tree: str | None = None  # the previous review's snapshot
+        self.tree = Tree(self.project, self.run_dir)
         self._next_c = 1
 
     # ------------------------------------------------------------- the run
@@ -205,7 +195,7 @@ class Implement:
             self.emit("termination", outcome=NEEDS_OUTCOME, reason="the human declined to proceed to implement")
             return NEEDS_OUTCOME
         await self._spawn_execution_crews()
-        self.baseline = await asyncio.to_thread(self._snapshot_tree)
+        self.baseline = await asyncio.to_thread(self.tree.snapshot)
         self.last_tree = self.baseline
         self.execution.baseline = self.baseline or ""
         held = False
@@ -215,7 +205,7 @@ class Implement:
                 rec.blocked_reasons = ["the human held the run"]
                 continue
             held = await self._build_stage(rec)
-        final_tree = await asyncio.to_thread(self._snapshot_tree)
+        final_tree = await asyncio.to_thread(self.tree.snapshot)
         self.execution.final_tree = final_tree or ""
         outcome = PARTIAL if self.execution.blocked else IMPLEMENTED
         self._mark_unasked()
@@ -893,7 +883,7 @@ class Implement:
             "## The diff since the last review",
             "",
             "```",
-            diff or "(no changes to show)",
+            diff,
             "```",
         ]
         if addressed:
@@ -1204,59 +1194,26 @@ class Implement:
 
     # ------------------------------------------------------------- the diff
 
-    def _git(self, *args: str, env: dict | None = None, timeout: float = 60) -> tuple[bool, str]:
-        try:
-            proc = subprocess.run(
-                ["git", "-C", self.project, *args],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env={**os.environ, **(env or {})},
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False, ""
-        return proc.returncode == 0, (proc.stdout or "").strip()
-
-    def _snapshot_tree(self) -> str | None:
-        """The project's worktree as a tree object, in the run directory's private index and object store.
-
-        The add is scoped to the project: a subdirectory of a larger repo snapshots only what the run
-        may touch. The index persists across snapshots, so the stat cache skips files the builder did
-        not touch; it compares ctime as well, and a restore cannot carry one, so an old mtime cannot
-        hide a change.
-        """
-        env = snapshot_env(self.run_dir)
-        # git refuses a repo whose object directory does not exist yet, so the private store is created first
-        os.makedirs(env["GIT_OBJECT_DIRECTORY"], exist_ok=True)
-        if not self._git("add", "-A", "--", ".", env=env, timeout=_SNAPSHOT_TIMEOUT_S)[0]:
-            return None
-        ok, tree = self._git("write-tree", env=env, timeout=_SNAPSHOT_TIMEOUT_S)
-        return tree or None
-
     async def _stage_diff(self, changed: list[str]) -> str:
         """What the tree changed since the last review, or the changed files where the project has no git.
 
         The git calls walk the worktree, so they run off the loop.
         """
         if self.last_tree is not None:
-            tree = await asyncio.to_thread(self._snapshot_tree)
+            tree = await asyncio.to_thread(self.tree.snapshot)
             if tree is not None:
-                prev = self.last_tree
-                ok, diff = await asyncio.to_thread(
-                    self._git, "diff", prev, tree, env=snapshot_env(self.run_dir), timeout=_SNAPSHOT_TIMEOUT_S
-                )
-                if ok:
+                diff = await asyncio.to_thread(self.tree.diff, self.last_tree, tree)
+                if diff:
                     # only a diff the review actually saw becomes the next review's baseline
                     self.last_tree = tree
-                    return (diff or "(no changes to show)")[:_DIFF_CAP]
+                    return diff
         parts: list[str] = []
         for path in dict.fromkeys(p for p in changed if p):
             full = os.path.join(self.project, path)
             with contextlib.suppress(OSError):
                 with open(full, encoding="utf-8", errors="replace") as handle:
                     parts.append(f"### {path}\n```\n{handle.read()[:_FILE_CAP]}\n```")
-        return "\n".join(parts)[:_DIFF_CAP]
+        return "\n".join(parts)[:_DIFF_CAP] or "(no changes to show)"
 
     def _read_plan_file(self) -> str:
         with open(self.plan_file, encoding="utf-8", errors="replace") as handle:

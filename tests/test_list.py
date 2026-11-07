@@ -80,6 +80,45 @@ role = "prose"
     assert 'knobs: fix_budget = 5 · planner = "planners" · reviewer = "inspect" · in_place = true' in out
 
 
+def test_list_shows_a_fix_councils_crew_knobs(cli, project):
+    """The fix knobs list like the implement ones: the review council the findings come from, and a
+    stated commit that differs from the default."""
+    write_project_config(
+        project,
+        """\
+[councils.inspect]
+mode = "review"
+goal = "Find the defects"
+
+[councils.inspect.chair]
+name = "Review Chair"
+
+[[councils.inspect.agents]]
+name = "R1"
+
+[[councils.inspect.agents]]
+name = "R2"
+
+[councils.fixit]
+mode = "fix"
+goal = "Fix the findings"
+review = "inspect"
+commit = false
+
+[councils.fixit.chair]
+name = "Chair"
+
+[[councils.fixit.agents]]
+name = "Forge"
+""",
+    )
+    result = cli(["list"], cwd=project)
+    assert result.returncode == 0, result.console
+    out = result.stdout
+    assert "fixit · fix" in out
+    assert 'knobs: review = "inspect" · commit = false · in_place = true' in out
+
+
 def test_list_marks_templates_and_broken_councils(cli, project):
     write_project_config(
         project,

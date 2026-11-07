@@ -1,8 +1,9 @@
 # mech-council
 
-A council of coding agents that reviews a project, plans a task, or implements one — the third
-mode takes a direction from a planner crew or a plan document, then has builder seats land it in
-the real tree stage by stage while a reviewer crew watches.
+A council of coding agents that reviews a project, plans a task, implements one — or fixes a
+review's findings, the fourth mode convening a review crew and then having a builder seat fix what
+its gate selects, one at a time — the agreed findings in severity order, then any the gate adds —
+each passed fix committed and a failed one rolled back.
 
 You name a council in `council.toml` — seats and a chair, each a [`pi`](https://github.com/earendil-works/pi)
 session on whatever provider and model you like — and `mech-council` convenes them. The seats
@@ -35,7 +36,7 @@ mech-council init              # writes your user council.toml: $COUNCIL_CONFIG,
                                # else ~/.config/council/council.toml — one config that serves every project
 ```
 
-The starter is a `review`, a `plan` and a `build` (implement) council. No seat states a
+The starter is a `review`, a `plan`, a `build` (implement) and a `fixit` (fix) council. No seat states a
 `provider` or a `model`, so every seat takes whatever pi is configured with — state them per seat
 to point one somewhere else. `init` refuses to replace a file that is already there;
 `mech-council init --overwrite` replaces it.
@@ -264,28 +265,30 @@ with `--config`.
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `mode` | `review` | `review`, `plan` for a task plan, or `implement` for a build that lands in the real tree — see [below](#implement-plan-build-review-in-place). |
-| `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` or `implement` council needs one. |
+| `mode` | `review` | `review`, `plan` for a task plan, `implement` for a build that lands in the real tree, or `fix` for the find-fix-commit run — see [below](#implement-plan-build-review-in-place). |
+| `goal` | — | What the seats are briefed with. `--goal` overrides; a `plan` or `implement` council needs one. A `fix` council's is optional — when stated it is the review crew's goal, steering the hunt; the builder takes its how from its persona. |
 | `max_rounds` | `10` | Round limit. |
 | `grace_rounds` | `1` | How many rounds past the limit an answer may buy. `0` ends the run on the limit with its questions unasked. |
 | `seconding` | `true` | A question reaches you only once a second seat backs it. `false` puts every question the council left open in front of you. |
 | `human` | `blocking` | The run's posture toward the council's questions. `blocking`: it waits where a declared stop reaches the bar. `non_blocking`: it never waits — questions are shown while it keeps working, and you may answer any of them. `none`: the council is never asked; its open questions are recorded in the report. `--human` overrides; a run with no terminal on stdin takes `none` unless a posture is stated, and says so in a note. |
 | `watchdog_sec` | `600` | How often the chair is handed a digest of in-flight seats. `0` disables it. |
 | `planning_rounds` | `4` | implement: rounds the planner crew gets to converge on a direction. |
-| `fix_budget` | `3` | implement: review-fix ladders one stage may spend before it is blocked. |
-| `replans` | `2` | implement: re-structures one stage may spend before it is blocked. |
+| `fix_budget` | `3` | implement and fix: the repair ladder one stage or finding may spend before it is blocked. |
+| `replans` | `2` | implement and fix: the re-structures one stage or finding may spend before it is blocked. |
 | `planner` | — | implement: the name of a `plan` council to convene as the run's planning crew. |
-| `reviewer` | — | implement: the name of a `review` council to convene as the run's per-stage reviewer crew. |
+| `reviewer` | — | implement and fix: the name of a `review` council to convene as the run's per-stage or per-finding reviewer crew. |
+| `review` | — | fix: the name of a `review` council to convene first for the findings the run fixes. |
+| `commit` | `true` | fix: whether a passed finding lands as the run's own commit; `false` leaves the fixes in the tree. |
 | `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction, structure, pick). |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
-| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; an implement run is always in place. |
+| `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; an implement or fix run is always in place. |
 | `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json`), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
 Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi
 will not start a seat configured that way), and `persona`. An unknown model warns rather than
-failing the run. An implement builder seat also takes `role`: `code`, `prose`, or `both` (the default) —
-`prose` seats are handed prose stages only.
+failing the run. An implement or fix builder seat also takes `role`: `code`, `prose`, or `both` (the default) —
+`prose` seats are handed prose stages only, and a fix run's baton goes to a non-prose builder.
 
 ### Per-provider `max_concurrency`
 
@@ -351,6 +354,50 @@ answer says `hold`.
 ```sh
 mech-council build                     # plan (if a planner is named), adopt, build, review, report
 mech-council build --plan docs/PLAN.md # skip the planners; structure the document instead
+```
+
+
+### `fix`: find, fix, commit — one finding at a time
+
+`mode = "fix"` is a build off a review: the `review` crew finds the defects, and the builder
+seat fixes the gate's list one at a time — the agreed findings in severity order, then the ones
+the gate adds. It is always in place, and it
+**commits**: each finding that passes its verify lands as the run's own commit (`mech-council`,
+the run's identity — you rework the history later), and a finding that fails burns its ladder
+then rolls back to its pre-finding tree, its diff saved to the run directory as
+`finding-NN.diff`. The commit is the safety model, so a project that is not a git repo is
+refused; a dirty tree is refused unless `--dirty` is passed, and with it the run's commits may
+sweep in what was already dirty. `commit = false` lands the fixes in the tree without
+committing.
+
+A fix council is a chair and builder seats, plus at most two borrowed councils: `review` names
+a `review` council that is convened first to find the defects, and `reviewer` names a `review`
+crew that verifies each fix — with no `reviewer` named, the `review` crew verifies instead. The
+fix council's `goal`, when stated, is the review crew's goal: it steers the hunt. Without one
+the crew keeps its own goal, and the builder takes its how from its persona.
+The findings come from the `review` council — or from `--review-file <report.json>` when it is
+passed, which supersedes the configured council: the machine-readable report of a previous review
+run, whose agreed findings are the list as-is. A curated file is the curation, so a file run has
+no review crew and no gate.
+
+In a council run the findings pass a **gate** before the fixes begin: one question per finding,
+fix or skip — agreed findings default to fixing, the rest to skipping, and a disputed finding
+may be added only here. `human = "none"` takes the defaults without asking; `blocking` waits,
+and a closed stdin declines what is left, the defaults taking it — that is the overnight run's
+"no human"; `non_blocking` shows the gate and does not wait.
+
+Each finding is planned alone — one plan, one gate, the smallest change the finding allows — and
+built; the verifying crew re-runs the gate and reviews the diff before the finding passes, and
+the builder gets the same finite repair ladder as implement (`fix_budget` fix passes, then
+`replans`) when it does not. A finding past both is **blocked**: the tree rolls back to the
+finding's pre-state, the run keeps going, and it ends `partial` — `fixed` when every selected
+finding landed and the final check passed. With a verifying crew on hand, a final check over the
+whole project closes the run, and `fix.md` reports the gate, the finding ledger, what landed, and
+the final check.
+
+```sh
+mech-council fixit                           # review, gate, then fix and commit the agreed findings
+mech-council fixit --review-file report.json # fix a previous run's findings, ungated
 ```
 
 

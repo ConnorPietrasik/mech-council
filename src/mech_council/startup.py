@@ -27,6 +27,8 @@ class Launch:
     crews: list[tuple[str, config_mod.Council]] = field(default_factory=list)
     #: implement: `--plan <file>` — a plan document the run's chair structures instead of convening the planners
     plan_file: str = ""
+    #: fix: `--review-file <file>` — a previous run's report.json whose findings the run fixes
+    review_file: str = ""
 
 
 def stdin_is_terminal() -> bool:
@@ -94,17 +96,23 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
         output_path=output_path,
         output_overwrite=args.overwrite,
     )
-    if council.mode == "implement":
+    if council.mode in ("implement", "fix"):
         launch.crews = config_mod.resolve_crews(loaded, council, args)
-        if args.plan:
-            if not os.path.isfile(args.plan):
-                raise UsageError(f"--plan is not a file: {args.plan!r}")
-            # absolute: the orchestrator's cwd moves to the runs dir before the document is read
-            launch.plan_file = os.path.abspath(args.plan)
+    if council.mode == "implement" and args.plan:
+        if not os.path.isfile(args.plan):
+            raise UsageError(f"--plan is not a file: {args.plan!r}")
+        # absolute: the orchestrator's cwd moves to the runs dir before the document is read
+        launch.plan_file = os.path.abspath(args.plan)
+    if council.mode == "fix" and args.review_file:
+        if not os.path.isfile(args.review_file):
+            raise UsageError(f"--review-file is not a file: {args.review_file!r}")
+        launch.review_file = os.path.abspath(args.review_file)
     # after the crews: a crew's auto lines have joined the run's in resolve_crews
     notes += council.provider_notes
     if council.mode == "implement":
         notes += _implement_notes(council, args)
+    if council.mode == "fix":
+        notes += _fix_notes(council, args)
     return args, launch
 
 
@@ -182,69 +190,84 @@ def confirm_overwrite(launch: Launch) -> list[str]:
     return [note]
 
 
-def _implement_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
-    """What an implement run owes the human before the first edit: the tree's state and the no-commit line."""
+def _git_state(project: str) -> dict | None:
+    """The project's git tree for a build run's preflight: None when git is not reachable,
+    `inside` false when the project is no repo, else the branch and the dirt."""
     import subprocess
 
-    notes = ["an implement run never commits: when it is done, review the diff before you do"]
+    def run(*args: str):
+        return subprocess.run(["git", "-C", project, *args], check=False, capture_output=True, text=True, timeout=30)
+
     try:
-        inside = subprocess.run(
-            ["git", "-C", council.project, "rev-parse", "--is-inside-work-tree"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        inside = run("rev-parse", "--is-inside-work-tree")
         if inside.returncode != 0 or inside.stdout.strip() != "true":
-            notes.append(
-                "the project is not a git repo: the stage diffs and the report's diffstat read the tree directly, "
-                "and the run's diff is weaker for it"
-            )
-            return notes
-        rev = subprocess.run(
-            ["git", "-C", council.project, "rev-parse", "HEAD"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+            return {"inside": False}
+        rev = run("rev-parse", "HEAD")
         if rev.returncode != 0:  # an unborn HEAD: the repo exists and has no commits
             branch = "(no commits yet)"
         else:
-            head = subprocess.run(
-                ["git", "-C", council.project, "rev-parse", "--abbrev-ref", "HEAD"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            head = run("rev-parse", "--abbrev-ref", "HEAD")
             branch = head.stdout.strip() or "HEAD"
         # scoped to the project directory: a project that is a subdirectory of a larger repo runs on
         # the project's dirt, the way the snapshots are scoped to it
-        dirty = subprocess.run(
-            ["git", "-C", council.project, "status", "--porcelain", "--", "."],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if dirty.returncode != 0:
-            notes.append("git status failed: the tree's dirt could not be checked — the run proceeds against it as found")
-        elif dirty.stdout.strip():
-            if args.dirty:
-                notes.append(
-                    f"the git tree is dirty on branch {branch!r} and --dirty was passed: the stage diffs and "
-                    "the report's diffstat are measured against it"
-                )
-            else:
-                raise UsageError(
-                    f"the project's git tree is dirty on branch {branch!r}: an implement run measures its stage "
-                    "diffs against a clean baseline — commit or stash first, or pass --dirty to proceed anyway"
-                )
-        else:
-            notes.append(f"on git branch {branch!r}: the stage diffs and the report's diffstat are measured against it")
+        dirty = run("status", "--porcelain", "--", ".")
     except OSError, subprocess.TimeoutExpired:
+        return None
+    dirty_ok = None if dirty.returncode != 0 else bool(dirty.stdout.strip())
+    return {"inside": True, "branch": branch, "dirty": dirty_ok}
+
+
+def _tree_state_notes(council: config_mod.Council, args: cli.Args, state: dict, *, what: str) -> list[str]:
+    """The branch and dirt lines a build run's preflight owes, shared by implement and fix."""
+    branch = state["branch"]
+    diffs = "stage diffs" if what == "implement" else "finding diffs"
+    if state["dirty"] is None:
+        return ["git status failed: the tree's dirt could not be checked — the run proceeds against it as found"]
+    if state["dirty"]:
+        if args.dirty:
+            tail = f"the {diffs} and the report's diffstat are measured against it"
+            if what == "fix" and council.commit:
+                tail += ", and the first fix commit sweeps in the pre-existing dirt"
+            return [f"the git tree is dirty on branch {branch!r} and --dirty was passed: {tail}"]
+        raise UsageError(
+            f"the project's git tree is dirty on branch {branch!r}: a {what} run measures its {diffs} "
+            "against a clean baseline — commit or stash first, or pass --dirty to proceed anyway"
+        )
+    return [f"on git branch {branch!r}: the {diffs} and the report's diffstat are measured against it"]
+
+
+def _implement_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
+    """What an implement run owes the human before the first edit: the tree's state and the no-commit line."""
+    notes = ["an implement run never commits: when it is done, review the diff before you do"]
+    state = _git_state(council.project)
+    if state is None:
         notes.append("git is not reachable: the stage diffs and the report's diffstat read the tree directly")
+        return notes
+    if not state["inside"]:
+        notes.append(
+            "the project is not a git repo: the stage diffs and the report's diffstat read the tree directly, "
+            "and the run's diff is weaker for it"
+        )
+        return notes
+    notes += _tree_state_notes(council, args, state, what="implement")
+    return notes
+
+
+def _fix_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
+    """What a fix run owes before the first edit: the commit line and the tree's state. A fix run
+    needs git — the commit is the safety model — so no repo is a refusal, not a note."""
+    notes = [
+        "a fix run commits each verified finding as its own commit; a blocked finding is rolled back to its pre-tree"
+        if council.commit
+        else "a fix run leaves its fixes uncommitted: a blocked finding is rolled back to its pre-tree"
+    ]
+    state = _git_state(council.project)
+    if state is None:
+        notes.append("git is not reachable: the run cannot take its pre-snapshots and will refuse before the first finding")
+        return notes
+    if not state["inside"]:
+        raise UsageError(f"{council.project} is not a git repo: a fix run commits each verified finding, so it needs one")
+    notes += _tree_state_notes(council, args, state, what="fix")
     return notes
 
 

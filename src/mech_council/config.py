@@ -29,6 +29,8 @@ BUILTIN_DEFAULTS: dict[str, object] = {
     "replans": 2,
     "planner": None,
     "reviewer": None,
+    "review": None,
+    "commit": True,
 }
 
 #: name → (type, `[defaults]`-allowed)
@@ -51,6 +53,8 @@ SCALAR_KEYS: dict[str, tuple[str, bool]] = {
     "replans": ("int>=0", True),
     "planner": ("str", False),
     "reviewer": ("str", False),
+    "review": ("str", False),
+    "commit": ("bool", True),
 }
 #: What a seat table states; `drop` is a patch verb, so it is `PATCH_KEYS` only.
 AGENT_KEYS = {"name": "str", "provider": "str", "model": "str", "persona": "str", "role": "role"}
@@ -125,6 +129,9 @@ class Council:
     #: implement: the council that writes the plan, and the one that reviews each stage.
     planner: str | None = None
     reviewer: str | None = None
+    #: fix: the review council that finds the defects, and whether a passed finding is committed.
+    review: str | None = None
+    commit: bool = True
     #: This roster's providers, by the total requests each takes at once, the chair's included; absent means uncapped.
     provider_concurrency: dict[str, int] = field(default_factory=dict)
     #: One line per `auto` provider the probe resolved or fell back on.
@@ -194,7 +201,7 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
     elif kind == "mode":
         hint = suggest.suggest(str(value), MODES)
         extra = f" (did you mean {hint!r}?)" if hint else ""
-        raise ConfigError(f"config key {where}.mode is 'review', 'plan' or 'implement', got {value!r}{extra}")
+        raise ConfigError(f"config key {where}.mode is 'review', 'plan', 'implement' or 'fix', got {value!r}{extra}")
     elif kind == "human":
         if value in HUMAN_MODES:
             return value
@@ -217,7 +224,7 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
 
 
 #: The mode names config validation accepts.
-MODES: tuple[str, ...] = ("review", "plan", "implement")
+MODES: tuple[str, ...] = ("review", "plan", "implement", "fix")
 
 #: The report's format: the markdown file, one self-contained HTML page, the machine-readable docket, or the pair.
 REPORT_FORMATS: tuple[str, ...] = ("md", "html", "json", "both")
@@ -405,7 +412,7 @@ def _flatten(source: dict, defaults: dict, where: str) -> dict:
         if mode not in MODES:
             hint = suggest.suggest(str(mode), list(MODES))
             extra = f" (did you mean {hint!r}?)" if hint else ""
-            raise ConfigError(f"config key {where}.mode is 'review', 'plan' or 'implement', got {mode!r}{extra}")
+            raise ConfigError(f"config key {where}.mode is 'review', 'plan', 'implement' or 'fix', got {mode!r}{extra}")
         out["mode"] = mode
     return out
 
@@ -625,14 +632,22 @@ def convene_without_pi(
     if agents_raw is None:
         raise ConfigError(f"[councils.{name}] declares no [[councils.{name}.agents]]{via}")
     agents = _members(agents_raw, f"councils.{name}.agents", chair=False)
-    if flat["mode"] == "implement":
-        # the run's plan comes from a planner crew or a --plan document; the builders never plan themselves
+    if flat["mode"] in ("implement", "fix"):
+        # the run's builders do the landing work; they never plan the run itself
         if not agents:
-            raise ConfigError(f"[councils.{name}] declares no builders: an implement run needs at least one{via}")
-        if not (flat["planner"] or args.plan):
+            raise ConfigError(f"[councils.{name}] declares no builders: a {flat['mode']} run needs at least one{via}")
+        if flat["mode"] == "implement" and not (flat["planner"] or args.plan):
             raise ConfigError(
                 f"[councils.{name}] names no planner council and --plan was not passed: the run's plan comes from one of the two{via}"
             )
+        if flat["mode"] == "implement" and "commit" in table:
+            raise ConfigError(f"config key [councils.{name}].commit is a fix knob, but {name!r} is an implement council{via}")
+        if flat["mode"] == "implement" and flat["review"]:
+            raise ConfigError(f"config key [councils.{name}].review is a fix knob, but {name!r} is an implement council{via}")
+        if flat["mode"] == "fix" and flat["planner"]:
+            raise ConfigError(f"config key [councils.{name}].planner is an implement knob: a fix run plans each finding itself{via}")
+        if flat["mode"] == "fix" and not (flat["review"] or args.review_file):
+            raise ConfigError(f"[councils.{name}] needs a review council or --review-file:<path>: it states neither{via}")
     elif len(agents) < 2:
         raise ConfigError(f"[councils.{name}] convenes {len(agents)} agent(s); a council needs ≥ 2{via}")
     #: casefolded name → as written: the human's `<name>: <text>` line matches case-insensitively
@@ -675,28 +690,32 @@ def convene_without_pi(
     goal = args.goal if args.goal is not None else flat["goal"]
     if flat["mode"] == "plan" and not (goal or "").strip():
         raise ConfigError(f"[councils.{name}] is a plan council with no goal stated anywhere")
-    if flat["mode"] == "implement":
-        if not (goal or "").strip():
-            raise ConfigError(f"[councils.{name}] is an implement council with no goal stated anywhere: state a goal or pass --goal")
-        if flat["planner"] or flat["reviewer"]:
+    if flat["mode"] == "implement" and not (goal or "").strip():
+        raise ConfigError(f"[councils.{name}] is an implement council with no goal stated anywhere: state a goal or pass --goal")
+    if flat["mode"] in ("implement", "fix"):
+        if flat["planner"] or flat["reviewer"] or flat["review"]:
             _crew_reference(config, name, flat)
     else:
-        for key, what in (("planner", "plan"), ("reviewer", "review")):
+        for key, what in (("planner", "plan"), ("reviewer", "review"), ("review", "review")):
             if flat[key]:
                 raise ConfigError(
-                    f"config key [councils.{name}].{key} names a {what} council for an implement run, "
+                    f"config key [councils.{name}].{key} names a {what} council for an implement or fix run, "
                     f"but {name!r} is a {flat['mode']} council"
                 )
+        if "commit" in table:
+            raise ConfigError(f"config key [councils.{name}].commit is a fix knob, but {name!r} is a {flat['mode']} council{via}")
         for index, entry in enumerate(agents_raw, 1):
             if isinstance(entry, dict) and "role" in entry:
                 raise ConfigError(
-                    f"config key [councils.{name}.agents][{index}].role is an implement builder knob, "
+                    f"config key [councils.{name}.agents][{index}].role is an implement or fix builder knob, "
                     f"but {name!r} is a {flat['mode']} council"
                 )
     if args.plan is not None and flat["mode"] != "implement":
         raise UsageError(f"--plan is an implement flag: {name!r} is a {flat['mode']} council, it runs no plan phase")
-    if args.dirty and flat["mode"] != "implement":
-        raise UsageError("--dirty overrides a dirty-tree refusal, and only implement runs refuse a dirty tree")
+    if args.review_file is not None and flat["mode"] != "fix":
+        raise UsageError(f"--review-file is a fix flag: {name!r} is a {flat['mode']} council, it fixes no findings")
+    if args.dirty and flat["mode"] not in ("implement", "fix"):
+        raise UsageError("--dirty overrides a dirty-tree refusal, and only implement and fix runs refuse a dirty tree")
 
     from .naming import chair_file_base, seat_file_base
 
@@ -727,13 +746,15 @@ def convene_without_pi(
         config_path=config.supplied_by(name),
         config_layers=list(config.paths),
         untrusted=untrusted,
-        in_place=flat["mode"] == "implement" or bool(args.in_place or not namespaces_available or flat["in_place"]),
+        in_place=flat["mode"] in ("implement", "fix") or bool(args.in_place or not namespaces_available or flat["in_place"]),
         project=project,
         planning_rounds=int(flat["planning_rounds"]),
         fix_budget=int(flat["fix_budget"]),
         replans=int(flat["replans"]),
         planner=flat["planner"],
         reviewer=flat["reviewer"],
+        review=flat["review"],
+        commit=bool(flat["commit"]),
         provider_concurrency=_provider_limits(config, agents, chair),
     )
     if council.max_rounds < 1:
@@ -760,13 +781,13 @@ def provider_seat_pool(council: Council, provider: str | None) -> int:
 
 
 def _crew_reference(config: ConfigFile, name: str, flat: dict) -> None:
-    """`planner` must name a plan council and `reviewer` a review council: no self, no template, no other mode."""
-    for key, mode in (("planner", "plan"), ("reviewer", "review")):
+    """`planner` must name a plan council, `reviewer` and `review` a review council: no self, no template, no other mode."""
+    for key, mode in (("planner", "plan"), ("reviewer", "review"), ("review", "review")):
         target = flat[key]
         if not target:
             continue
         if target == name:
-            raise ConfigError(f"config key [councils.{name}].{key} names the implement council itself, which cannot be its own {key}")
+            raise ConfigError(f"config key [councils.{name}].{key} names the {flat['mode']} council itself, which cannot be its own {key}")
         if str(target).startswith(TEMPLATE_PREFIX):
             raise ConfigError(f"config key [councils.{name}].{key} names {target!r}, a template: templates are extended, not convened")
         if target not in config.councils:
@@ -786,13 +807,18 @@ def _crew_reference(config: ConfigFile, name: str, flat: dict) -> None:
 
 
 def resolve_crews(config: ConfigFile, council: Council, args: Args) -> list[tuple[str, Council]]:
-    """The implement run's crews in crew order: `(label, council)` — planner, builder, reviewer.
+    """The build run's crews in crew order: `(label, council)` — implement's planner, or fix's
+    review, then the builder, then the reviewer.
 
     Seats take global `AgentN` ids in crew order; borrowed seats are shown with a crew suffix.
     """
     crews: list[tuple[str, Council]] = []
-    # `--plan` skips the planning phase, so the planner crew is not convened at all
-    if council.planner and not args.plan:
+    # `--plan` skips the planning phase, so the planner crew is not convened at all;
+    # `--review-file` skips the review phase the same way, superseding a configured review council
+    if council.mode == "fix":
+        if council.review and not args.review_file:
+            crews.append(("review", _borrow(config, council, council.review)))
+    elif council.planner and not args.plan:
         crews.append(("planner", _borrow(config, council, council.planner)))
     crews.append(("builder", council))
     if council.reviewer:

@@ -357,6 +357,10 @@ def schema_hint(mode: str, *, phase: str, human: str = "blocking") -> str:
         from . import implement as implement_text
 
         return implement_text.structure_schema()
+    if phase == "plan":
+        from . import fix as fix_text
+
+        return fix_text.plan_schema()
     if phase == "phase0":
         return _mode_text(mode).phase0_schema(human)
     if phase in SEAT_PHASES:

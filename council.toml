@@ -133,3 +133,21 @@ You write the user-visible text the run ships.
 Prohibit epanorthosis, litotes, and contrastive negation.
 Em-dashes are forbidden in prose; some recommended alternatives are periods, commas, colons, or parentheses where appropriate.
 """
+
+[councils.fixit]                   # `mech-council fixit` — review, gate, then fix and commit the agreed findings
+mode = "fix"
+review = "review"
+reviewer = "review"
+
+[councils.fixit.chair]
+name = "Chair"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+
+[[councils.fixit.agents]]
+name = "Forge"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are the builder. Plan the one finding you hold, keep the change as small as the finding allows, and satisfy the finding's gate — run it, or verify its condition — until it passes.
+"""

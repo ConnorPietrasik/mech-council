@@ -38,6 +38,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("rounds", "r", note="round limit"),
     Flag("goal", "g", note="goal"),
     Flag("plan", None, note="a plan document to structure into stages (implement runs only)"),
+    Flag("review-file", None, note="a previous run's report.json: fix its findings instead of convening the review crew (fix runs only)"),
     Flag("output", "o", note="where the report is written"),
     Flag("verbosity", None, choices=VERBOSITY_LEVELS, note="artifact level"),
     Flag("format", None, choices=("md", "html", "json", "both"), note="report format"),
@@ -45,7 +46,7 @@ FLAGS: tuple[Flag, ...] = (
     Flag("allow-nested", None, takes_value=False),
     Flag("untrusted", None, takes_value=False),
     Flag("in-place", None, takes_value=False),
-    Flag("dirty", None, takes_value=False, note="implement runs only: start on a dirty git tree anyway"),
+    Flag("dirty", None, takes_value=False, note="implement and fix runs: start on a dirty git tree anyway"),
     Flag("overwrite", None, takes_value=False),
 )
 
@@ -61,6 +62,7 @@ class Args:
     rounds: int | None = None
     goal: str | None = None
     plan: str | None = None
+    review_file: str | None = None
     verbosity: str | None = None
     format: str | None = None
     human: str | None = None
@@ -93,8 +95,10 @@ flags:
   -g, --goal <text>        the goal the seats are briefed with
       --plan <file>        implement runs only: skip the plan phase and structure this plan document
                            (a previous run's plan.md) into the stages and gates the run builds
-      --dirty              implement runs only: start even on a dirty git tree — the stage diffs and the
-                           report's diffstat are measured against it
+      --review-file <file> fix runs only: skip the review crew and fix the findings of this file —
+                           a review run's report.json (run it with --format json to get one)
+      --dirty              implement and fix runs: start even on a dirty git tree — the stage diffs and
+                           the report's diffstat are measured against it
       --verbosity <lvl>    quiet (default) < summary < detail < debug < full: what the run directory keeps beyond
                            the report — summary adds run.json, detail adds human_input.json, debug adds events.jsonl,
                            full adds the verbatim transcripts under agents/
@@ -106,8 +110,8 @@ flags:
                            council's questions, and whether the human answers them at all. Unstated with
                            no terminal on stdin, the run takes none
   -o, --output <path>      write the report here instead of into the run directory: an existing
-                           directory keeps the mode's name (report.md / plan.md / implementation.md, or the
-                           .html and .json equivalents), anything else is the file itself.
+                           directory keeps the mode's name (report.md / plan.md / implementation.md /
+                           fix.md, or the .html and .json equivalents), anything else is the file itself.
                            Nothing else follows it there; run.json names it
                            when the verbosity keeps run.json (summary or higher)
       --overwrite          replace an existing --output target without being asked first
@@ -183,7 +187,7 @@ def parse_args(argv: list[str]) -> Args:
             value_num = _whole_number(value, flag)
             _record_override(args, "rounds", value_num, flag, args.notes)
         else:
-            _record_override(args, flag.long, value, flag, args.notes)
+            _record_override(args, flag.long.replace("-", "_"), value, flag, args.notes)
     if len(positional) > 1:
         extra = " ".join(positional[1:])
         raise UsageError(f"one positional is accepted, not a second one ({extra!r})")

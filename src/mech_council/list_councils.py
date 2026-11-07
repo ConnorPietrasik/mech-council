@@ -102,7 +102,7 @@ def _seat(spec: config_mod.MemberSpec, *, show_role: bool = False) -> str:
 
 
 def _roster(council: config_mod.Council) -> str:
-    show_role = council.mode == "implement"
+    show_role = council.mode in ("implement", "fix")
     return ", ".join(_seat(spec, show_role=show_role) for spec in council.agents) + f" · chair: {_seat(council.chair)}"
 
 
@@ -125,6 +125,8 @@ def _knobs(council: config_mod.Council) -> str:
         "replans": council.replans,
         "planner": council.planner,
         "reviewer": council.reviewer,
+        "review": council.review,
+        "commit": council.commit,
         "chair_timeout_sec": council.chair_timeout_sec,
         "verbosity": cli.VERBOSITY_LEVELS[council.verbosity],
         "pi_cli": council.pi_cli or None,

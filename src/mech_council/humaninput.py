@@ -197,6 +197,7 @@ class Checkpoint:
         waiting: bool,
         notes: Sequence[tuple[Note, str]] = (),
     ) -> CheckpointOutcome:
+        """What prints, what a line means, and where a disposition lands."""
         result = CheckpointOutcome(waited=False)
         if notes:
             self.console.say(render_notes(notes, names=self.names))

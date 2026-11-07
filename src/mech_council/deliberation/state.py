@@ -21,6 +21,11 @@ IMPLEMENTED = "implemented"
 #: implement: some stages landed, some are blocked
 PARTIAL = "partial"
 
+#: fix: every selected finding landed, and the final check passed
+FIXED = "fixed"
+#: fix: the review found nothing to fix
+NOTHING_TO_FIX = "nothing_to_fix"
+
 NO_PREFERENCE = "no_preference"
 DECLINED = "declined"
 #: a `backing` naming a merge one seat wrote down: `merged: <label>`
@@ -225,8 +230,35 @@ class StageRecord:
 
 
 @dataclass
+class FindingRecord:
+    """One finding of the fix run's list, as the run fixed it or failed at it."""
+
+    index: int
+    finding_id: str  # the docket id the finding stands on
+    severity: str
+    claim: str
+    builder: str = ""  # the global id that held the baton
+    status: str = "pending"  # pending | fixed | blocked
+    plan: dict = field(default_factory=dict)  # state / gate / scope / exceptions
+    pre_tree: str = ""  # the tree the finding started from
+    commit_sha: str = ""  # the run's commit of the passed fix; empty when commit = false or no tree change
+    diff_path: str = ""  # a blocked finding's pre→post diff, in the run directory
+    gate_ok: bool = False  # the gate, as the verifier last read it
+    gate_output: str = ""  # the builder's report of the gate from its last pass
+    gate_rerun: str = ""  # the verifier's report of the gate from its last pass
+    gate_item: str = ""  # the docket item standing on a still-failing gate
+    changed: list[str] = field(default_factory=list)  # the paths the passes named as created or modified
+    fix_passes: list[dict] = field(default_factory=list)  # {pass, addressed: [{id, how}]}
+    replans: list[dict] = field(default_factory=list)  # {pass, note, stages: int}
+    review_findings: list[str] = field(default_factory=list)  # the docket ids the verifier raised against the fix
+    review_blind: bool = False  # every verifier verdict was unreadable: the gate stood alone
+    blocked_reasons: list[str] = field(default_factory=list)
+    verify_note: str = ""  # how the fix was verified, when not by the crew's full pass
+
+
+@dataclass
 class Execution:
-    """The implement run's spine, kept on the shared docket for the report and `run.json`."""
+    """The build run's spine, kept on the shared docket for the report and `run.json`."""
 
     crews: list[dict] = field(default_factory=list)  # {label, council, mode, seats: [(id, name)], chair: {name, file_base}}
     adopted: str = ""  # the direction token the run builds
@@ -238,6 +270,16 @@ class Execution:
     baseline: str = ""  # the tree the run started from, when the project is a git repo
     final_tree: str = ""  # the tree the run ended on, for the report's diffstat
     stages: list[StageRecord] = field(default_factory=list)
+    #: fix: where the findings came from — {"how": "council" | "file", "council", "date", "outcome", "rounds", "path"}
+    source: dict = field(default_factory=dict)
+    #: fix: the gate's result, one line per question id — selected | skipped | added
+    gate: dict = field(default_factory=dict)
+    #: fix: the per-finding ledger, in fix order
+    findings: list[FindingRecord] = field(default_factory=list)
+    #: fix: the whole-project check over the finished tree — {ok, ran, evidence}
+    final_check: dict = field(default_factory=dict)
+    #: fix: the run's commits — {sha, finding, message}
+    commits: list[dict] = field(default_factory=list)
 
     @property
     def blocked(self) -> list[StageRecord]:

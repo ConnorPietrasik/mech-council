@@ -1,3 +1,2 @@
-"fix" - review, then human / llm gate to decide which findings to fix, then either plan then implement or just go straight to implement
-EVENTUALLY: Maybe a cool browser UI that can show the streams of each agent + allow direct messaging or whatever
+EVENTUALLY: A cool browser UI or something that can show the streams of each agent + allow direct messaging or whatever
 EVENTUALLY: Reference docker container for super easy download / setup?

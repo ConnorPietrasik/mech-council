@@ -1,4 +1,4 @@
-"""The implement run's rosters: the builder's own council plus the borrowed planner and reviewer crews.
+"""The build run's rosters: the builder's own council plus the borrowed planner and reviewer crews.
 
 A crew is a council of its own, spawned and disposed at phase boundaries. Seats wear the run's
 global `AgentN` ids; `CrewLanes` spans the live crews' `Lanes`.
@@ -136,7 +136,7 @@ class Crew:
 
 
 class Crews:
-    """The run's crews in crew order: the planner, the builder, the reviewer."""
+    """The run's crews in crew order: the planner or review crew, the builder, and the reviewer."""
 
     def __init__(
         self,

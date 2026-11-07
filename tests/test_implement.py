@@ -196,6 +196,7 @@ def test_the_stage_diff_is_a_snapshot_since_the_last_review(tmp_path):
     from typing import cast
 
     from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.tree import Tree
 
     project = os.path.join(str(tmp_path), "proj")
     os.makedirs(project)
@@ -206,9 +207,8 @@ def test_the_stage_diff_is_a_snapshot_since_the_last_review(tmp_path):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
 
     host = types.SimpleNamespace(project=project, run_dir=os.path.join(str(tmp_path), "runs"))
-    host._git = types.MethodType(Implement._git, host)
-    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
-    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    host.tree = Tree(project, host.run_dir)
+    host.last_tree = host.tree.snapshot()
     assert host.last_tree, "the starting tree snapshots"
 
     with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
@@ -238,6 +238,7 @@ def test_a_change_that_carries_the_old_mtime_still_reaches_the_review(tmp_path):
     from typing import cast
 
     from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.tree import Tree
 
     project = os.path.join(str(tmp_path), "proj")
     os.makedirs(project)
@@ -249,9 +250,8 @@ def test_a_change_that_carries_the_old_mtime_still_reaches_the_review(tmp_path):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
 
     host = types.SimpleNamespace(project=project, run_dir=os.path.join(str(tmp_path), "runs"))
-    host._git = types.MethodType(Implement._git, host)
-    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
-    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    host.tree = Tree(project, host.run_dir)
+    host.last_tree = host.tree.snapshot()
     assert host.last_tree, "the starting tree snapshots"
 
     with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
@@ -270,6 +270,7 @@ def test_a_failed_diff_does_not_advance_the_last_tree(tmp_path):
     from typing import cast
 
     from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.tree import Tree
 
     project = os.path.join(str(tmp_path), "proj")
     os.makedirs(project)
@@ -280,27 +281,26 @@ def test_a_failed_diff_does_not_advance_the_last_tree(tmp_path):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
 
     host = types.SimpleNamespace(project=project, run_dir=os.path.join(str(tmp_path), "runs"))
-    host._git = types.MethodType(Implement._git, host)
-    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
-    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    host.tree = Tree(project, host.run_dir)
+    host.last_tree = host.tree.snapshot()
     baseline_tree = host.last_tree
     assert baseline_tree
 
-    real_git = host._git
+    real_git = host.tree.git
 
     def failing_diff(*args, **kwargs):
         if args and args[0] == "diff":
             return False, ""
         return real_git(*args, **kwargs)
 
-    host._git = failing_diff
+    host.tree.git = failing_diff
     with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
         handle.write("v = 2\n")
     diff = asyncio.run(Implement._stage_diff(cast("Implement", host), changed=["app.py"]))
     assert "### app.py" in diff and "v = 2" in diff, "a failed diff falls back to the changed files"
     assert host.last_tree == baseline_tree, "the failed diff is not the next review's baseline"
 
-    host._git = real_git
+    host.tree.git = real_git
     with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
         handle.write("v = 3\n")
     diff = asyncio.run(Implement._stage_diff(cast("Implement", host), changed=["app.py"]))
@@ -315,6 +315,7 @@ def test_the_snapshot_is_scoped_to_the_project_when_it_sits_in_a_larger_repo(tmp
     from typing import cast
 
     from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.tree import Tree
 
     repo = str(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
@@ -328,9 +329,8 @@ def test_the_snapshot_is_scoped_to_the_project_when_it_sits_in_a_larger_repo(tmp
         handle.write("v = 1\n")
 
     host = types.SimpleNamespace(project=project, run_dir=os.path.join(repo, "runs"))
-    host._git = types.MethodType(Implement._git, host)
-    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
-    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    host.tree = Tree(project, host.run_dir)
+    host.last_tree = host.tree.snapshot()
     assert host.last_tree, "the starting tree snapshots"
 
     with open(os.path.join(repo, "outside.py"), "w", encoding="utf-8") as handle:
@@ -350,6 +350,7 @@ def test_the_snapshots_keep_the_repo_object_store_untouched(tmp_path):
     from typing import cast
 
     from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.tree import Tree
 
     project = os.path.join(str(tmp_path), "proj")
     run_dir = os.path.join(str(tmp_path), "runs")
@@ -372,10 +373,9 @@ def test_the_snapshots_keep_the_repo_object_store_untouched(tmp_path):
     before = objects()
 
     host = types.SimpleNamespace(project=project, run_dir=run_dir)
-    host._git = types.MethodType(Implement._git, host)
-    host._snapshot_tree = types.MethodType(Implement._snapshot_tree, host)
+    host.tree = Tree(project, run_dir)
     host._stage_diff = types.MethodType(Implement._stage_diff, host)
-    host.last_tree = Implement._snapshot_tree(cast("Implement", host))
+    host.last_tree = host.tree.snapshot()
     assert host.last_tree, "the starting tree snapshots"
 
     with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
@@ -385,6 +385,67 @@ def test_the_snapshots_keep_the_repo_object_store_untouched(tmp_path):
 
     assert objects() == before, "the repo's object store is untouched by the run's snapshots"
     assert os.path.isdir(os.path.join(run_dir, "review_objects")), "the run's trees live in the run directory"
+
+
+def test_restore_round_trips_a_path_git_quotes(tmp_path):
+    """A non-ASCII path comes back C-escaped from name-status; the rollback unquotes it, or it
+    fails and the blocked fix's tree is left standing."""
+    from mech_council.deliberation.tree import Tree
+
+    project = os.path.join(str(tmp_path), "proj")
+    os.makedirs(project)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    with open(os.path.join(project, "café.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+
+    tree = Tree(project, os.path.join(str(tmp_path), "runs"))
+    base = tree.snapshot()
+    assert base
+    with open(os.path.join(project, "café.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    ok, why = tree.restore(base)
+    assert ok, why
+    with open(os.path.join(project, "café.py"), encoding="utf-8") as handle:
+        assert handle.read() == "v = 1\n", "the quoted path rolls back like any other"
+
+
+def test_restore_round_trips_a_project_that_sits_in_a_larger_repo(tmp_path):
+    """The restore's diff runs from the project, and name-status prints repo-root paths: the
+    project's prefix must come off, or a blocked fix's tree is left standing in a subdirectory."""
+    from mech_council.deliberation.tree import Tree
+
+    repo = str(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    with open(os.path.join(repo, "outside.txt"), "w", encoding="utf-8") as handle:
+        handle.write("outside = 1\n")
+    project = os.path.join(repo, "proj")
+    os.makedirs(project)
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=repo, check=True, capture_output=True)
+
+    tree = Tree(project, os.path.join(repo, "runs"))
+    base = tree.snapshot()
+    assert base
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    with open(os.path.join(project, "new.py"), "w", encoding="utf-8") as handle:
+        handle.write("x = 1\n")
+    os.makedirs(os.path.join(project, "added"))
+    with open(os.path.join(project, "added", "deep.py"), "w", encoding="utf-8") as handle:
+        handle.write("y = 1\n")
+
+    ok, why = tree.restore(base)
+    assert ok, why
+    with open(os.path.join(project, "app.py"), encoding="utf-8") as handle:
+        assert handle.read() == "v = 1\n", "the modified path rolls back in a subdirectory project"
+    assert not os.path.exists(os.path.join(project, "new.py")), "the added file is removed"
+    assert not os.path.exists(os.path.join(project, "added")), "the added directory is swept up"
+    with open(os.path.join(repo, "outside.txt"), encoding="utf-8") as handle:
+        assert handle.read() == "outside = 1\n", "the rollback never touches outside the project"
 
 
 def test_the_dirty_check_measures_only_the_project_tree(tmp_path):
@@ -416,6 +477,44 @@ def test_the_dirty_check_measures_only_the_project_tree(tmp_path):
         handle.write("v = 2\n")
     with pytest.raises(UsageError):
         startup._implement_notes(council, Args())
+
+
+def test_the_run_commit_carries_only_the_project(tmp_path):
+    """A larger repo with staged dirt outside the project: the dirt check never sees it (it is
+    project-scoped), so the commit itself must be scoped, or the user's staged change rides into
+    the run's commit."""
+    from mech_council.deliberation.tree import Tree
+
+    repo = str(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    with open(os.path.join(repo, "outside.txt"), "w", encoding="utf-8") as handle:
+        handle.write("outside = 1\n")
+    project = os.path.join(repo, "proj")
+    os.makedirs(project)
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=repo, check=True, capture_output=True)
+
+    # staged outside the project: the run's dirt check reads the tree as clean
+    with open(os.path.join(repo, "outside.txt"), "w", encoding="utf-8") as handle:
+        handle.write("outside = 2\n")
+    subprocess.run(["git", "add", "outside.txt"], cwd=repo, check=True, capture_output=True)
+    assert not subprocess.run(["git", "status", "--porcelain", "--", "."], cwd=project, check=True, capture_output=True, text=True).stdout
+
+    tree = Tree(project, os.path.join(repo, "runs"))
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    with open(os.path.join(project, "new.py"), "w", encoding="utf-8") as handle:
+        handle.write("x = 1\n")
+    sha, why = tree.commit("fix F1: the change")
+    assert sha, why
+    shown = subprocess.run(
+        ["git", "show", "--name-only", "--format=", sha], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.split()
+    assert sorted(shown) == ["proj/app.py", "proj/new.py"], "the commit carries only the project's change"
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True).stdout
+    assert "outside.txt" in status, "the user's staged dirt is still staged, as the run found it"
 
 
 # ------------------------------------------------------------ crew resolution

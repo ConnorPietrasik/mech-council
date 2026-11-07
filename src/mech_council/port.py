@@ -59,6 +59,14 @@ class Port:
             return RawAsk(text=str(failure), failure=str(failure))
         return _raw(outcome)
 
+    async def builder_plan(self, agent: str, message: str, *, round_: int) -> RawAsk:
+        """A builder's plan pass for one finding: the one-stage shape, read like a structure reply."""
+        try:
+            outcome = await self.lanes.ask_agent(agent, message, round_=round_, kind="structure", phase="plan", parse_kw={})
+        except (AskUnusable, AskLost) as failure:
+            return RawAsk(text=str(failure), failure=str(failure))
+        return _raw(outcome)
+
     async def builder_replan(self, agent: str, message: str, *, round_: int) -> RawAsk:
         """A builder's replan: a revised, smaller breakdown of the stuck stage."""
         try:

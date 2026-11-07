@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 
-from ..deliberation.implement import blind_note, snapshot_env
+from ..deliberation.implement import blind_note
 from ..deliberation.state import Docket, Execution, StageRecord
+from ..deliberation.tree import snapshot_env
 from . import report_plan
 from .context import ReportContext
 from .doc import Block, Heading, List, ListItem, Paragraph, Report, T, Table, Text

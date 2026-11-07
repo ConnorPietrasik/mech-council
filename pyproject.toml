@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mech-council"
-description = "A council of coding agents that reviews a project, plans a task, or implements one."
+description = "A council of coding agents that reviews a project, plans a task, implements one — or fixes a review's findings."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

@@ -43,7 +43,7 @@ class Chair:
         return await self._publication(message, kind="pick", phase="pick", round_=round_)
 
     async def gate_check(self, message: str, *, round_: int) -> dict:
-        """The implement run's chair verifying a stage's gate: the reply must carry an explicit `ok`."""
+        """The run's chair verifying a gate — a stage's or a finding's: the reply must carry an explicit `ok`."""
         return await self._publication(message, kind="gate_check", phase="gate_check", round_=round_)
 
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:

@@ -6,7 +6,7 @@ import sys
 
 from . import cli
 
-#: The starter user council.toml: `review`, `plan` and `build` (implement) councils, no provider or model
+#: The starter user council.toml: `review`, `plan`, `build` (implement) and `fix` councils, no provider or model
 #: stated, so every seat takes whatever pi is configured with.
 STARTER = '''\
 # council.toml — the user councils: one config that serves every project.
@@ -111,6 +111,21 @@ role = "prose"
 persona = """
 You write the user-visible text the run ships: docs, messages, names. You match the project's existing voice, and you never touch code.
 """
+
+[councils.fixit]                   # `mech-council fixit`
+mode = "fix"
+review = "review"
+reviewer = "review"
+human = "blocking"
+
+[councils.fixit.chair]
+name = "Chair"
+
+[[councils.fixit.agents]]
+name = "Forge"
+persona = """
+You are the builder. Plan the one finding you hold, keep the change as small as the finding allows, and satisfy the finding's gate — run it, or verify its condition — until it passes.
+"""
 '''
 
 HELP = """\
@@ -118,7 +133,7 @@ usage: mech-council init [--overwrite]
 
 Write the starter user council.toml to the user location: $COUNCIL_CONFIG, else
 $XDG_CONFIG_HOME/council/council.toml, else ~/.config/council/council.toml.  The starter holds a
-`review`, a `plan` and an `implement` (build) council; no seat states a provider or a model,
+`review`, a `plan`, an `implement` (build) and a `fix` council; no seat states a provider or a model,
 so every seat takes whatever pi is configured with.
 
 flags:

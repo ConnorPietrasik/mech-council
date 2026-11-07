@@ -666,7 +666,7 @@ def _human_input(data: dict, refused: list[dict[str, str]]) -> list[dict]:
         if not question:
             if any(entry.values()):
                 record = {"field": "human_input", "why": "carries no question text", "said": text_of(entry), "counts": "dropped"}
-                if (about := text_of(pick(entry, "item")).strip()):
+                if about := text_of(pick(entry, "item")).strip():
                     record["about"] = about
                 refused.append(record)
             continue
