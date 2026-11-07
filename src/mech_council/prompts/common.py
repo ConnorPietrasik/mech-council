@@ -9,6 +9,10 @@ overlay: `rm -rf` of a project directory fails with `EIO` and leaves it half-emp
 `rename` of one gives `EXDEV`, and `mv` copies the tree, fails to delete the source and
 leaves both copies. A directory you created yourself removes normally. `$TMPDIR`
 (`.council-scratch` inside your working directory) has no such limits — use it freely.
+The services the project talks to — databases, running stacks, external APIs — are not in
+the sandbox: peers may be exercising the same ones while you work. Before you file a flaky
+test, rerun it in isolation and say what that showed — a flake that reproduces in isolation
+is still a defect.
 An overlay errno is never an item you raise: it says what the sandbox forbids, not what the
 project does. If you hit one, say what you were trying to do and move on.
 """
@@ -20,9 +24,11 @@ Your working directory is the project. The other seats work in this same tree at
 you did not make is a peer's work in progress — never a defect, and never yours to finish,
 revert or reformat. Touch only what your own task touches, and leave the rest of the tree
 as you found it. `$TMPDIR` is a directory of your own outside the project: put anything
-half-finished there rather than in the tree. A filesystem refusal (`EACCES`, `EROFS`,
-`ENOSPC`) says what your environment forbids, not what the project does: say what you were
-trying to do and move on.
+half-finished there rather than in the tree. The services the project talks to — databases,
+running stacks, external APIs — are shared too. Before you file a flaky test, rerun it in
+isolation and say what that showed — a flake that reproduces in isolation is still a defect.
+A filesystem refusal (`EACCES`, `EROFS`, `ENOSPC`) says what your environment forbids, not
+what the project does: say what you were trying to do and move on.
 """
 
 PROTOCOL = """\
