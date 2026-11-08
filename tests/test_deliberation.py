@@ -53,8 +53,8 @@ def stance(docket: Docket, item: str, agent: str, value: str, **kw) -> None:
         (("agree", "agree", "agree"), AGREED),
         (("agree", "agree", "abstain"), AGREED),
         (("agree", "agree", None), UNSEEN),  # not complete
-        (("agree", "agree", "disagree"), DISPUTED),  # disputed beats the bar
-        (("agree", "disagree", "abstain"), DISPUTED),
+        (("agree", "agree", "disagree"), AGREED),  # a bare dissent does not hold the met bar
+        (("agree", "disagree", "abstain"), UNHEARD),  # heard, and no refutation stands
         (("disagree", "disagree", "disagree"), UNHEARD),  # heard, but nothing refutes
         (("disagree", "disagree", "abstain"), UNHEARD),
         (("abstain", "abstain", "abstain"), UNHEARD),
@@ -89,6 +89,14 @@ def test_rejection_needs_a_reason_and_is_not_majority():
     for agent in docket.roster:
         stance(docket, "F1", agent, DISAGREE)  # no note, no evidence
     assert dispositions.derive(docket, "F1") == UNHEARD  # heard, and unheard
+
+
+def test_a_reasoned_dissent_still_holds_the_met_bar():
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE)
+    stance(docket, "F1", "Agent2", AGREE)
+    stance(docket, "F1", "Agent3", DISAGREE, note="refuted by X")
+    assert dispositions.derive(docket, "F1") == DISPUTED
 
 
 def test_a_declined_record_is_inert_in_every_count():

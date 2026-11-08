@@ -1201,8 +1201,12 @@ def test_a_question_shown_at_the_grace_checkpoint_is_unanswered_never_unasked():
         if ask.kind == "merge":
             return {"groups": []}
         if ask.who == "Agent2":
-            # an open dispute keeps `evaluate` at GO, so the round limit is what ends the run
-            return stance_all(ask, "disagree")
+            # a reasoned objection keeps `evaluate` at GO, so the round limit is what ends the run
+            return payload(
+                positions=[{"item": item, "stance": "disagree", "evidence": "app.py:9"} for item in shown_items(ask.text)],
+                backing="no_preference",
+                signoff=True,
+            )
         return stance_all(ask, "agree")
 
     async def main():
@@ -2949,7 +2953,12 @@ def test_the_non_blocking_terminal_ask_is_asked_on_the_way_out_never_parked():
         if ask.kind == "merge":
             return {"groups": []}
         if ask.who == "Agent2":
-            return stance_all(ask, "disagree")
+            # a reasoned objection holds the item open, so the ceiling is what ends the run
+            return payload(
+                positions=[{"item": item, "stance": "disagree", "evidence": "app.py:9"} for item in shown_items(ask.text)],
+                backing="no_preference",
+                signoff=True,
+            )
         return stance_all(ask, "agree")
 
     async def main():

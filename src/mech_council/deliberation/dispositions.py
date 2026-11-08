@@ -19,13 +19,14 @@ def derive(docket: Docket, item_id: str) -> str:
         return HUMAN
     counted = [docket.effective_stance(item_id, a) for a in docket.roster]
     agrees = [c for c in counted if c == AGREE]
-    disputes = [c for c in counted if c == DISAGREE]
+    # a bare dissent is noted, not blocking: only a reasoned objection holds the bar
+    disputes = [s for s in objections(docket, item_id) if s.reasoned]
     if agrees and disputes:
         return DISPUTED
     complete = all(c is not None for c in counted)
-    if complete and len(agrees) >= docket.bar() and not disputes:
+    if complete and len(agrees) >= docket.bar():
         return AGREED
-    if complete and not agrees and any(s.reasoned for s in objections(docket, item_id)):
+    if complete and not agrees and disputes:
         return REJECTED
     if complete:
         return UNHEARD
