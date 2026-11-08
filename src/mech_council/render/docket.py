@@ -114,11 +114,8 @@ NOTE_WINDOW = 2
 
 def _notes_section(docket: Docket, viewer: str) -> list[str]:
     """What peers told the human without asking."""
-    standing = [
-        note
-        for note in (docket.human_notes[nid] for nid in docket.note_order)
-        if note.state == STANDING and not folded_away(docket, note)
-    ]
+    notes = (docket.human_notes[nid] for nid in docket.note_order)
+    standing = [note for note in notes if note.state == STANDING and not folded_away(docket, note)]
     fresh = [note for note in standing if note.updated_round >= docket.round - NOTE_WINDOW]
     if not fresh:
         return []
