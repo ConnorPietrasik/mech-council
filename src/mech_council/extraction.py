@@ -242,8 +242,9 @@ def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str
     while start >= 0:
         end = _balanced_end(cleaned, start)
         if end is None:
-            # an unclosed object is a reply cut off mid-answer; its contents are a fragment
-            if _opens_an_object(cleaned, start):
+            # an unclosed object that is a JSON document to the end of the reply was cut off mid-answer, its
+            # contents a fragment; a prose `{` that never closes gets the next `{` a chance
+            if _opens_an_object(cleaned, start) and _is_cut_off(cleaned, start):
                 return None, "unbalanced JSON object in the answer: the reply was cut off, so send the object whole"
             start = cleaned.find("{", start + 1)
             continue
@@ -276,6 +277,20 @@ def _opens_an_object(text: str, start: int) -> bool:
     while pos < len(text) and text[pos].isspace():
         pos += 1
     return pos < len(text) and text[pos] == '"'
+
+
+def _is_cut_off(text: str, start: int) -> bool:
+    """Whether the reply was cut off at `start`: the text from there is a JSON document to the end of it."""
+    body = text[start:]
+    try:
+        json.JSONDecoder().raw_decode(body)
+    except json.JSONDecodeError as exc:
+        # an error at the end of the text — or a string that never closes — is a cut-off document; an error
+        # before it is prose
+        return exc.pos >= len(body) - 1 or exc.msg.startswith("Unterminated string")
+    except RecursionError:
+        return True  # a brace nest too deep to scan: not prose
+    return False  # a whole object: `_balanced_end` would have found it
 
 
 def _balanced_end(text: str, start: int) -> int | None:

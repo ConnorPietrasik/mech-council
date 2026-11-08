@@ -61,6 +61,18 @@ def test_a_brace_left_open_in_the_prose_does_not_doom_the_object_after_it():
     assert not out.invalid and out.data["positions"][0]["item"] == "F1"
 
 
+def test_a_lone_brace_in_double_quotes_in_the_prose_does_not_doom_the_object_after_it():
+    out = parse('the "{" character opens an object.\n' + json.dumps(positions(("F1", "agree"))))
+    assert not out.invalid and out.data["positions"][0]["item"] == "F1"
+
+
+def test_a_reply_cut_off_after_a_complete_entry_is_cut_off_and_never_becomes_that_entry():
+    """A cut-off reply read through its nested entries would keep a partial report as the whole one."""
+    text = json.dumps({"new_items": [{"claim": "it drops the error"}], "summary": "halfway there"})
+    out = parse_phase0(text[:-1], mode="review")
+    assert out.invalid and out.errors
+
+
 def test_an_answer_cut_off_mid_object_owes_a_repair_and_never_becomes_the_object_nested_in_it():
     """A truncated reply leaves a complete position nested in it; that position must never be taken as the answer."""
     out = parse(json.dumps(positions(("F1", "agree"), ("F2", "disagree")))[:-1])
