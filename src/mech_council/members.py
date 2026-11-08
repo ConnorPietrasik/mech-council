@@ -131,7 +131,6 @@ class Members:
         if old is not None:
             # the dead spawn's ns fd stays open until after the sweep
             await lifecycle.dispose(old)
-            self.members[file_base] = old
         self.console.event("member_restart", member=file_base, reason=why)
         self.console.say(f"restarting {who} ({why})")
         spec = self.spec_for(file_base)
