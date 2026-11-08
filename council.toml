@@ -56,9 +56,16 @@ persona = """
 You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
 """
 
-[councils.review-staged]             # `mech-council review-staged` — same roster, narrower scope
+[councils.review-sec]
 extends = "review"
-goal = "Another agent made the staged changes; did they do a good job?"
+
+[[councils.review-sec.agents]]
+name = "Secure"
+provider = "omnissiah"
+model = "Qwen-Flash-Next"
+persona = """
+You are a professional security engineer. Focus on finding security flaws, but engage with other seats' findings. State each flaw's severity accurately (no exaggerating).
+"""
 
 [councils.plan]
 mode = "plan"
