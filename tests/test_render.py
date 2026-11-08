@@ -6,7 +6,7 @@ import re
 
 from mech_council.deliberation import dispositions, escalations, state
 from mech_council.render import docket as docket_render
-from mech_council.render import preview, report_fix, report_plan, report_review
+from mech_council.render import preview, report_fix, report_implement, report_plan, report_review
 from mech_council.render.context import Interrupted, ReportContext, RosterRow, minimal_report
 
 
@@ -680,3 +680,13 @@ def test_the_fix_report_files_notes_under_its_findings_and_keeps_the_rest():
     body = section(text, "Notes for the human (1)")
     assert "the smell needs no action" in body and "on V1" in body, "a note on an item the report does not print stays in the ledger"
     assert "the gate re-run is the real proof" not in body, "a filed note leaves the flat ledger"
+
+
+def test_the_diffstat_stat_line_strips_the_bar_and_drops_the_summary_line():
+    lines = [" src/foo.py | 12 ++++++------", " src/bar.py |  4 ++--", " 2 files changed, 8 insertions(+), 8 deletions(-)"]
+    assert [report_implement._stat_line(line) for line in lines] == ["src/foo.py | 12", "src/bar.py | 4", ""]
+    # a file whose name carries a pipe still keeps its count, and a binary line has no bar to strip
+    assert report_implement._stat_line(" src/a | b.py | 3 ++- ") == "src/a | b.py | 3"
+    assert report_implement._stat_line(" src/img.png | Bin 1234 -> 5678 bytes") == "src/img.png | Bin 1234 -> 5678 bytes"
+    # a blank line is not a file line: it comes back empty rather than raising
+    assert report_implement._stat_line("") == "" and report_implement._stat_line("   ") == ""

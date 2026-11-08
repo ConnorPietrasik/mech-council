@@ -154,10 +154,15 @@ def _user_text(project: str, rec: StageRecord) -> list[Block]:
 
 
 def _stat_line(line: str) -> str:
-    """A `git diff --stat` file line without its column padding: `path | changes`, the + - bar dropped."""
-    path, sep, rest = line.strip().rpartition(" | ")
-    count = rest.split(None, 1)[0]
-    return f"{path.strip()} | {count}" if sep and count.isdigit() else line.strip()
+    """A `git diff --stat` file line without its column padding: `path | changes`, the + - bar dropped.
+    A line that is not a file line — the summary line or a blank one — comes back empty."""
+    text = line.strip()
+    path, sep, rest = text.rpartition(" | ")
+    words = rest.split()
+    count = words[0] if words else ""
+    if sep and count.isdigit():
+        return f"{path.strip()} | {count}"
+    return text if sep else ""
 
 
 def _landed(context: ReportContext, run_dir: str) -> list[Block]:
@@ -175,7 +180,7 @@ def _landed(context: ReportContext, run_dir: str) -> list[Block]:
         try:
             proc = subprocess.run(args, check=False, capture_output=True, text=True, timeout=60, env=env)
             # one code line: inline code is single-line, and the stat's padding and + - bar read as noise
-            stat = " · ".join(_stat_line(line) for line in (proc.stdout or "").splitlines() if line.strip())[:_DIFFSTAT_CAP]
+            stat = " · ".join(part for part in (_stat_line(line) for line in (proc.stdout or "").splitlines()) if part)[:_DIFFSTAT_CAP]
             if proc.returncode == 0 and stat:
                 blocks.append(Paragraph(T((stat, "code"))))
                 return blocks
