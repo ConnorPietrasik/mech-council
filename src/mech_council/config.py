@@ -198,10 +198,6 @@ def _check(value: object, kind: str, where: str, key: str) -> object:
             hint = suggest.suggest(str(value), BUILDER_ROLES)
             extra = f" (did you mean {hint!r}?)" if hint else ""
             raise ConfigError(f"config key {where}.{key} is 'code', 'prose' or 'both', got {value!r}{extra}")
-    elif kind == "mode":
-        hint = suggest.suggest(str(value), MODES)
-        extra = f" (did you mean {hint!r}?)" if hint else ""
-        raise ConfigError(f"config key {where}.mode is 'review', 'plan', 'implement' or 'fix', got {value!r}{extra}")
     elif kind == "human":
         if value in HUMAN_MODES:
             return value
