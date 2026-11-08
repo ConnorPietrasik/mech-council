@@ -533,16 +533,27 @@ def select_council(config: ConfigFile, name: str | None) -> str:
     raise UsageError(f"no council {name!r} in {config.where}{extra}: it offers {', '.join(names)}")
 
 
+def stated_value(config: ConfigFile, name: str, chain: list[str], key: str) -> tuple[object, str] | None:
+    """The value `key` states for this council, the file that states it, or None.
+
+    Resolved the way the council's own knobs resolve: the chain's leaf beats its ancestors, a council
+    line beats `[defaults]`, and a higher layer beats a lower one.
+    """
+    for owned in [name, *chain]:
+        table = config.councils.get(owned) or {}
+        if key in table:
+            return table[key], config.supplied_by(owned)
+    for path in reversed(config.paths or [config.path]):
+        defaults = config.raw.get(path, {}).get("defaults") or {}
+        if key in defaults:
+            return defaults[key], path
+    return None
+
+
 def stated_by(config: ConfigFile, name: str, chain: list[str], key: str) -> str | None:
     """The highest-precedence council file that states `key` for this council, or None."""
-    for path in reversed(config.paths or [config.path]):
-        raw = config.raw.get(path, {})
-        if key in (raw.get("defaults") or {}):
-            return path
-        councils = raw.get("councils") or {}
-        if any(key in (councils.get(owned) or {}) for owned in [name, *chain]):
-            return path
-    return None
+    stated = stated_value(config, name, chain, key)
+    return None if stated is None else stated[1]
 
 
 def _pi_cli_stated_by_project(config: ConfigFile, chain: list[str]) -> bool:

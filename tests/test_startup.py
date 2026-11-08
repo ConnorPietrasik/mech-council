@@ -71,6 +71,88 @@ def test_a_council_asking_for_in_place_names_the_file_that_asked(project):
     assert "sandbox_mib = 64 is ignored" in said, "a knob in place cannot honor is said so"
 
 
+def test_a_build_run_names_the_mode_as_the_reason_for_in_place(project):
+    write_project_config(
+        project,
+        """\
+[defaults]
+pi_cli = "{pi_cli}"
+max_rounds = 1
+
+[councils.build]
+goal = "Build it"
+mode = "implement"
+planner = "plan"
+
+[councils.build.chair]
+name = "Chair"
+
+[[councils.build.agents]]
+name = "Forge"
+
+[councils.plan]
+goal = "How should we do it?"
+mode = "plan"
+
+[councils.plan.chair]
+name = "Chair"
+
+[[councils.plan.agents]]
+name = "Planner"
+
+[[councils.plan.agents]]
+name = "Checker"
+""".format(pi_cli=FAKE_PI),
+    )
+    notes, council = convened(["build"], project)
+    assert council.in_place is True
+    said = next(note for note in notes if "in place" in note)
+    assert "implement" in said, f"the note must name the mode: {said}"
+    assert "no namespaces" not in said, f"the mode is the reason, not the host: {said}"
+
+
+def test_a_build_run_that_declines_in_place_blames_the_mode_not_the_file(project):
+    """`in_place = false` is a stated line, but it asked for the opposite: the mode is the reason."""
+    write_project_config(
+        project,
+        """\
+[defaults]
+pi_cli = "{pi_cli}"
+max_rounds = 1
+
+[councils.build]
+goal = "Build it"
+mode = "implement"
+planner = "plan"
+in_place = false
+
+[councils.build.chair]
+name = "Chair"
+
+[[councils.build.agents]]
+name = "Forge"
+
+[councils.plan]
+goal = "How should we do it?"
+mode = "plan"
+
+[councils.plan.chair]
+name = "Chair"
+
+[[councils.plan.agents]]
+name = "Planner"
+
+[[councils.plan.agents]]
+name = "Checker"
+""".format(pi_cli=FAKE_PI),
+    )
+    notes, council = convened(["build"], project)
+    assert council.in_place is True, "an implement run works in place even when the config declines"
+    said = next(note for note in notes if "in place" in note)
+    assert "implement" in said, f"the note must name the mode: {said}"
+    assert "asked for by" not in said, f"a false line did not ask for this: {said}"
+
+
 def test_a_host_with_no_namespaces_runs_in_place_instead_of_refusing(project, monkeypatch):
     monkeypatch.setattr(mount, "supported", lambda: False)
     notes, council = convened(["review"], project)

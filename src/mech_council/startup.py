@@ -297,15 +297,19 @@ def _trust_notes(council: config_mod.Council, args: cli.Args) -> list[str]:
 
 
 def _in_place_notes(loaded: config_mod.ConfigFile, council: config_mod.Council, args: cli.Args, *, plat: str) -> list[str]:
-    """Who asked to run unsandboxed."""
+    """Why the run works in place: the flag, a config line, the mode, or no namespaces."""
     if not council.in_place:
         return []
     costs = "members share one project and nothing they write is journaled or discarded"
     if args.in_place:
         note = f"--in-place: no namespaces, no overlays and no masks — {costs}"
+    elif (stated := config_mod.stated_value(loaded, council.name, council.extends, "in_place")) and stated[0]:
+        note = f"in place, asked for by {stated[1]} — {costs}"
+    elif council.mode in ("implement", "fix"):
+        article = "an" if council.mode == "implement" else "a"
+        note = f"{article} {council.mode} run works in place — {costs}"
     else:
-        asked_by = config_mod.stated_by(loaded, council.name, council.extends, "in_place")
-        note = f"in place, asked for by {asked_by} — {costs}" if asked_by else f"no namespaces on {plat!r}: running in place — {costs}"
+        note = f"no namespaces on {plat!r}: running in place — {costs}"
     if config_mod.stated_by(loaded, council.name, council.extends, "sandbox_mib"):
         note += f" · sandbox_mib = {council.sandbox_mib} is ignored"
     return [note]

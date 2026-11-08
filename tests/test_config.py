@@ -525,6 +525,27 @@ def test_stated_by_names_the_layer_that_asked_for_in_place(tmp_path):
     assert config_mod.stated_by(loaded, "review", council.extends, "max_rounds") is None, "nothing states this one"
 
 
+def test_a_council_line_beats_a_higher_layer_default_in_the_stated_answer(tmp_path):
+    """The stated answer is the line the run resolves: a council line beats a `[defaults]` line in a higher layer."""
+    user = layer(tmp_path, "user", body().replace('goal = "g"', 'goal = "g"\nin_place = false'))
+    project = layer(tmp_path, "proj", "[defaults]\nin_place = true\n")
+    loaded = config_mod.load_layers([user, project], project_layer=project)
+    council = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert council.in_place is False, "the council line outranks the higher layer's default"
+    assert config_mod.stated_by(loaded, "review", council.extends, "in_place") == user
+    assert config_mod.stated_value(loaded, "review", council.extends, "in_place") == (False, user)
+
+
+def test_a_replaced_councils_line_is_not_the_stated_one(tmp_path):
+    """A same-named council in a higher layer replaces the lower table: a line it left behind is not stated."""
+    user = layer(tmp_path, "user", body().replace('goal = "g"', 'goal = "g"\nin_place = true'))
+    project = layer(tmp_path, "proj", body())
+    loaded = config_mod.load_layers([user, project], project_layer=project)
+    council = config_mod.convene(loaded, "review", Args(), str(tmp_path))
+    assert council.in_place is False, "the project's table is the whole council's: the user's line is dead"
+    assert config_mod.stated_by(loaded, "review", council.extends, "in_place") is None
+
+
 def test_a_child_patches_the_inherited_seats_by_name(tmp_path):
     text = chain().replace(
         '[councils.leaf]\nextends = "mid"\ngoal = "g"',
