@@ -904,10 +904,14 @@ class Engine:
             summary += " · " + ", ".join(f"{count} {state}" for state, count in sorted(counts.items()))
         record = RoundRecord(round=round_, summary=summary)
         for agent in self.docket.roster:
-            backing = self.docket.backing.get(agent, "—") if self.docket.mode == "plan" else "n/a"
-            signoff = "yes" if self.docket.signoffs.get(agent) == round_ else "no"
-            shown = len(self.shown.get(agent, []))
-            record.lines.append((agent, f"stance {shown} · backing {backing} · signoff {signoff}"))
+            stances = len(self.shown.get(agent, []))  # the items shown this round, one stance owed each
+            parts = [f"{stances} stance" + ("" if stances == 1 else "s")]
+            if self.docket.mode == "plan":
+                token = self.docket.backing.get(agent)
+                if token:
+                    parts.append(f"backing {token}")
+            parts.append("signed off" if self.docket.signoffs.get(agent) == round_ else "no signoff")
+            record.lines.append((agent, " · ".join(parts)))
         self.docket.rounds.append(record)
         self.emit("round_summary", round=round_, signed_off=signed, states=counts)
 
