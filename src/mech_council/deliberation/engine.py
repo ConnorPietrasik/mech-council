@@ -34,7 +34,7 @@ from .escalations import (
     showable,
     stop_for,
 )
-from .notes import item_named, mark_shown, raise_note, retract_note, unshown
+from .notes import item_named, mark_shown, merge_notes, raise_note, retract_note, unshown
 from .stalemate import signature, stalemate
 from .state import (
     ABSTAIN,
@@ -935,6 +935,7 @@ class Engine:
         else:
             await self.publish_review()
         await self._merge_asks(round_=0)
+        await self._merge_notes(round_=0)
         self.docket.round = 1
         await self._checkpoint(round_=0, terminal=False)
         round_ = 1
@@ -1010,6 +1011,26 @@ class Engine:
         for question in asks:
             self._recheck_class(question, round_)
         self._folded_asks = _ask_signature(self._open_asks())
+
+    async def _merge_notes(self, round_: int) -> None:
+        """The chair folds the notes that say the same thing; an unreadable chair reply folds nothing.
+        Round 0 only: phase 0 is independent, so the seats' own prompts cannot keep the duplicates apart.
+        """
+        standing = [self.docket.human_notes[nid] for nid in self.docket.note_order if self.docket.human_notes[nid].state == STANDING]
+        if len(standing) < 2 or len({note.by for note in standing}) < 2:
+            return
+        self.phase("the chair folding the notes")
+        try:
+            merged = await self.port.chair_merge_notes(self._note_listing(standing), round_=round_)
+        except Abort as failure:
+            self.emit("chair_note_merge_unreadable", round=round_, reason=str(failure), notes=len(standing))
+            return
+        events, reason = merge_notes(self.docket, groups=merged.get("groups") or [], round_=round_)
+        if reason:
+            self.emit("chair_note_merge_refused", round=round_, reason=reason, notes=len(standing))
+            return
+        for event, fields in events:
+            self.emit(event, **fields)
 
     async def _peer_pass(self, round_: int) -> None:
         """Once, before the run ends: every seat gets one last look at the asks the human will not be shown —
@@ -1087,6 +1108,14 @@ class Engine:
                 lines.append(f"answered instead of asking: {seat}: {answer}")
             for number, option in enumerate(question.options, start=1):
                 lines.append(f"{number}) {option}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def _note_listing(self, notes: list) -> str:
+        blocks = []
+        for note in notes:
+            kind = " [correction]" if note.kind == "correction" else ""
+            lines = [f"### {note.id}{kind}" + (f" (on {note.item_id})" if note.item_id else ""), note.text, f"by: {note.by}"]
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 

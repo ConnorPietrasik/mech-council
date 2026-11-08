@@ -562,6 +562,20 @@ def test_the_docket_shows_peers_the_notes_they_left_for_the_human():
         assert "retention is a contract" in body and "on F1" in body, "every seat sees the note and what it is about"
 
 
+def test_a_folded_note_reads_once_and_names_the_other_seat_that_said_it():
+    from mech_council.deliberation import notes
+
+    docket = build()
+    noted(docket, "retention is a contract", by="Agent1")
+    noted(docket, "retention is a contract", by="Agent2")
+    notes.merge_notes(docket, groups=[{"canonical": "N1", "duplicates": ["N2"]}], round_=0)
+    body = section(docket_render.render(docket, "Agent3"), "Notes for the human")
+    assert body.count("retention is a contract") == 1, "the fold keeps the note from reading twice"
+    assert "also noted by Agent2" in body, "the other seat's note is recorded beside the survivor"
+    ledger = section(report_review.render(docket, context()), "Notes for the human")
+    assert "N1" in ledger and "N2" not in ledger and "also noted by" in ledger, "the report ledger keeps one entry, named with the other"
+
+
 def test_a_retracted_note_leaves_the_docket_a_seat_reads():
     from mech_council.deliberation import notes
 

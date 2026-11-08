@@ -26,6 +26,9 @@ class Chair:
     async def merge_questions(self, listing: str, *, round_: int) -> dict:
         return await self._publication(self.brief.ask_merge(listing), kind="asks", phase="asks", round_=round_)
 
+    async def note_merge(self, listing: str, *, round_: int) -> dict:
+        return await self._publication(self.brief.note_merge(listing), kind="notes", phase="notes", round_=round_)
+
     async def compare(self, listing: str, *, round_: int) -> dict:
         message = self.brief.comparison(listing=listing, goal=self.council.goal)
         return await self._publication(message, kind="compare", phase="compare", round_=round_)

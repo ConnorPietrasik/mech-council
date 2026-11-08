@@ -47,6 +47,9 @@ class Brief:
     def ask_merge(self, listing: str) -> str:
         return common.ask_merge_task(listing, self.human)
 
+    def note_merge(self, listing: str) -> str:
+        return common.note_merge_task(listing)
+
     def comparison(self, *, listing: str, goal: str | None = None) -> str:
         return common.comparison_task(listing, goal, self.human)
 

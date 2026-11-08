@@ -78,6 +78,15 @@ class ScriptPort:
         data, _errors = parse_ask_merge(text or "")
         return {"groups": (data or {}).get("groups") or []}
 
+    async def chair_merge_notes(self, listing: str, *, round_: int) -> dict:
+        # `Port` runs the extractor, so the harness does too: the chair's fold is JSON text first.
+        self.asks.append(Ask("chair", "notes", round_, "notes", listing))
+        from mech_council.extraction import parse_note_merge
+
+        text = self._chair_answer(Ask("chair", "notes", round_, "notes", listing))
+        data, _errors = parse_note_merge(text or "")
+        return {"groups": (data or {}).get("groups") or []}
+
     async def chair_direction(self, listing: str, *, round_: int) -> dict:
         self.asks.append(Ask("chair", "direction", round_, "direction", listing))
         from mech_council.extraction import parse_direction

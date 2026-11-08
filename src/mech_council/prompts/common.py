@@ -150,11 +150,12 @@ def question_shape(human: str) -> str:
     if human == "blocking":
         notes = (
             "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats "
-            f"nothing a finding already says. {filed}"
+            f"nothing a finding already says nor a peer's standing note. {filed}"
         )
     else:
         notes = (
-            f"`notes` tells the human what they need only *know*: it replaces an ask and repeats nothing a finding already says. {filed}"
+            f"`notes` tells the human what they need only *know*: it replaces an ask and repeats "
+            f"nothing a finding already says nor a peer's standing note. {filed}"
         )
     return f"""\
 # Asking well
@@ -387,6 +388,10 @@ def schema_hint(mode: str, *, phase: str, human: str = "blocking") -> str:
         from . import chair as chair_text
 
         return chair_text.ASK_MERGE_SCHEMA
+    if phase == "notes":
+        from . import chair as chair_text
+
+        return chair_text.NOTE_MERGE_SCHEMA
     if phase == "compare":
         from . import plan as plan_text
 
@@ -427,6 +432,23 @@ def ask_merge_task(listing: str, human: str = "blocking") -> str:
             chair.ASK_MERGE_SCHEMA,
             "---",
             "## The open asks",
+            "",
+            listing,
+        ]
+    )
+
+
+def note_merge_task(listing: str) -> str:
+    """The chair's note fold: ids are `N1`-shaped in every mode, so no id prefix goes in."""
+    from . import chair
+
+    return "\n".join(
+        [
+            chair.note_merge(),
+            ANSWER_SHAPE,
+            chair.NOTE_MERGE_SCHEMA,
+            "---",
+            "## The notes for the human",
             "",
             listing,
         ]

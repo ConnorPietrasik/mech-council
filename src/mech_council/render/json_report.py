@@ -169,4 +169,6 @@ def _note(note: Note) -> dict:
         "retracted_round": note.retracted_round,
         "retract_reason": note.retract_reason,
         "retraction_shown_round": note.retraction_shown_round,
+        "folded_into": note.folded_into,
+        "also_noted_by": list(note.also_noted_by),
     }

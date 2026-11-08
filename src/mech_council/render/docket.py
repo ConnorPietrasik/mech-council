@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..deliberation.dispositions import derive
 from ..deliberation.escalations import MOOT, SETTLED, UNBACKED, effective_class, held_back, showable, stop_holders
+from ..deliberation.notes import folded_away
 from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, STANDING, Docket, Question
 from ..modes.base import adapter_for
 
@@ -113,7 +114,11 @@ NOTE_WINDOW = 2
 
 def _notes_section(docket: Docket, viewer: str) -> list[str]:
     """What peers told the human without asking."""
-    standing = [docket.human_notes[nid] for nid in docket.note_order if docket.human_notes[nid].state == STANDING]
+    standing = [
+        note
+        for note in (docket.human_notes[nid] for nid in docket.note_order)
+        if note.state == STANDING and not folded_away(docket, note)
+    ]
     fresh = [note for note in standing if note.updated_round >= docket.round - NOTE_WINDOW]
     if not fresh:
         return []
@@ -121,7 +126,8 @@ def _notes_section(docket: Docket, viewer: str) -> list[str]:
     for note in fresh:
         where = f" (on {note.item_id})" if note.item_id else ""
         kind = " [correction]" if note.kind == "correction" else ""
-        out.append(f"- {note.id}{where}{kind} {_who([note.by], viewer)}, round {note.round}: {note.text}")
+        also = f" — also noted by {_who(note.also_noted_by, viewer)}" if note.also_noted_by else ""
+        out.append(f"- {note.id}{where}{kind} {_who([note.by], viewer)}, round {note.round}: {note.text}{also}")
     if len(fresh) < len(standing):
         out.append(f"- +{len(standing) - len(fresh)} older note(s), in the report")
     if any(note.by == viewer for note in fresh):

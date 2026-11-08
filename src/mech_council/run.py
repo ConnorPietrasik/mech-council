@@ -524,6 +524,10 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
         return f"the chair's ask fold was refused: {fields['reason']}"
     if name == "chair_ask_merge_unreadable":
         return "the chair could not read the ask fold — every ask keeps its own wording"
+    if name == "chair_note_merge_refused":
+        return f"the chair's note fold was refused: {fields['reason']}"
+    if name == "chair_note_merge_unreadable":
+        return "the chair could not read the note fold — every note keeps its own wording"
     if name == "round_summary":
         states = ", ".join(f"{count} {state}" for state, count in sorted((fields.get("states") or {}).items()))
         return f"round {fields['round']}: {fields['signed_off']} signed off · {states or 'nothing open'}"
@@ -583,6 +587,11 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
         return f"{name_of(fields['seat'], names)} says the answer to {fields['id']} was not enough"
     if name == "question_merged":
         dropped = f"{fields['id']} wanted what {fields['into']} wants — now asked by {_seats(fields['askers'], names)}"
+        if (named := fields.get("chair_named")) and named != fields["into"]:
+            return f"{dropped}; {fields['into']} keeps its words, though the chair named {named}"
+        return dropped
+    if name == "note_merged":
+        dropped = f"{fields['id']} says what {fields['into']} says — the human reads the note once"
         if (named := fields.get("chair_named")) and named != fields["into"]:
             return f"{dropped}; {fields['into']} keeps its words, though the chair named {named}"
         return dropped

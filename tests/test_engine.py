@@ -177,6 +177,19 @@ def test_the_ask_fold_brief_shows_the_chair_asks_and_their_ids():
     assert common.schema_hint("review", phase="asks") == common.schema_hint("plan", phase="asks")
 
 
+def test_the_note_fold_brief_shows_the_chair_notes_and_their_ids():
+    """Note ids are `N1` in both modes, so the fold's schema must not take the mode's item prefix."""
+    brief = common.note_merge_task("### N1\nall gates green\nby: Agent1")
+    assert '"canonical": "N1"' in brief and "all gates green" in brief and "by: Agent1" in brief
+    assert common.schema_hint("review", phase="notes") == common.schema_hint("plan", phase="notes")
+
+
+def test_the_seat_prompt_keeps_a_note_from_saying_a_peers_note_again():
+    """The docket shows a seat a peer's fresh notes, so a repeat of one is a choice the prompt closes."""
+    for human in ("blocking", "non_blocking"):
+        assert "a peer's standing note" in common.question_shape(human)
+
+
 def test_every_seat_phase_repairs_with_the_verdict_shape():
     """A repair re-ask quotes the shape of the pass it repairs: the gap, defense and seconding passes had the chair's.
     The builder's passes are the exception: `work` and `replan` repair with the builder's own shapes."""
@@ -1121,6 +1134,58 @@ def test_the_chair_reads_the_asks_once_and_only_the_round_after_it_fails_to_read
     _outcome, _built, port, records = asyncio.run(main())
     assert [a.round for a in port.asks if a.kind == "asks"] == [0, 1], "one read that failed, one that landed, and no third"
     assert len([r for r in records if r["event"] == "chair_ask_merge_refused"]) == 1
+
+
+def test_the_chair_fold_makes_two_wordings_one_note():
+    """Phase 0 is independent, so the same note often reaches the docket twice: the chair folds it before the human reads it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent3":
+                return payload(findings=[])
+            note = "all gates green: ruff, mypy, pytest"
+            return payload(findings=[finding("a bug")] if ask.who == "Agent1" else [], notes=[note])
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.kind == "notes":
+            return {"groups": [{"canonical": "N1", "duplicates": ["N2"]}]}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=2, reply=reply)
+        return await built.run(), built, port, records
+
+    outcome, built, port, records = asyncio.run(main())
+    assert outcome == "consensus"
+    first, second = built.docket.human_notes["N1"], built.docket.human_notes["N2"]
+    assert (second.folded_into, first.also_noted_by) == ("N1", ["Agent2"]), "the earliest note survives, named with the other"
+    shown = [c["notes"] for c in port.checkpoints if c["notes"]]
+    assert shown == [["N1:note"]], "the human reads the note once"
+    fold = next(r for r in records if r["event"] == "note_merged")
+    assert (fold["id"], fold["into"]) == ("N2", "N1")
+
+
+def test_the_chair_is_not_asked_to_fold_notes_when_there_is_nothing_to_fold():
+    """A chair pass costs a lane's whole turn: it runs when there is something to fold."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent1":
+                return payload(findings=[finding("a bug")], notes=["all gates green"])
+            return payload(findings=[])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, records = engine(max_rounds=2, reply=reply)
+        return await built.run(), built, port, records
+
+    outcome, _built, port, _records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert not [a for a in port.asks if a.kind == "notes"], "one note: nothing for the chair to fold"
 
 
 def test_a_question_shown_at_the_grace_checkpoint_is_unanswered_never_unasked():

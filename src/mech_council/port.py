@@ -109,6 +109,12 @@ class Port:
         except ChairUnusable as failure:
             raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
 
+    async def chair_merge_notes(self, listing: str, *, round_: int) -> dict:
+        try:
+            return await self.chair.note_merge(listing, round_=round_)
+        except ChairUnusable as failure:
+            raise Abort(str(failure), member=CHAIR_ID, round_=round_) from failure
+
     async def chair_compare(self, listing: str, *, round_: int) -> dict:
         try:
             return await self.chair.compare(listing, round_=round_)

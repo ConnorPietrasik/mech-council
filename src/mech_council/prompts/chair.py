@@ -35,6 +35,24 @@ often want one decision and word it differently; your job is to say which asks a
 """
 
 
+def note_merge() -> str:
+    return """\
+# Fold the notes that say the same thing
+
+You are the council's chair. Below are notes the seats filed for the human. Seats often tell the
+human the same thing separately; your job is to say which notes are one note, so the human reads
+it once and the other seats are named beside it.
+
+- Conservative beats tidy: when unsure, keep them apart.
+- A note that corrects an item is a different kind from a plain note: they are one note only
+  when they say the same thing and are of one kind.
+- Name the note raised **first** as `canonical`: its words are what the human reads, and the others
+  are recorded beside it. The ids ascend with time, so the lowest one in a group is the earliest.
+- Echo the `N` IDs below exactly; make none up, and never name a note that is not listed.
+- You add nothing here: a note you cannot trace to a seat does not exist.
+"""
+
+
 WATCHDOG = """\
 # Watchdog
 
@@ -65,6 +83,16 @@ A group means: keep `canonical` — the ask raised first, whose words the human 
 `duplicates` are that same decision asked again in other words: every seat that asked one now asks
 the other. Only list a group when the asks want the same decision; an answer that would settle one
 must settle the rest. Omit every ask that stands alone, and send `{"groups": []}` when nothing folds.
+"""
+
+NOTE_MERGE_SCHEMA = """\
+```json
+{"groups": [{"canonical": "N1", "duplicates": ["N4", "N7"]}]}
+```
+A group means: keep `canonical` — the note raised first, whose words the human reads — and the
+`duplicates` are the same note filed by other seats: the human reads it once, with those seats
+named beside it. Only list a group when the notes say the same thing; omit every note that stands
+alone, and send `{"groups": []}` when nothing folds.
 """
 
 WATCHDOG_SCHEMA = """\

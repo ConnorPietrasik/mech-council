@@ -332,6 +332,8 @@ def note_line(note: Note, context: ReportContext) -> ListItem:
     """A note filed under an item: the one line the item's section prints for it."""
     who = _names([note.by], context)
     label = f"correction, {who}" if note.kind == "correction" else who
+    if note.also_noted_by:
+        label += f", also noted by {_names(note.also_noted_by, context)}"
     parts: list[Part] = ["note: ", (note.id, "bold"), f" ({label}"]
     if note.state == RETRACTED:
         reason = f": {note.retract_reason}" if note.retract_reason else ""

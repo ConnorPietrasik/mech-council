@@ -818,6 +818,26 @@ def _ask_token(text: str) -> str:
     return token if _ASK_ID.fullmatch(token) else ""
 
 
+def parse_note_merge(payload: str) -> tuple[dict | None, list[str]]:
+    """The chair's note fold: the ask fold's shape, with the docket's `N1` ids read however the chair typed them."""
+    plan, errors = parse_merge_plan(payload)
+    if plan is None:
+        return None, errors
+    groups = []
+    for group in plan["groups"]:
+        canonical = _note_token(group["canonical"])
+        duplicates = list(dict.fromkeys(one for one in map(_note_token, group["duplicates"]) if one and one != canonical))
+        if canonical and duplicates:
+            groups.append({"canonical": canonical, "duplicates": duplicates})
+    return {"groups": groups}, errors
+
+
+def _note_token(text: str) -> str:
+    """`n1`, `#N1` and ` N1 ` all name N1; anything that is not a note id names nothing."""
+    token = text.strip().lstrip("#").upper()
+    return token if _NOTE_ID.fullmatch(token) else ""
+
+
 def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
     data, error = find_json(payload, DIRECTION_FIELDS)
     if data is None:
@@ -1039,6 +1059,9 @@ def extract(kind: str, text: str, **kwargs) -> Extraction:
         return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
     if kind == "asks":
         plan, errors = parse_ask_merge(text)
+        return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
+    if kind == "notes":
+        plan, errors = parse_note_merge(text)
         return Extraction(data={"groups": (plan or {}).get("groups", [])}, invalid=plan is None, errors=errors)
     if kind == "direction":
         wording, errors = parse_direction(text)

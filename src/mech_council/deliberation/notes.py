@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypeGuard
+
 from .state import RETRACTED, STANDING, Docket, Item, Note, note_key
 
 NOTE_MAX_CHARS = 600
@@ -10,7 +12,7 @@ NOTE_KINDS = ("info", "correction")
 def raise_note(docket: Docket, *, by: str, text: str, item_id: str | None, round_: int, kind: str = "info") -> tuple[Note, bool]:
     """Record what a seat wants the human to know.
 
-    A seat repeating itself updates its note; one it retracted is a fresh claim and id.
+    A seat repeating itself updates its note; one it retracted or the chair folded is a fresh claim and id.
     A correction names the item it corrects; without one it is no correction.
     """
     kind = kind if kind in NOTE_KINDS else "info"
@@ -19,7 +21,7 @@ def raise_note(docket: Docket, *, by: str, text: str, item_id: str | None, round
     key = note_key(text)
     for nid in docket.note_order:
         note = docket.human_notes[nid]
-        if note.by == by and note.state == STANDING and note.key == key:
+        if note.by == by and note.state == STANDING and note.folded_into is None and note.key == key:
             note.updated_round = round_
             note.item_id = note.item_id or item_id
             if kind == "correction" and note.item_id is not None:
@@ -44,6 +46,8 @@ def retract_note(docket: Docket, *, nid: str, agent: str, round_: int, reason: s
         return None, "no standing note with that id"
     if note.state != STANDING:
         return None, "no standing note with that id"
+    if note.folded_into is not None:
+        return None, f"{nid} folded into {note.folded_into}: the human reads the survivor"
     if note.by != agent:
         return None, f"{note.by} wrote that note: only {note.by} retracts it — dispute it with an item and evidence"
     note.state, note.retracted_round, note.updated_round = RETRACTED, round_, round_
@@ -75,6 +79,8 @@ def unshown(docket: Docket) -> list[tuple[Note, str]]:
     out: list[tuple[Note, str]] = []
     for nid in docket.note_order:
         note = docket.human_notes[nid]
+        if folded_away(docket, note):
+            continue
         if note.shown_round is None:
             if note.state == STANDING:
                 out.append((note, "note"))
@@ -93,12 +99,61 @@ def mark_shown(shown: list[tuple[Note, str]], round_: int) -> None:
 
 
 def report_notes(docket: Docket) -> list[Note]:
-    """Every note except one retracted before the human ever read it."""
+    """Every note except one retracted before the human ever read it, and one folded into a note that still stands."""
     return [
         note
         for note in (docket.human_notes[nid] for nid in docket.note_order)
-        if not (note.state == RETRACTED and note.shown_round is None)
+        if not (note.state == RETRACTED and note.shown_round is None) and not folded_away(docket, note)
     ]
+
+
+def folded_away(docket: Docket, note: Note) -> bool:
+    """Folded into a note that still stands: the human reads the survivor, and this one beside it."""
+    if note.folded_into is None:
+        return False
+    survivor = docket.human_notes.get(note.folded_into)
+    return survivor is not None and survivor.state == STANDING
+
+
+def _note_foldable(note: Note | None) -> TypeGuard[Note]:
+    """Only a standing note the human has not read, and no fold has taken, can fold."""
+    return note is not None and note.state == STANDING and note.shown_round is None and note.folded_into is None
+
+
+def merge_notes(docket: Docket, *, groups: list[dict], round_: int) -> tuple[list[tuple[str, dict]], str]:
+    """Fold the notes the chair says are one note: the note raised first survives whichever one the
+    chair names; a group naming one note twice, or one note in two groups, folds nothing.
+    """
+    claimed: set[str] = set()
+    usable: list[tuple[Note, list[Note], str]] = []
+    for group in groups:
+        ids = [group["canonical"], *(group.get("duplicates") or [])]
+        if len(set(ids)) != len(ids):
+            return [], f"{ids[0]} is named twice in one group"
+        if reused := claimed & set(ids):
+            return [], f"{sorted(reused)[0]} is reused across groups"
+        claimed.update(ids)
+        notes = [one for one in (docket.human_notes.get(nid) for nid in ids) if _note_foldable(one)]
+        if len(notes) > 1 and len({one.kind for one in notes}) == 1:
+            survivor = min(notes, key=lambda one: docket.note_order.index(one.id))
+            usable.append((survivor, [one for one in notes if one is not survivor], group["canonical"]))
+    events: list[tuple[str, dict]] = []
+    for survivor, duplicates, chair_named in usable:
+        for duplicate in duplicates:
+            _fold_note(survivor, duplicate)
+            events.append(
+                ("note_merged", {"id": duplicate.id, "into": survivor.id, "by": survivor.by, "chair_named": chair_named, "round": round_})
+            )
+    return events, ""
+
+
+def _fold_note(canonical: Note, duplicate: Note) -> None:
+    """One note absorbs another: the human reads the survivor, and the duplicate's seat is named beside it."""
+    if duplicate.by != canonical.by and duplicate.by not in canonical.also_noted_by:
+        canonical.also_noted_by.append(duplicate.by)
+    if duplicate.item_id and canonical.item_id is None:
+        canonical.item_id = duplicate.item_id
+    duplicate.folded_into = canonical.id
 
 
 def item_notes(docket: Docket, item_id: str) -> list[Note]:

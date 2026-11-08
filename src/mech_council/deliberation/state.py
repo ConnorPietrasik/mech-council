@@ -166,6 +166,10 @@ class Note:
     retract_reason: str = ""
     #: the round whose checkpoint printed the retraction
     retraction_shown_round: int | None = None
+    #: the note the chair folded this one into: the human reads the survivor, this one beside it
+    folded_into: str | None = None
+    #: the seats whose notes folded into this one
+    also_noted_by: list[str] = field(default_factory=list)
 
     @property
     def key(self) -> str:

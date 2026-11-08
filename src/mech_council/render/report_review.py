@@ -324,6 +324,8 @@ def _notes(docket: Docket, context: ReportContext) -> list[Block]:
     for note in notes:
         group: list[Block] = [Heading(3, T(f"{note.id} · {'retracted' if note.state == RETRACTED else 'standing'} · {note.text}"))]
         out: list[ListItem] = [ListItem(T("from: ", _names([note.by], context)))]
+        if note.also_noted_by:
+            out.append(ListItem(T("also noted by: ", _names(note.also_noted_by, context))))
         if note.item_id:
             item = docket.items.get(note.item_id)
             out.append(ListItem(T("about: ", (note.item_id, "bold"), *([f" {item.claim}"]) if item is not None else [note.item_id])))
