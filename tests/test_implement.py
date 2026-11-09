@@ -517,6 +517,37 @@ def test_the_run_commit_carries_only_the_project(tmp_path):
     assert "outside.txt" in status, "the user's staged dirt is still staged, as the run found it"
 
 
+def test_a_refused_commit_leaves_the_repo_index_as_found(tmp_path):
+    """A hook that refuses the run's commit: the run's add leaves no staging in the repo's index,
+    and a silent refusal still names its likely causes."""
+    from mech_council.deliberation.tree import Tree
+
+    project = os.path.join(str(tmp_path), "proj")
+    os.makedirs(project)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "config", "maintenance.auto", "false"], cwd=project, check=True)
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+    hook = os.path.join(project, ".git", "hooks", "commit-msg")
+    with open(hook, "w", encoding="utf-8") as handle:
+        handle.write("#!/bin/sh\nexit 1\n")
+    os.chmod(hook, 0o755)
+
+    tree = Tree(project, os.path.join(str(tmp_path), "runs"))
+    with open(os.path.join(project, "app.py"), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    sha, why = tree.commit("fix F1: the value")
+    assert sha == ""
+    assert "git commit failed" in why and "no error was reported" in why, why
+    # the index is as the run found it: nothing staged. The worktree change stays, for the caller to roll back
+    staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=project, check=False).returncode
+    assert staged == 0, "the refused commit left the run's staging in the repo's index"
+    with open(os.path.join(project, "app.py"), encoding="utf-8") as handle:
+        assert handle.read() == "v = 2\n", "the worktree is the caller's to roll back, not the commit's"
+
+
 # ------------------------------------------------------------ crew resolution
 
 

@@ -265,6 +265,47 @@ def test_the_review_crews_findings_are_fixed_and_committed(cli, project):
     assert "committed" in report and "The whole-project check passed" in report
 
 
+def test_a_gate_that_passes_as_the_tree_stands_fixes_with_no_commit(cli, project):
+    """A builder that proves the gate without changing the tree: the finding passes uncommitted,
+    the baseline commit stands, and the run still ends fixed."""
+    write_project_config(project, body())
+    commit_all(project)
+    script = json.dumps(
+        [
+            {
+                "contains": "## The planned fix",
+                "reply": {"summary": "clean", "gate": {"ok": True, "ran": "grep", "evidence": "VALUE = 1"}, "open_questions": []},
+            },
+            {
+                "contains": "Phase 0",
+                "once": True,
+                "reply": review_phase0(findings=[{"claim": "the value is wrong", "severity": "blocker", "evidence": "src/mod.py:1"}]),
+            },
+            {"contains": "Round ", "reply": {"positions": [{"id": "F1", "stance": "agree"}], "signoff": True}},
+            {
+                "contains": "# Plan the fix",
+                "reply": {"stages": [{"state": "the value is right", "gate": "grep -q 'VALUE = 1' src/mod.py", "scope": "src/mod.py"}]},
+            },
+            {
+                "contains": "# Implement the fix",
+                "reply": {
+                    "summary": "the gate already holds",
+                    "gate_command": "grep -q 'VALUE = 1' src/mod.py",
+                    "gate_output": "VALUE = 1",
+                    "changed": [],
+                    "open_issues": [],
+                },
+            },
+            {"contains": "# The final check", "reply": {"ok": True, "ran": "the checks", "evidence": "ok"}},
+        ]
+    )
+    result = cli(["fixit"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=script), timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["outcome"] == "fixed"
+    assert "fixed with no tree change" in result.console, result.console
+    assert len(git_log_lines(project)) == 1, "the baseline commit stands: a no-change fix lands as no commit"
+
+
 def test_severity_orders_the_findings_and_only_the_reviewer_verifies(cli, project):
     """Two agreed findings fix in severity order — the blocker before the major — and a named
     reviewer crew verifies, so the review crew disposes at the phase boundary."""

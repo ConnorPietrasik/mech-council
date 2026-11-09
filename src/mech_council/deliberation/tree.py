@@ -12,9 +12,18 @@ DIFF_CAP = 12000
 #: the snapshot's git calls walk the worktree, so they get a long leash
 _SNAPSHOT_TIMEOUT_S = 600
 
+#: the run's commit waits out the project's hooks, then gives up
+_COMMIT_TIMEOUT_S = 120
+
 #: the run's commit identity: greppable, never the repo's own
 COMMIT_NAME = "mech-council"
 COMMIT_EMAIL = "mech-council@localhost"
+
+#: the add failure's detail when git reports none: no hook can refuse an add, so it is the timeout
+NO_ADD_DETAIL = f"no error was reported — the {_SNAPSHOT_TIMEOUT_S:g} s timeout was reached"
+
+#: the commit failure's detail when git reports none: a silent hook refusal, or the timeout
+NO_COMMIT_DETAIL = f"no error was reported — a git hook is the likely cause, or the {_COMMIT_TIMEOUT_S:g} s timeout was reached"
 
 
 def snapshot_env(run_dir: str) -> dict[str, str]:
@@ -157,6 +166,9 @@ class Tree:
         sha back. The commit's pathspec: staged dirt the user holds elsewhere in a larger repo is
         not swept in, and the pathspec's add is what makes a pass's new files committable.
 
+        The repo's index is stowed before the add and put back on any failure: a refused commit
+        leaves the index as the run found it.
+
         An empty tree is not a failure: the pass proved the gate with no change, and the finding
         passes uncommitted.
         """
@@ -167,12 +179,59 @@ class Tree:
             "GIT_COMMITTER_NAME": COMMIT_NAME,
             "GIT_COMMITTER_EMAIL": COMMIT_EMAIL,
         }
+        stowed = self._stow_index()
         ok, out = self.git("add", "-A", "--", ".", env=env, timeout=_SNAPSHOT_TIMEOUT_S)
         if not ok:
-            return "", f"git add failed: {out}"
-        ok, out = self.git("commit", "-m", message, "--", ".", env=env, timeout=120)
+            self._unstow_index(stowed)
+            return "", f"git add failed: {out or NO_ADD_DETAIL}"
+        ok, out = self.git("commit", "-m", message, "--", ".", env=env, timeout=_COMMIT_TIMEOUT_S)
+        if ok:
+            # the commit kept the new index: the stowed copy is done for
+            if stowed is not None:
+                try:
+                    os.remove(stowed)
+                except OSError:
+                    pass
+            return self.git("rev-parse", "HEAD", env=env)[1], ""
+        if not self.status():
+            self._unstow_index(stowed)
+            return "", "nothing to commit"
+        self._unstow_index(stowed)
+        return "", f"git commit failed: {out or NO_COMMIT_DETAIL}"
+
+    def _stow_index(self) -> str | None:
+        """The repo's index copied into the run directory, so a failed commit can put it back.
+        None when there is no index to protect or the copy cannot be made."""
+        ok, where = self.git("rev-parse", "--git-path", "index")
         if not ok:
-            if not self.status():
-                return "", "nothing to commit"
-            return "", f"git commit failed: {out}"
-        return self.git("rev-parse", "HEAD", env=env)[1], ""
+            return None
+        # `--git-path` prints relative in a plain repo, absolute in a linked worktree; the join takes both
+        real = os.path.realpath(os.path.join(self.project, where))
+        if not os.path.isfile(real):
+            return None
+        stowed = os.path.join(self.run_dir, "commit_index")
+        try:
+            os.makedirs(self.run_dir, exist_ok=True)
+            shutil.copyfile(real, stowed)
+        except OSError:
+            return None
+        return stowed
+
+    def _unstow_index(self, stowed: str | None) -> None:
+        """The repo's index back from the run directory, the stow copy removed as it lands;
+        a put-back that cannot be made keeps the stow copy and says nothing — the run reports
+        the commit's failure, not this second one."""
+        if stowed is None:
+            return
+        ok, where = self.git("rev-parse", "--git-path", "index")
+        if not ok:
+            return
+        real = os.path.realpath(os.path.join(self.project, where))
+        try:
+            shutil.copyfile(stowed, real)
+        except OSError:
+            return
+        try:
+            os.remove(stowed)
+        except OSError:
+            pass

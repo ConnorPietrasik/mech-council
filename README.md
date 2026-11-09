@@ -365,10 +365,12 @@ the gate adds. It is always in place, and it
 **commits**: each finding that passes its verify lands as the run's own commit (`mech-council`,
 the run's identity — you rework the history later), and a finding that fails burns its ladder
 then rolls back to its pre-finding tree, its diff saved to the run directory as
-`finding-NN.diff`. The commit is the safety model, so a project that is not a git repo is
-refused; a dirty tree is refused unless `--dirty` is passed, and with it the run's commits may
-sweep in what was already dirty. `commit = false` lands the fixes in the tree without
-committing.
+`finding-NN.diff`. A commit the project's hooks refuse aborts the run on that finding, its
+changes left in the tree, the repo's index back as the run found it; when the hook says
+nothing, the reason names the likely causes. The commit is the safety model, so a project
+that is not a git repo is refused; a dirty tree is refused unless `--dirty` is passed, and
+with it the run's commits may sweep in what was already dirty. `commit = false` lands the
+fixes in the tree without committing.
 
 A fix council is a chair and builder seats, plus at most two borrowed councils: `review` names
 a `review` council that is convened first to find the defects, and `reviewer` names a `review`
