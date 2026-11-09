@@ -12,7 +12,7 @@
 # at once, the chair's included, or "auto" to read the number the provider reports.  A
 # provider the table never names is uncapped: every seat on it may be in flight at once.
 
-[providers.omnissiah]
+[providers.omnissiah-qfn]
 max_concurrency = "auto"
 
 [councils.review]                   # `mech-council review` — the whole tree
@@ -21,37 +21,37 @@ goal = "See if there is anything that should be fixed / improved in this project
 
 [councils.review.chair]
 name = "Chair"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 
 [[councils.review.agents]]
 name = "Metic"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a meticulous code reviewer. Hunt for correctness bugs.
 """
 
 [[councils.review.agents]]
 name = "Senior"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a pragmatic senior engineer.
 """
 
 [[councils.review.agents]]
 name = "Pro"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a professional code reviewer.
 """
 
 [[councils.review.agents]]
 name = "Coworker"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a coworker of the author. Make sure the code is readable and correct so you won't hate working on it for future improvements / feature adds.
 """
@@ -61,8 +61,8 @@ extends = "review"
 
 [[councils.review-sec.agents]]
 name = "Secure"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a professional security engineer. Focus on finding security flaws, but engage with other seats' findings. State each flaw's severity accurately (no exaggerating).
 """
@@ -73,37 +73,37 @@ goal = "Make a plan for the implementation of the next TODO item"
 
 [councils.plan.chair]
 name = "Chair"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 
 [[councils.plan.agents]]
 name = "Metic"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a meticulous planner. Attack the internal correctness of a plan: preconditions, step ordering, partially-applied migrations, and anything that breaks when a step lands out of order or half-runs.
 """
 
 [[councils.plan.agents]]
 name = "Senior"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a pragmatic senior engineer. Find the smallest change that actually satisfies the task, prefer deleting to adding, and commit to a decision instead of presenting a menu. Push back on plans that leave the risky step for last. Challenge feasibility wherever you see it, including in your own plan.
 """
 
 [[councils.plan.agents]]
 name = "Pro"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are a professional architect on a planning council. Re-read the task before endorsing anything and make sure the plan satisfies every requirement.
 """
 
 [[councils.plan.agents]]
 name = "Coworker"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
 """
@@ -116,13 +116,13 @@ reviewer = "review"
 
 [councils.build.chair]
 name = "Chair"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 
 [[councils.build.agents]]
 name = "Coder"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 role = "code"
 persona = """
 You are the builder. Implement the stage exactly as the plan states it and re-run the stage's gate until it passes.
@@ -130,8 +130,8 @@ You are the builder. Implement the stage exactly as the plan states it and re-ru
 
 [[councils.build.agents]]
 name = "Writer"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 role = "prose"
 persona = """
 You write the user-visible text the run ships.
@@ -148,13 +148,13 @@ reviewer = "review"
 
 [councils.fixit.chair]
 name = "Chair"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 
 [[councils.fixit.agents]]
 name = "Forge"
-provider = "omnissiah"
-model = "Qwen-Flash-Next"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
 persona = """
 You are the builder. Plan the one finding you hold, keep the change as small as the finding allows, and satisfy the finding's gate — run it, or verify its condition — until it passes.
 """
