@@ -236,11 +236,16 @@ def find_json(text: str, fields: tuple[str, ...] = ()) -> tuple[dict | None, str
     if not text:
         return None, "empty answer"
     cleaned = text.replace("```json", "```")
+    ends, quoted = _brace_map(cleaned)
     unrelated = False  # an object was there; it just was not the answer
     last_error: str | None = None
     start = cleaned.find("{")
     while start >= 0:
-        end = _balanced_end(cleaned, start)
+        if start in quoted:
+            # a `{` inside a string: the map never balanced it, so it gets a fresh read
+            end = _balanced_end(cleaned, start)
+        else:
+            end = ends.get(start)
         if end is None:
             # an unclosed object that is a JSON document to the end of the reply was cut off mid-answer, its
             # contents a fragment; a prose `{` that never closes gets the next `{` a chance
@@ -291,6 +296,32 @@ def _is_cut_off(text: str, start: int) -> bool:
     except RecursionError:
         return True  # a brace nest too deep to scan: not prose
     return False  # a whole object: `_balanced_end` would have found it
+
+
+def _brace_map(text: str) -> tuple[dict[int, int], set[int]]:
+    """The matching `}` for each `{` in one string-aware pass, plus the `{`s that sit inside a string."""
+    ends: dict[int, int] = {}
+    quoted: set[int] = set()
+    stack: list[int] = []
+    in_string = escape = False
+    for pos, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            if char == "{":
+                quoted.add(pos)
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append(pos)
+        elif char == "}" and stack:
+            ends[stack.pop()] = pos
+    return ends, quoted
 
 
 def _balanced_end(text: str, start: int) -> int | None:

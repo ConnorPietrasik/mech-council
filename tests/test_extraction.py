@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from mech_council.extraction import (
     map_backing,
@@ -104,6 +105,15 @@ def test_a_plan_seat_s_phase_0_answer_is_legible_to_the_verdict_parser():
     """`approach` must be a verdict field: phase 0 runs through the verdict parser, and dropping it refuses every plan run's phase 0."""
     approach = json.dumps({"approach": {"claim": "retry it", "stages": [{"state": "write it", "gate": "the tests"}]}})
     assert not parse(approach, mode="plan").invalid
+
+
+def test_a_long_run_of_unmatched_braces_before_the_answer_stays_fast():
+    """A reply opening on a run of unmatched `{` (a repetition loop) must still find the answer in linear time."""
+    text = "{" * 20000 + json.dumps({"summary": "the answer"})
+    started = time.perf_counter()
+    out = parse(text)
+    assert not out.invalid and out.data["summary"] == "the answer"
+    assert time.perf_counter() - started < 2.0
 
 
 # --------------------------------------------------------------------------- case and separators
