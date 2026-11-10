@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 
 from mech_council.asks import REPAIR_ASKS, AskLost, AskUnusable, Lanes, needs_repair
-from mech_council.chairwork import Chair
+from mech_council.chairwork import Chair, ChairUnusable
 from mech_council.config import Council, MemberSpec, provider_seat_pool
 from mech_council.console import Console as RunConsole
 from mech_council.deliberation import escalations
@@ -713,6 +713,20 @@ def test_an_unreadable_pass_restarts_the_chair_under_its_own_file_base():
     assert data == {"question": "which way?", "context": "a split held two rounds"}
     assert members.members["planner-chair"].restarts == 1, "the crew's own chair is the one restarted"
     assert any(e["type"] == "chair_unreadable" for e in console.events)
+
+
+def test_a_lost_chair_fails_the_pass_like_an_unreadable_one():
+    """A lost chair raises `ChairUnusable`, not `AskLost`: the port turns only the former into its `Abort`."""
+
+    async def main():
+        board, _members, _console, council_ = lanes(script={"chair": [GONE, GONE]})
+        chair = Chair(council_, board, _console, Brief(mode="review", project="/proj"))
+        return await chair.merge("### F1 the claim", round_=0)
+
+    with pytest.raises(ChairUnusable) as raised:
+        run(main())
+    assert raised.value.phase == "merge" and raised.value.round == 0
+    assert "restart and one re-ask" in str(raised.value), "the loss is still reported as such"
 
 
 def test_a_pass_in_flight_suppresses_the_next_tick_instead_of_queueing_one():

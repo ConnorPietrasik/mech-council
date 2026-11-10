@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .asks import AskLost
 from .config import Council
 from .console import Console
 from .prompts.brief import Brief
@@ -52,14 +53,18 @@ class Chair:
     async def _publication(self, message: str, *, kind: str, phase: str, round_: int) -> dict:
         refusal = "no JSON object"
         for attempt in (0, 1):
-            outcome = await self.lanes.ask_chair(
-                message,
-                round_=round_,
-                phase=phase,
-                kind=kind,
-                timeout=self.council.chair_timeout_sec,
-                classify_unusable=(attempt == 0 and round_ == 0),
-            )
+            try:
+                outcome = await self.lanes.ask_chair(
+                    message,
+                    round_=round_,
+                    phase=phase,
+                    kind=kind,
+                    timeout=self.council.chair_timeout_sec,
+                    classify_unusable=(attempt == 0 and round_ == 0),
+                )
+            except AskLost as failure:
+                # a lost chair fails the pass exactly like an unreadable one
+                raise ChairUnusable(phase, round_, failure.detail) from failure
             if not outcome.rejected and outcome.data is not None:
                 return outcome.data.data
             refusal = "; ".join(outcome.errors) or "no JSON object"
