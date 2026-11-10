@@ -19,19 +19,32 @@ def models_config_path() -> str:
 
 
 def provider_entry(name: str) -> dict | None:
-    """The provider's entry in pi's models.json, or None: the file lacks it (a built-in provider)."""
+    """The provider's entry in pi's models.json, or None: the file lacks it (a built-in provider).
+
+    Raises ValueError if the file exists but is not a provider table: it does not parse, or its top level or 'providers' is not an object.
+    """
     try:
         with open(models_config_path(), "rb") as handle:
             raw = json.load(handle)
-    except OSError, ValueError:
+    except OSError:
         return None
-    entry = (raw.get("providers") or {}).get(name)
+    if not isinstance(raw, dict):
+        raise ValueError(f"top level is {type(raw).__name__}, not an object")
+    providers = raw.get("providers")
+    if providers is not None and not isinstance(providers, dict):
+        raise ValueError(f"'providers' is {type(providers).__name__}, not an object")
+    entry = (providers or {}).get(name)
     return entry if isinstance(entry, dict) else None
 
 
 def probe(name: str) -> tuple[int | None, str | None]:
     """The provider's reported concurrency, or (None, why) when it reports none. Never raises: auto falls back."""
-    entry = provider_entry(name)
+    try:
+        entry = provider_entry(name)
+    except json.JSONDecodeError as failure:
+        return None, f"models.json at {models_config_path()} does not parse ({failure}), so its entry cannot be read"
+    except ValueError as failure:
+        return None, f"models.json at {models_config_path()} is malformed ({failure}), so its entry cannot be read"
     if entry is None:
         return None, "no models.json entry states its baseUrl, so there is no endpoint to ask"
     base = entry.get("baseUrl")

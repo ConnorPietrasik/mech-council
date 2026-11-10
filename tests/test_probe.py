@@ -77,6 +77,41 @@ def test_a_builtin_provider_has_no_entry_and_no_endpoint(ground, monkeypatch):
     assert reason is not None and "no models.json entry" in reason
 
 
+def test_an_unparseable_models_json_is_said_to_be_unparseable(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text('{"providers": {"omnissiah": {"baseUrl": "http://provider.test:8080/v1"},},}')
+    _limit, reason = probe.probe("omnissiah")
+    assert _limit is None
+    assert reason is not None and "does not parse" in reason
+    assert "no models.json entry" not in reason, "a broken file is not a missing entry"
+
+
+def test_a_models_json_that_parses_to_a_list_is_said_to_be_malformed(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text("[1, 2]")
+    _limit, reason = probe.probe("omnissiah")
+    assert _limit is None
+    assert reason is not None and "is malformed" in reason
+    assert "no models.json entry" not in reason, "a broken file is not a missing entry"
+
+
+def test_a_models_json_whose_providers_is_not_an_object_is_said_to_be_malformed(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text('{"providers": [1]}')
+    _limit, reason = probe.probe("omnissiah")
+    assert _limit is None
+    assert reason is not None and "is malformed" in reason
+    assert "no models.json entry" not in reason, "a broken file is not a missing entry"
+
+
+def test_a_models_json_without_providers_lacks_the_entry_rather_than_being_malformed(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text("{}")
+    _limit, reason = probe.probe("omnissiah")
+    assert _limit is None
+    assert reason is not None and "no models.json entry" in reason
+
+
 def test_an_entry_without_a_base_url_has_no_endpoint(ground, monkeypatch):
     _, agent = ground
     (agent / "models.json").write_text('{"providers": {"local": {"models": [{"id": "m"}]}}}')
