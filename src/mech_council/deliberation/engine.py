@@ -555,14 +555,27 @@ class Engine:
             self.docket.qa_order.append(qa.id)
 
     def _notes(self, entries: list[dict], asker: str, round_: int) -> None:
-        """An unknown item drops the link, keeps the note; a note that opens with an item id is filed under it."""
+        """Phase 0 shows no docket, so a note's item reference is dropped as a guess. Otherwise a note that opens
+        with an item id files under it, and an unknown id drops the link, keeping the note."""
         for entry in entries:
             item_id = entry.get("item")
-            if item_id and item_id not in self.docket.items:
-                self.emit("verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a note named an unknown item")
+            if round_ == 0:
+                named = item_id or item_named(entry["text"], self.docket.items)
+                if named:
+                    self.emit(
+                        "verdict_unknown_findings",
+                        member=asker,
+                        id=named,
+                        round=round_,
+                        reason="phase 0 shows no docket, so a note cannot name an item",
+                    )
                 item_id = None
-            if item_id is None:
-                item_id = item_named(entry["text"], self.docket.items)
+            else:
+                if item_id and item_id not in self.docket.items:
+                    self.emit("verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a note named an unknown item")
+                    item_id = None
+                if item_id is None:
+                    item_id = item_named(entry["text"], self.docket.items)
             note, updated = raise_note(
                 self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_, kind=entry.get("kind", "info")
             )

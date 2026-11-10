@@ -2904,20 +2904,45 @@ def test_a_note_about_an_item_that_does_not_exist_keeps_the_note_and_drops_the_l
     assert any(r["event"] == "verdict_unknown_findings" for r in records), "the bad id is said, not silently obeyed"
 
 
-def test_a_note_that_opens_with_an_item_id_files_under_it_without_being_asked():
+def test_phase0_note_cannot_link_an_item_the_seat_was_not_shown():
     import asyncio
 
     def reply(ask):
         if ask.phase == "phase0":
             return payload(
                 findings=[finding("the cache ignores tenants")],
-                notes=["F1: the fix should extend the conditional write", "the lease renews in march, like F1 does"]
-                if ask.who == "Agent1"
-                else [],
+                notes=["F1: the fix should extend the conditional write"] if ask.who == "Agent4" else [],
             )
         if ask.kind == "merge":
             return {"groups": []}
         return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(4, reply=reply)
+        return await built.run(), records, built
+
+    _outcome, records, built = asyncio.run(main())
+    note = built.docket.human_notes["N1"]
+    assert note.by == "Agent4"
+    assert note.item_id is None, "phase 0 shows no docket, so a note's item reference is dropped"
+    assert any(r["event"] == "verdict_unknown_findings" and r["id"] == "F1" for r in records), "the dropped link is said"
+
+
+def test_a_note_that_opens_with_an_item_id_files_under_it_without_being_asked():
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[finding("the cache ignores tenants")])
+        if ask.kind == "merge":
+            return {"groups": []}
+        return stance_all(
+            ask,
+            "agree",
+            notes=["F1: the fix should extend the conditional write", "the lease renews in march, like F1 does"]
+            if ask.who == "Agent1"
+            else [],
+        )
 
     async def main():
         built, _port, _records = engine(reply=reply)

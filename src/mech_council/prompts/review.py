@@ -30,7 +30,7 @@ def phase0_schema(human: str) -> str:
         + """,
                    "context": "what you saw that leaves it open, and the cost of guessing",
                    "options": ["an answer you would accept", "another you would accept"]}],
-  "notes": ["what the human should know and need not answer", {"note": "F1: …", "item": "F1"}]
+  "notes": ["what the human should know and need not answer"]
 }
 ```
 """
