@@ -379,6 +379,40 @@ def test_a_merge_of_an_id_the_chair_was_never_shown_retires_nothing():
     assert run_mod._summary_line("merge_canonical_unlisted", unlisted[0], {}), "the operator is told, not only the log"
 
 
+def test_asks_and_notes_named_on_a_folded_duplicate_repoint_to_the_survivor():
+    """The duplicate's ask is about the claim that survives: the fold re-points it, so the canonical's closure can moot it."""
+    import asyncio
+
+    from mech_council import run as run_mod
+    from mech_council.deliberation.escalations import moot, moot_item_asks, raise_question
+    from mech_council.deliberation.notes import raise_note
+
+    async def main():
+        built, _port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="tenant key missing from the cache", severity="major", opened_round=1))
+        question, _ = raise_question(built.docket, text="may we change the tenant key?", asker="Agent2", item_id="F2", round_=1)
+        note, _ = raise_note(built.docket, by="Agent3", text="the key format is documented", item_id="F2", round_=1)
+        await built._merge_new_items(round_=1)
+        return built, records, question, note
+
+    built, records, question, note = asyncio.run(main())
+    assert "F2" not in built.docket.items, "the duplicate did not fold"
+    assert question.item_id == "F1", "the ask still names an id the docket no longer has"
+    assert note.item_id == "F1", "the note still names an id the docket no longer has"
+    folded = [r for r in records if r["event"] == "question_item_folded"]
+    assert folded == [{"event": "question_item_folded", "id": "H1", "item": "F2", "into": "F1", "round": 1}]
+    note_folded = [r for r in records if r["event"] == "note_item_folded"]
+    assert note_folded == [{"event": "note_item_folded", "id": "N1", "item": "F2", "into": "F1", "round": 1}]
+    assert run_mod._summary_line("question_item_folded", folded[0], {}), "the operator is told, not only the log"
+    assert run_mod._summary_line("note_item_folded", note_folded[0], {}), "the operator is told, not only the log"
+
+    built.docket.items["F1"].disposition = AGREED
+    mooted = moot_item_asks(built.docket, item_id="F1", disposition="agreed", round_=2)
+    assert [fields["id"] for _event, fields in mooted] == ["H1"], "the survivor's closure could not moot the re-pointed ask"
+    assert question.state == WITHDRAWN and moot(built.docket, question)
+
+
 def test_a_group_that_names_the_later_entry_canonical_folds_it_into_the_earlier_one():
     """The chair is told the earliest id is canonical; a group ignoring that must fold, not no-op."""
     import asyncio

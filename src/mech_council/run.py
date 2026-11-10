@@ -553,6 +553,10 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
             f"the chair named {fields['chair_named']} the group's claim, but {fields['canonical']} was raised first — "
             "the earlier entry is the one whose claim the human reads"
         )
+    if name == "question_item_folded":
+        return f"{fields['id']} asked about {fields['item']}, folded into {fields['into']} — the ask is now on {fields['into']}"
+    if name == "note_item_folded":
+        return f"{fields['id']} is about {fields['item']}, folded into {fields['into']} — the note is now on {fields['into']}"
     if name == "answer_buys_a_round":
         return f"{fields['answered']} answer(s) settled: round {fields['round']} is a full one"
     if name == "grace_round_bought":

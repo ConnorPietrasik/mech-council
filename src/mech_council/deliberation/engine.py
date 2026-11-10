@@ -891,6 +891,17 @@ class Engine:
                         target.also_reported_by.append(agent)
                 for escalation_key in [k for k in self.docket.escalations if k[0] == duplicate]:
                     del self.docket.escalations[escalation_key]
+                # an ask or note that names the duplicate is about the claim that survives: re-point it, so closure can moot it
+                for qid in self.docket.question_order:
+                    question = self.docket.questions[qid]
+                    if question.item_id == duplicate:
+                        question.item_id = canonical
+                        self.emit("question_item_folded", id=qid, item=duplicate, into=canonical, round=round_)
+                for nid in self.docket.note_order:
+                    note = self.docket.human_notes[nid]
+                    if note.item_id == duplicate:
+                        note.item_id = canonical
+                        self.emit("note_item_folded", id=nid, item=duplicate, into=canonical, round=round_)
         return len(usable), ""
 
     def _summarize(self, round_: int) -> None:
