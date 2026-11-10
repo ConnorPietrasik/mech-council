@@ -388,8 +388,8 @@ def test_the_snapshots_keep_the_repo_object_store_untouched(tmp_path):
 
 
 def test_restore_round_trips_a_path_git_quotes(tmp_path):
-    """A non-ASCII path comes back C-escaped from name-status; the rollback unquotes it, or it
-    fails and the blocked fix's tree is left standing."""
+    """A non-ASCII path must come back raw from name-status, or the blocked fix's tree is left
+    standing."""
     from mech_council.deliberation.tree import Tree
 
     project = os.path.join(str(tmp_path), "proj")
@@ -409,6 +409,33 @@ def test_restore_round_trips_a_path_git_quotes(tmp_path):
     assert ok, why
     with open(os.path.join(project, "café.py"), encoding="utf-8") as handle:
         assert handle.read() == "v = 1\n", "the quoted path rolls back like any other"
+
+
+def test_restore_round_trips_a_path_git_c_quotes(tmp_path):
+    """git C-quotes a name holding a quote in name-status; the rollback must still find the file
+    to restore and the one to remove, or the blocked fix's tree is left standing."""
+    from mech_council.deliberation.tree import Tree
+
+    project = os.path.join(str(tmp_path), "proj")
+    os.makedirs(project)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    with open(os.path.join(project, 'we"ird.txt'), "w", encoding="utf-8") as handle:
+        handle.write("v = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+
+    tree = Tree(project, os.path.join(str(tmp_path), "runs"))
+    base = tree.snapshot()
+    assert base
+    with open(os.path.join(project, 'we"ird.txt'), "w", encoding="utf-8") as handle:
+        handle.write("v = 2\n")
+    with open(os.path.join(project, 'new"one.txt'), "w", encoding="utf-8") as handle:
+        handle.write("x = 1\n")
+    ok, why = tree.restore(base)
+    assert ok, why
+    with open(os.path.join(project, 'we"ird.txt'), encoding="utf-8") as handle:
+        assert handle.read() == "v = 1\n", "the C-quoted path rolls back like any other"
+    assert not os.path.exists(os.path.join(project, 'new"one.txt')), "the pass's added file is removed"
 
 
 def test_restore_round_trips_a_project_that_sits_in_a_larger_repo(tmp_path):

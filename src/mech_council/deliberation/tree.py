@@ -97,13 +97,13 @@ class Tree:
         if not post:
             return False, "the worktree could not be snapshotted"
         env = snapshot_env(self.run_dir)
-        # quotePath off: an escaped path (a non-ASCII file) would not match the worktree's;
+        # -z: NUL-delimited, names raw — a name git would C-quote (a quote or a backslash in it)
+        # still reads as the pathspec and the filesystem path;
         # --relative: the diff prints repo-root paths, and the pathspecs and the removals are project-relative
         ok, status = self.git(
-            "-c",
-            "core.quotePath=false",
             "diff",
             "--name-status",
+            "-z",
             "--relative",
             tree,
             post,
@@ -114,16 +114,21 @@ class Tree:
             return False, "the diff against the pre-tree could not be read"
         restore_paths: list[str] = []
         remove_paths: list[str] = []
-        for line in status.splitlines():
-            parts = line.split("\t")
-            code, paths = parts[0], parts[1:]
-            if len(paths) == 2:  # a rename or a copy: the old path is restored, the new one removed
+        fields = status.split("\0")
+        if fields and fields[-1] == "":  # every -z record ends in its NUL
+            fields.pop()
+        i = 0
+        while i < len(fields):
+            code = fields[i]
+            count = 2 if code[0] in "RC" else 1  # a rename or a copy record carries two paths
+            paths = fields[i + 1 : i + 1 + count]
+            i += 1 + count
+            if count == 2:  # a rename or a copy: the old path is restored, the new one removed
                 restore_paths.append(paths[0])
                 remove_paths.append(paths[1])
-                continue
-            if code == "A":
+            elif code == "A":
                 remove_paths.extend(paths)
-            else:  # M, D, T, U: the pre-tree's content is what the path wants
+            else:  # M, D, T: the pre-tree's content is what the path wants
                 restore_paths.extend(paths)
         if restore_paths:
             ok, out = self.git(
