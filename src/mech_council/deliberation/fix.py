@@ -428,9 +428,7 @@ class Fix:
             if not text:
                 continue
             kind = "correction" if entry.get("kind") == "correction" else "info"
-            notes.setdefault(str(entry.get("item") or ""), []).append(
-                (str(entry.get("seat") or ""), kind, text, entry.get("shown_round"))
-            )
+            notes.setdefault(str(entry.get("item") or ""), []).append((str(entry.get("seat") or ""), kind, text, entry.get("shown_round")))
         self.execution.source = {
             "how": "file",
             "path": self.review_file,

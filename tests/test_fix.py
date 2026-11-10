@@ -1012,9 +1012,9 @@ def test_the_gate_shows_the_review_s_corrections(cli, project):
         stdin="H1: fix\n",
     )
     assert result.returncode == 0, result.console
-    assert (
-        "correction: F1: the value is not wrong; it is computed twice" in result.console
-    ), "the gate's context carries the review's correction"
+    assert "correction: F1: the value is not wrong; it is computed twice" in result.console, (
+        "the gate's context carries the review's correction"
+    )
     assert result.manifest["outcome"] == "fixed"
 
 

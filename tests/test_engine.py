@@ -7,7 +7,7 @@ import re
 import pytest
 
 from mech_council.deliberation.engine import Abort, Engine
-from mech_council.deliberation.state import AGREE, AGREED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
+from mech_council.deliberation.state import AGREE, AGREED, DECLINED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
 from mech_council.prompts.brief import Brief
@@ -2566,6 +2566,42 @@ def test_plan_mode_reaches_consensus_on_one_backer_and_two_shrugs():
 
     outcome, records = asyncio.run(main())
     assert outcome == "consensus", [r for r in records if r["event"] == "termination"]
+
+
+def test_a_plan_verdict_that_omits_backing_is_said_and_the_ladder_owns_the_rest():
+    """The omission is the only case the emit can see: a token that maps to none of the three is refused before the verdict is applied."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(
+                summary="one paragraph",
+                approach={
+                    "claim": "do it in one step",
+                    "stages": [{"state": "the step is done", "gate": "the tests pass", "scope": "src/", "exceptions": []}],
+                },
+            )
+        if ask.kind == "compare":
+            return payload(agreed=[], conflicts=[], uncovered=[])
+        if ask.who == "Agent2":
+            return RawAsk(rejected=True)  # what the port does with a backing that maps to none of the three
+        if ask.who == "Agent3":
+            return payload(positions=[], backing="no_preference", signoff=True)
+        return payload(positions=[], signoff=True)  # Agent1: the verdict names no backing
+
+    async def main():
+        built, _port, records = engine(reply=reply, mode="plan", max_rounds=1)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    missing = [r for r in records if r["event"] == "verdict_missing_backing"]
+    assert {(r["member"], r["round"]) for r in missing} == {("Agent1", 1)}, "the omission is said once, by the seat that omitted"
+    assert not [r for r in records if r["event"] == "verdict_unknown_findings"], "a missing field is not an unknown finding"
+    declined = [r for r in records if r["event"] == "gap_declined"]
+    assert sorted(r["member"] for r in declined) == ["Agent1", "Agent2"], "the ladder owns what the omission and the refusal leave behind"
+    assert all(r["items"] == ["backing"] for r in declined)
+    assert built.docket.backing["Agent1"] == DECLINED and built.docket.backing["Agent2"] == DECLINED
 
 
 def test_an_answer_naming_its_addressee_instead_of_a_q_id_still_lands():

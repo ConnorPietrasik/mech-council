@@ -512,14 +512,8 @@ class Engine:
         token = data.get("backing")
         if token:
             self.docket.backing[agent] = token
-        elif "backing" in data and data["backing"] is None:
-            self.emit(
-                "verdict_unknown_findings",
-                member=agent,
-                id="backing",
-                round=round_,
-                reason="the backing token did not map to one of the three",
-            )
+        else:
+            self.emit("verdict_missing_backing", member=agent, round=round_, reason="the verdict named no backing")
 
     def _answers(self, entries: list[dict], agent: str, round_: int) -> None:
         for entry in entries:
