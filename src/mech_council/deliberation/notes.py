@@ -4,7 +4,7 @@ from typing import TypeGuard
 
 from .state import RETRACTED, STANDING, Docket, Item, Note, note_key
 
-NOTE_MAX_CHARS = 600
+NOTE_MAX_CHARS = 2000
 NOTE_MAX_PER_REPLY = 6
 NOTE_KINDS = ("info", "correction")
 

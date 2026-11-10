@@ -150,12 +150,14 @@ def question_shape(human: str) -> str:
     if human == "blocking":
         notes = (
             "`notes` tells the human what they need only *know*: it replaces an ask, stops nothing, and repeats "
-            f"nothing a finding already says nor a peer's standing note. {filed}"
+            "nothing a finding already says nor a peer's standing note. Keep each note concise — the point, "
+            f"plainly. {filed}"
         )
     else:
         notes = (
-            f"`notes` tells the human what they need only *know*: it replaces an ask and repeats "
-            f"nothing a finding already says nor a peer's standing note. {filed}"
+            "`notes` tells the human what they need only *know*: it replaces an ask and repeats "
+            "nothing a finding already says nor a peer's standing note. Keep each note concise — the point, "
+            f"plainly. {filed}"
         )
     return f"""\
 # Asking well
