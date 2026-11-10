@@ -35,8 +35,8 @@ class Brief:
     def gap(self, chunk: list[str], *, deliberate: bool, reason: str) -> str:
         return common.gap_ask(chunk, reason=reason, deliberate=deliberate)
 
-    def defense(self, item_id: str, challenge: dict, question: str) -> str:
-        return common.defense_ask(item_id, challenge, question)
+    def defense(self, item_id: str, challenges: list[dict], question: str) -> str:
+        return common.defense_ask(item_id, challenges, question)
 
     def peer_pass(self, listing: str) -> str:
         return common.peer_pass_task(listing, self.mode, self.human)

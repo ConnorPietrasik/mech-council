@@ -1990,6 +1990,56 @@ def test_a_challenge_with_evidence_costs_exactly_one_defense_ask():
     assert port.count(who="Agent1", phase="defense") == 1
 
 
+def test_every_challenge_in_a_round_reaches_the_defense():
+    """Two reasoned objections in one round: the holder answers the set, not just the first."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        if ask.phase == "defense":
+            return payload(
+                positions=[{"item": "F1", "stance": "needs_human", "note": "the policy predates the tenant work"}],
+                signoff=True,
+            )
+        items = shown_items(ask.text)
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": i, "stance": "needs_human", "note": "does policy allow this"} for i in items],
+                signoff=True,
+            )
+        if ask.who == "Agent2":
+            return payload(
+                positions=[
+                    {"item": i, "stance": "disagree", "note": "the contract fixes it", "evidence": "docs/contract.md:12"} for i in items
+                ],
+                signoff=True,
+            )
+        if ask.who == "Agent3":
+            return payload(
+                positions=[
+                    {"item": i, "stance": "disagree", "note": "the test suite covers it", "evidence": "tests/test_tenant.py:44"}
+                    for i in items
+                ],
+                signoff=True,
+            )
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return built, port
+
+    built, port = asyncio.run(main())
+    defense = [ask.text for ask in port.asks if ask.phase == "defense"]
+    assert len(defense) == 1, "one round of challenges costs one defense ask"
+    for snippet in ("the contract fixes it", "docs/contract.md:12", "the test suite covers it", "tests/test_tenant.py:44"):
+        assert snippet in defense[0], f"the seat never saw {snippet!r}"
+    assert built.docket.escalations[("F1", "Agent1")].state == STANDING
+
+
 def test_a_defense_that_lets_go_of_the_item_does_not_adopt_the_ask_it_raises():
     """A withdrawn hold must not own the ask its own release left standing: that reports a free question as escalated."""
     import asyncio

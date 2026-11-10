@@ -535,18 +535,20 @@ def message_ask(message: str) -> str:
     )
 
 
-def defense_ask(item_id: str, challenge: dict, question: str) -> str:
-    return "\n".join(
-        [
-            f"Your `needs_human` on {item_id} was challenged with cited evidence.",
+def defense_ask(item_id: str, challenges: list[dict], question: str) -> str:
+    lines = [f"Your `needs_human` on {item_id} was challenged with cited evidence."]
+    for challenge in challenges:
+        lines += [
             f"Challenge from {challenge.get('by', 'a peer')}:",
             f"  note: {challenge.get('note') or '(none)'}",
             f"  evidence: {challenge.get('evidence') or '(none)'}",
-            f"Your question was: {question}",
-            "",
-            "Answer the challenge. Restate `needs_human` and address the cited evidence — "
-            "optionally with refreshed question text — or the escalation is demoted and the "
-            "item derives from the remaining stances. Repeating the question without "
-            "touching the evidence demotes it.",
         ]
-    )
+    lines += [
+        f"Your question was: {question}",
+        "",
+        "Answer every challenge. Restate `needs_human` and address the cited evidence — "
+        "optionally with refreshed question text — or the escalation is demoted and the "
+        "item derives from the remaining stances. Repeating the question without "
+        "touching the evidence demotes it.",
+    ]
+    return "\n".join(lines)

@@ -760,7 +760,7 @@ class Engine:
             self.emit("escalation_challenged", item=item_id, asker=asker, by=[c["by"] for c in fresh], round=round_)
             question = self.docket.questions.get(escalation.question_id)
             text = question.text if question else ""
-            result = await self.port.ask_seat(asker, self.brief.defense(item_id, fresh[0], text), round_=round_, phase="defense")
+            result = await self.port.ask_seat(asker, self.brief.defense(item_id, fresh, text), round_=round_, phase="defense")
             if result.failure:
                 raise Abort(result.failure, member=asker, round_=round_)
             defended = self._apply_defense(item_id, asker, result, round_)
