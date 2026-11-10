@@ -8,9 +8,7 @@ from . import gaps as gap_rules
 from .dispositions import closure_pass, derive
 from .escalations import (
     HELD_BACK,
-    MOOT,
     NO_HUMAN,
-    SETTLED,
     UNBACKED,
     answer_by_seat,
     ask_to_stop,
@@ -859,9 +857,6 @@ class Engine:
         self._record_pending_folds(groups, ids, landed)
         if applied is None:
             self.emit("merge_refused", round=round_, reason=reason, items=len(ids))
-            self.emit_note(
-                f"merge plan refused ({reason}): the docket stays unmerged ({len(ids)} {self.adapter.item_noun_plural} printed as raised)"
-            )
             return
         self.emit("chair_merge", round=round_, groups=applied)
 
@@ -957,9 +952,6 @@ class Engine:
             record.lines.append((agent, " · ".join(parts)))
         self.docket.rounds.append(record)
         self.emit("round_summary", round=round_, signed_off=signed, states=counts)
-
-    def emit_note(self, text: str) -> None:
-        self.emit("console_note", text=text)
 
     async def run(self) -> str:
         outcome = await self._deliberate()
@@ -1201,10 +1193,6 @@ class Engine:
         listing = ask
         pending_notes = unshown(self.docket)
         if not listing:
-            # no_human is not a held-back reason: the note names only the asks the council actually kept back
-            held = [q for q in open_asks if held_back(self.docket, q)]
-            if terminal and held:
-                self.emit_note(_held_back_note(self.docket, held))
             if pending_notes:
                 # no asks to show; the notes are the reason for the checkpoint
                 self.phase("the notes for you")
@@ -1388,23 +1376,6 @@ def _one_line(text: str, width: int = 90) -> str:
 def _ask_signature(questions: list) -> tuple:
     """What the chair reads about the asks; an unchanged signature folds nothing."""
     return tuple((q.id, q.text, q.item_id, tuple(q.askers), tuple(sorted(q.peer_answers))) for q in questions)
-
-
-def _held_back_note(docket: Docket, held_asks: list) -> str:
-    """The per-ask reason the run ends without asking the human."""
-    answered = [q.id for q in held_asks if held_back(docket, q) == SETTLED]
-    unbacked = [q.id for q in held_asks if held_back(docket, q) == UNBACKED]
-    moot = [q.id for q in held_asks if held_back(docket, q) == MOOT]
-    said = []
-    if answered:
-        said.append(
-            f"{', '.join(answered)}: a seat answered {'these' if len(answered) > 1 else 'this'} from the workspace instead of asking you"
-        )
-    if unbacked:
-        said.append(f"{', '.join(unbacked)}: no second seat backed {'them' if len(unbacked) > 1 else 'it'}, so the council never asked you")
-    if moot:
-        said.append(f"{', '.join(moot)}: {'those items were' if len(moot) > 1 else 'that item was'} settled among the seats")
-    return " · ".join(said) + ". The report lists them."
 
 
 def _plan_text(artifact: dict) -> str:

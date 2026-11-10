@@ -933,8 +933,6 @@ def test_an_unbacked_ask_is_weighed_by_the_council_and_never_asked():
     assert all("H1" not in c["ask_set"] for c in port.checkpoints), "an unbacked ask is never put to the human"
     question = built.docket.questions["H1"]
     assert question.answer == "" and "unseconded" in question.markers
-    note = next(r for r in records if r["event"] == "console_note")["text"]
-    assert "no second seat" in note and "answered" not in note, "nothing was settled among itself: say why it went unasked"
 
 
 def test_a_seat_that_answers_a_peer_ask_keeps_the_human_out_of_it():
@@ -962,7 +960,6 @@ def test_a_seat_that_answers_a_peer_ask_keeps_the_human_out_of_it():
     assert built.docket.questions["H1"].peer_answers == {"Agent2": "config names it: tenant_id"}
     assert not any(c["waiting"] and "H1" in c["ask_set"] for c in port.checkpoints), "a seat answered it: nobody waits on the human"
     assert built.docket.questions["H1"].answer == ""
-    assert "a seat answered this from the workspace" in next(r for r in records if r["event"] == "console_note")["text"]
 
 
 def test_the_seat_that_raised_an_ask_can_call_a_peer_s_answer_not_enough_on_the_last_pass():
@@ -3389,8 +3386,8 @@ def test_the_non_blocking_plan_split_is_asked_and_the_run_ends_on_its_own_budget
     assert outcome in ("round_limit_reached", "stalemate"), outcome
 
 
-def test_the_none_run_ends_on_open_asks_without_a_note_to_a_human_that_is_not_there():
-    """`no_human` is not a held-back reason: the terminal note names only the asks the council actually kept back."""
+def test_the_none_run_does_not_mark_a_seconded_ask_held_back():
+    """`no_human` is not a held-back reason: a seconded ask on a none-run ends marked no_human, never held back."""
     import asyncio
 
     def reply(ask):
@@ -3405,11 +3402,14 @@ def test_the_none_run_ends_on_open_asks_without_a_note_to_a_human_that_is_not_th
             return stance_all(ask, "agree", second=["H1"])
         return stance_all(ask, "agree")
 
+    from mech_council.deliberation.escalations import HELD_BACK, NO_HUMAN
+
     async def main():
         built, port, records = engine(reply=reply, human="none")
         outcome = await built.run()
-        return outcome, records
+        return outcome, built
 
-    outcome, records = asyncio.run(main())
+    outcome, built = asyncio.run(main())
     assert outcome == "consensus"
-    assert [r for r in records if r["event"] == "console_note"] == [], "the held-back note names a human that is not on the run"
+    markers = built.docket.questions["H1"].markers
+    assert NO_HUMAN in markers and not set(HELD_BACK) & set(markers), "the seconded ask is never shown, but never held back either"
