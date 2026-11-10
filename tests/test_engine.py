@@ -7,7 +7,7 @@ import re
 import pytest
 
 from mech_council.deliberation.engine import Abort, Engine
-from mech_council.deliberation.state import AGREE, AGREED, DECLINED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
+from mech_council.deliberation.state import ABSTAIN, AGREE, AGREED, DECLINED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
 from mech_council.prompts.brief import Brief
@@ -308,6 +308,109 @@ def test_a_round_merge_is_shown_the_open_docket_so_a_re_reported_claim_folds_onc
     listing = [ask.text for ask in port.asks if ask.kind == "merge"][-1]
     assert "F2: tenant key missing from the cache" in listing.split("Already on the docket")[0], "what to group is listed first"
     assert "F1: the cache ignores tenants" in listing.split("Already on the docket")[1], "what to fold into is listed too"
+
+
+def test_a_declined_stance_on_a_duplicate_does_not_block_its_fold():
+    """The gap ladder's own declines are non-answers: a duplicate it ran out on still folds."""
+    import asyncio
+
+    async def main():
+        built, _port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="the cache ignores tenants", severity="major", opened_round=1))
+        for agent in built.docket.roster:
+            built.docket.stances["F2"][agent] = Stance(stance=ABSTAIN, round=1, declined=True)
+        await built._merge_new_items(round_=1)
+        return built, records
+
+    built, records = asyncio.run(main())
+    assert "F2" not in built.docket.items, "the ladder's declined abstains vetoed the fold"
+    assert [r for r in records if r["event"] == "chair_merge"][-1]["groups"] == 1
+
+
+def test_an_answered_stance_on_a_duplicate_still_blocks_its_fold():
+    """A seat that looked and chose not to take a position still chose: only declines fold away, and the skip is logged."""
+    import asyncio
+
+    async def main():
+        built, _port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="the cache ignores tenants", severity="major", opened_round=1))
+        built.docket.stances["F2"]["Agent1"] = Stance(stance=ABSTAIN, round=1)
+        await built._merge_new_items(round_=1)
+        return built, records
+
+    built, records = asyncio.run(main())
+    assert "F2" in built.docket.items, "the fold discarded a seat's verdict"
+    assert [r for r in records if r["event"] == "merge_duplicate_stanced"][0]["into"] == "F1", records
+    assert [r for r in records if r["event"] == "chair_merge"][-1]["groups"] == 0
+
+
+def test_a_landed_fold_is_not_offered_again():
+    """A fold that landed owes nothing: its canonical is not re-offered when the next round raises nothing."""
+    import asyncio
+
+    async def main():
+        built, port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="the cache ignores tenants", severity="major", opened_round=0))
+        await built._merge_pass(round_=0, ids=["F1", "F2"])
+        await built._merge_new_items(round_=1)
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "F2" not in built.docket.items, "the fold never landed"
+    assert [a.round for a in port.asks if a.kind == "merge"] == [0], "a landed fold was re-offered"
+
+
+def test_a_group_that_grouped_nothing_is_offered_again():
+    """A fold the guard blocked grouped nothing: the canonical is re-offered, the answered duplicate is not."""
+    import asyncio
+
+    async def main():
+        built, port, records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="the cache ignores tenants", severity="major", opened_round=1))
+        built.docket.stances["F2"]["Agent1"] = Stance(stance=AGREE, round=1)
+        await built._merge_new_items(round_=1)
+        await built._merge_new_items(round_=2)
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "F2" in built.docket.items, "a fold the guard blocked was folded anyway"
+    asks = [a for a in port.asks if a.kind == "merge"]
+    assert [a.round for a in asks] == [1, 2], "a group that folded nothing was not re-offered"
+    offered = asks[1].text.split("Already on the docket")[0]
+    assert "F1:" in offered and "F2:" not in offered, "the answered duplicate was re-offered"
+
+
+def test_a_plan_mode_duplicate_conflict_folds_in_the_round_0_merge():
+    """Conflicts open in round 0, so only the comparison's own merge pass can offer them."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(approach=dict(PLANS))
+        if ask.kind == "compare":
+            positions = [{"agent": "Agent1", "claim": "gate first"}, {"agent": "Agent2", "claim": "ship first"}]
+            conflict = {"claim": "gate before ship", "positions": positions}
+            return payload(agreed=[], conflicts=[conflict, dict(conflict)], uncovered=[])
+        if ask.kind == "merge":
+            return payload(groups=[{"canonical": "T1", "duplicates": ["T2"]}])
+        return payload(positions=[], backing="no_preference", signoff=True)
+
+    async def main():
+        built, port, records = engine(reply=reply, mode="plan", max_rounds=1)
+        await built.phase0()
+        await built.publish_plan()
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "T2" not in built.docket.items, "the duplicate conflict was never offered to fold"
+    assert [a.round for a in port.asks if a.kind == "merge"] == [0], "the comparison never ran its merge pass"
+    listing = [a.text for a in port.asks if a.kind == "merge"][0]
+    assert "T1: gate before ship" in listing and "T2: gate before ship" in listing, "both conflicts were on the chair's scope"
+    assert [r for r in records if r["event"] == "chair_merge"][0]["groups"] == 1
 
 
 def test_a_folded_duplicate_is_a_co_reporter_not_a_co_claimant():
@@ -2167,6 +2270,47 @@ def test_a_refused_merge_plan_leaves_the_docket_unmerged_and_the_run_going():
     assert len(built.docket.items) == 2, "nothing merged"
     assert any(r["event"] == "merge_refused" for r in records), records
     assert outcome != "aborted"
+
+
+def test_a_refused_fold_is_offered_again_until_it_lands():
+    """A duplicate whose fold was refused is re-offered in later rounds; the ladder's declines do not stop it."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the token cache is wrong")
+        if ask.kind == "merge":
+            if ask.round == 0:
+                return payload(groups=[])
+            if ask.round <= 2:
+                # one id reused across groups refuses the whole plan
+                return payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}, {"canonical": "F2", "duplicates": []}])
+            return payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}])
+        positions = []
+        for item in shown_items(ask.text):
+            if item == "F2":
+                continue  # the seats stay out of the duplicate until the chair folds it
+            if ask.who == "Agent2":
+                positions.append({"item": item, "stance": "disagree", "note": "not the only cause"})
+            else:
+                positions.append({"item": item, "stance": "agree"})
+        extra = {"new_items": [finding("the token cache is wrong too")]} if ask.round == 1 and ask.who == "Agent1" else {}
+        return payload(positions=positions, backing="no_preference", signoff=True, **extra)
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=3)
+        await built.run()
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "F2" not in built.docket.items, "the refused fold was never re-offered"
+    assert [a.round for a in port.asks if a.kind == "merge"] == [0, 1, 2, 3], "the re-offer skipped a round"
+    listing = [a.text for a in port.asks if a.kind == "merge" and a.round == 2][0]
+    assert "F2: the token cache is wrong too" in listing.split("Already on the docket")[0], "the carried id is what the chair groups"
+    declined = [r for r in records if r["event"] == "gap_declined" and "F2" in r["items"]]
+    assert declined and all(r["round"] == 2 for r in declined), "the fold landed before the round-3 ladder could nag"
+    assert [r for r in records if r["event"] == "chair_merge" and r["round"] == 3][0]["groups"] == 1
+    assert not built.docket.items["F1"].closed
 
 
 PLANS = {"claim": "do it", "stages": [{"state": "done", "gate": "green", "scope": "src/", "exceptions": []}]}

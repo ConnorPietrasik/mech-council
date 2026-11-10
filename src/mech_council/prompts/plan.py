@@ -128,8 +128,9 @@ with the guess it stands for — never decided silently.{stop}
 
 
 MERGE_TASK = """\
-New decision points are listed under **Entries to group**. The decision points still open on the docket are
-listed under **Already on the docket**: a new entry asking one of those asks the same decision twice, and it
+Decision points the chair still owes a fold on are listed under **Entries to group**: what the round raised,
+and what its last plan did not fold. The decision points still open on the docket are
+listed under **Already on the docket**: an entry asking one of those asks the same decision twice, and it
 folds into it. Say which entries ask the **same decision twice**; merging wording or scope is not merging,
 because it is the decision that matches, not the sentence stating it.
 

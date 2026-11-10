@@ -548,6 +548,11 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
         return f"the chair folded into {fields['canonical']}, which it was never shown — nothing in that group is merged"
     if name == "merge_duplicate_unlisted":
         return f"the chair folded {fields['duplicate']} into {fields['into']}, an id it was never shown — that entry keeps its claim"
+    if name == "merge_duplicate_stanced":
+        return (
+            f"the chair folded {fields['duplicate']} into {fields['into']}, but a seat has already stanced on "
+            f"{fields['duplicate']} — that entry keeps its claim"
+        )
     if name == "merge_canonical_replaced":
         return (
             f"the chair named {fields['chair_named']} the group's claim, but {fields['canonical']} was raised first — "

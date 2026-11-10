@@ -115,6 +115,7 @@ class Engine:
         self.previous_signature: tuple | None = None
         self.checkpoint_moved = False
         self.shown: dict[str, list[str]] = {}
+        self.pending_folds: list[str] = []  # ids the chair's last plan still owes a fold on
         self.asks_used: dict[str, int] = {}
         self.answers: dict[str, str] = {}
         self._next_item = 1
@@ -243,6 +244,10 @@ class Engine:
             conflicts=len(comparison.get("conflicts") or []),
             uncovered=len(comparison.get("uncovered") or []),
         )
+        # conflicts open in round 0, so the rounds' fresh-item pass can never offer them
+        if self.docket.order:
+            self.phase("the chair's merge")
+            await self._merge_pass(round_=0, ids=list(self.docket.order))
 
     def _approach_listing(self) -> str:
         blocks = []
@@ -828,13 +833,20 @@ class Engine:
         return (note + (" | " + evidence if evidence else "")).strip()
 
     async def _merge_new_items(self, round_: int) -> None:
-        self.phase("the chair's merge of what the round raised")
         open_ids = [i for i in self.docket.order if not self.docket.items[i].closed]
         fresh = [i for i in open_ids if self.docket.items[i].opened_round == round_]
-        if not fresh:
+        carried = [i for i in self.pending_folds if i in set(open_ids) and not self._answered(i)]
+        new = [i for i in open_ids if i in set(fresh) | set(carried)]
+        if not new:
+            self.pending_folds = []  # the survivors are closed or answered, and neither is ever offered
             return
+        self.phase("the chair's merge of what the round raised" if fresh else "the chair's merge of what earlier rounds left un-folded")
         # the other open entries are listed too, so a duplicate of one folds into it
-        await self._merge_pass(round_=round_, ids=open_ids, new=fresh)
+        await self._merge_pass(round_=round_, ids=open_ids, new=new)
+
+    def _answered(self, item_id: str) -> bool:
+        """A seat actually stanced on the entry; a declined record is a non-answer."""
+        return any(not record.declined for record in self.docket.stances.get(item_id, {}).values())
 
     async def _merge_pass(self, round_: int, ids: list[str], *, new: list[str] | None = None) -> None:
         """`new` are the entries to group; the rest of `ids` are open entries a new one folds into. All of them are the chair's scope."""
@@ -842,7 +854,9 @@ class Engine:
         fresh_set = set(fresh)
         listing = _merge_listing(self.docket.items, self.adapter.detail_label, new=fresh, older=[i for i in ids if i not in fresh_set])
         merged = await self.port.chair_merge(listing, round_=round_)
-        applied, reason = self._apply_merge(merged.get("groups") or [], shown=set(ids), round_=round_)
+        groups = merged.get("groups") or []
+        applied, reason, landed = self._apply_merge(groups, shown=set(ids), round_=round_)
+        self._record_pending_folds(groups, ids, landed)
         if applied is None:
             self.emit("merge_refused", round=round_, reason=reason, items=len(ids))
             self.emit_note(
@@ -851,14 +865,20 @@ class Engine:
             return
         self.emit("chair_merge", round=round_, groups=applied)
 
-    def _apply_merge(self, groups: list[dict], *, shown: set[str], round_: int) -> tuple[int | None, str]:
+    def _record_pending_folds(self, groups: list[dict], shown: list[str], landed: list[str]) -> None:
+        """The ids the chair named in its plan and still owes a fold on: still open, not landed, and no seat has answered one."""
+        named = {i for group in groups for i in (group["canonical"], *group["duplicates"])}
+        still_open = [i for i in shown if i in self.docket.items and not self.docket.items[i].closed]
+        self.pending_folds = [i for i in still_open if i in named and i not in landed and not self._answered(i)]
+
+    def _apply_merge(self, groups: list[dict], *, shown: set[str], round_: int) -> tuple[int | None, str, list[str]]:
         seen: set[str] = set()
         usable = []
         raised = {i: n for n, i in enumerate(self.docket.order)}
         for group in groups:
             chair_canonical, duplicates = group["canonical"], group["duplicates"]
             if chair_canonical in seen or any(d in seen for d in duplicates):
-                return None, f"{chair_canonical} is reused across groups"
+                return None, f"{chair_canonical} is reused across groups", []
             seen.add(chair_canonical)
             seen.update(d for d in duplicates if d != chair_canonical)
             if chair_canonical not in self.docket.items:
@@ -884,7 +904,8 @@ class Engine:
                     # the same for a duplicate outside the listing: it keeps its claim
                     self.emit("merge_duplicate_unlisted", round=round_, duplicate=duplicate, into=canonical)
                     continue
-                if self.docket.stances.get(duplicate):
+                if self._answered(duplicate):
+                    self.emit("merge_duplicate_stanced", round=round_, duplicate=duplicate, into=canonical)
                     continue  # merging would discard verdicts
                 keep.append(duplicate)
             if keep:
@@ -913,7 +934,7 @@ class Engine:
                     if note.item_id == duplicate:
                         note.item_id = canonical
                         self.emit("note_item_folded", id=nid, item=duplicate, into=canonical, round=round_)
-        return len(usable), ""
+        return len(usable), "", [canonical for canonical, _ in usable]
 
     def _summarize(self, round_: int) -> None:
         states = {i: derive(self.docket, i) for i in self.docket.order if not self.docket.items[i].closed}
@@ -1413,7 +1434,7 @@ def _tokens(text: str) -> set[str]:
 
 #: the two headings of the merge listing, as the mode briefings name them
 MERGE_NEW_HEADING = "## Entries to group"
-MERGE_OLDER_HEADING = "## Already on the docket: fold a new entry into one of these, never these into each other"
+MERGE_OLDER_HEADING = "## Already on the docket: fold one of the grouped entries into one of these, never these into each other"
 
 
 def _merge_listing(items, detail_label: str, *, new: list[str], older: list[str]) -> str:

@@ -90,8 +90,9 @@ def extra_briefing(human: str) -> str:
 
 
 MERGE_TASK = """\
-New findings are listed under **Entries to group**. The findings still open on the docket are listed under
-**Already on the docket**: a new finding that reports one of those is that finding reported twice, and it
+Findings the chair still owes a fold on are listed under **Entries to group**: what the round raised, and what
+its last plan did not fold. The findings still open on the docket are listed under
+**Already on the docket**: an entry that reports one of those is that finding reported twice, and it
 folds into it. Say which entries report the **same defect**.
 
 - Never fold two entries from **Already on the docket** together: those were grouped once already.
