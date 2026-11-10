@@ -744,6 +744,280 @@ def test_the_review_file_run_fixes_its_agreed_findings_without_a_gate(cli, proje
     assert "Notes for the human (0)" in report, "a note that opens with the finding's id is filed under it, not the flat ledger"
 
 
+def test_the_review_file_carries_its_notes_to_the_builder(cli, project):
+    """The review's standing notes ride with the finding: the builder reads them in the brief and the report
+    files them under the finding, while a retracted one, one on an unfixed finding, and one folded into a
+    note that still stands stay out. The agreed finding is the review's F2, so it is the run's F1: a prefix
+    that rode would name a finding that does not exist in the run. A note the review already showed the
+    human is not shown again in the fix run; one the review left unshown is."""
+    write_project_config(project, body().replace('review = "inspect"\nreviewer = "inspect"\n', ""))
+    commit_all(project)
+    review_file = os.path.join(os.path.dirname(project), "report.json")
+    with open(review_file, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "format": "council-report",
+                "version": 1,
+                "run": {"council": "inspect", "mode": "review", "date": "2026-02-08 03:00:00", "outcome": "all_agreed"},
+                "items": [
+                    {
+                        "id": "F1",
+                        "claim": "the cache is wrong",
+                        "detail": "",
+                        "evidence": "",
+                        "severity": "blocker",
+                        "disposition": "disputed",
+                    },
+                    {
+                        "id": "F2",
+                        "claim": "the value is wrong",
+                        "detail": "",
+                        "evidence": "src/mod.py:1",
+                        "severity": "blocker",
+                        "disposition": "agreed",
+                    },
+                ],
+                "questions": [],
+                "notes": [
+                    {
+                        "id": "N1",
+                        "seat": "Agent1",
+                        "item": "F2",
+                        "kind": "correction",
+                        "note": "F2: the value is not wrong; it is computed twice",
+                        "state": "standing",
+                        "shown_round": 2,
+                    },
+                    {
+                        "id": "N2",
+                        "seat": "Agent1",
+                        "item": "F2",
+                        "kind": "correction",
+                        "note": "F2: an earlier, retracted guess",
+                        "state": "retracted",
+                    },
+                    {
+                        "id": "N3",
+                        "seat": "Agent2",
+                        "item": "F1",
+                        "kind": "correction",
+                        "note": "F1: a correction of an unfixed finding",
+                        "state": "standing",
+                    },
+                    {
+                        "id": "N4",
+                        "seat": "Agent2",
+                        "item": "F1",
+                        "kind": "info",
+                        "note": "F1: a note of an unfixed finding",
+                        "state": "standing",
+                    },
+                    {
+                        "id": "N5",
+                        "seat": "Agent2",
+                        "item": "F2",
+                        "kind": "correction",
+                        "note": "F2: a correction folded into a standing correction",
+                        "state": "standing",
+                        "folded_into": "N1",
+                    },
+                    {
+                        "id": "N6",
+                        "seat": "Agent2",
+                        "item": "F2",
+                        "kind": "correction",
+                        "note": "F2: a correction folded into a standing note",
+                        "state": "standing",
+                        "folded_into": "N7",
+                    },
+                    {
+                        "id": "N7",
+                        "seat": "Agent2",
+                        "item": "F2",
+                        "kind": "info",
+                        "note": "F2: the standing note it folded into",
+                        "state": "standing",
+                    },
+                ],
+            },
+            handle,
+        )
+    script = json.dumps(
+        [
+            {
+                "contains": "# Plan the fix",
+                "reply": {
+                    "stages": [{"state": "the value is computed once", "gate": "grep -q 'VALUE = 2' src/mod.py", "scope": "src/mod.py"}]
+                },
+            },
+            {
+                "contains": "# Implement the fix",
+                "reply": {
+                    "summary": "fixed it",
+                    "gate_output": "ok",
+                    "changed": ["src/mod.py"],
+                    "open_issues": [],
+                },
+                "write": [{"path": "src/mod.py", "text": "VALUE = 2\n"}],
+            },
+            {"contains": "# Verify the gate", "reply": {"ok": True, "ran": "grep", "evidence": "ok"}},
+        ]
+    )
+    prompts_log = os.path.join(os.path.dirname(project), "prompts.log")
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script, FAKE_PI_PROMPTS=prompts_log)
+    result = cli(["fixit", "--review-file", review_file], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    with open(prompts_log, encoding="utf-8") as handle:
+        plan = [p["message"] for p in (json.loads(line) for line in handle) if "# Plan the fix" in p["message"]]
+    assert plan, "the builder planned the finding"
+    assert "it is computed twice" in plan[0], "the correction reaches the builder beside the original claim"
+    assert "the standing note it folded into" in plan[0], "the info note rides too: the review's record of the finding is the builder's"
+    assert "an earlier, retracted guess" not in plan[0], "a retracted note does not ride with the finding"
+    assert "a correction of an unfixed finding" not in plan[0], "a correction of an unfixed finding stays with it"
+    assert "a note of an unfixed finding" not in plan[0], "a note of an unfixed finding stays with it"
+    assert "a correction folded into a standing correction" not in plan[0], "the duplicate reads through the standing correction"
+    assert "a correction folded into a standing note" not in plan[0], "the duplicate reads through the standing note, whatever its kind"
+    assert "F2" not in plan[0], "the review's id does not ride: the finding has its own"
+    report = result.artifact("fix.md")
+    assert "it is computed twice" in report, "the report files the correction under the finding"
+    assert "the standing note it folded into" in report, "the info note prints under the finding"
+    assert "a correction folded into a standing correction" not in report, "the folded duplicate does not print under the finding"
+    assert "a correction folded into a standing note" not in report
+    assert "a correction of an unfixed finding" not in report
+    assert "a note of an unfixed finding" not in report
+    assert "Notes for the human (0)" in report, "a note about the finding prints under it, not the flat ledger"
+    run_console = result.console.split("# Fix")[0]  # the run's own output, before the report is echoed to the console
+    assert "it is computed twice" not in run_console, "a note the review already showed is not shown again"
+    assert "the standing note it folded into" in run_console, "one the review left unshown is shown in the fix run"
+
+
+def test_the_review_crews_notes_ride_with_their_findings(cli, project):
+    """The review crew's standing notes ride with their findings, like a review file's: the builder reads
+    them in the brief and the report files them under the finding. A note on a finding the gate skips stays
+    with the review's record."""
+    write_project_config(project, body())
+    commit_all(project)
+    script = json.dumps(
+        [
+            {
+                "contains": "## The planned fix",
+                "reply": {"summary": "clean", "gate": {"ok": True, "ran": "grep", "evidence": "VALUE = 2"}, "open_questions": []},
+            },
+            {
+                "contains": "Phase 0",
+                "reply": review_phase0(
+                    findings=[
+                        {"claim": "the value is wrong", "severity": "blocker", "evidence": "src/mod.py:1"},
+                        {"claim": "the cache is wrong", "severity": "major", "evidence": "src/mod.py:2"},
+                    ]
+                ),
+            },
+            {
+                "contains": "Round ",
+                "reply": {
+                    "positions": [{"id": "F1", "stance": "agree"}],
+                    "signoff": True,
+                    "notes": [
+                        {"note": "F1: the value is not wrong; it is computed twice", "item": "F1", "kind": "correction"},
+                        {"note": "F1: the evidence is stale; the code moved since the report", "item": "F1", "kind": "info"},
+                        {"note": "F2: the cache is fine as it stands", "item": "F2", "kind": "correction"},
+                    ],
+                },
+            },
+            {
+                "contains": "# Plan the fix",
+                "reply": {
+                    "stages": [{"state": "the value is computed once", "gate": "grep -q 'VALUE = 2' src/mod.py", "scope": "src/mod.py"}]
+                },
+            },
+            {
+                "contains": "# Implement the fix",
+                "reply": {
+                    "summary": "fixed it",
+                    "gate_output": "ok",
+                    "changed": ["src/mod.py"],
+                    "open_issues": [],
+                },
+                "write": [{"path": "src/mod.py", "text": "VALUE = 2\n"}],
+            },
+            {"contains": "# The final check", "reply": {"ok": True, "ran": "the checks", "evidence": "ok"}},
+        ]
+    )
+    prompts_log = os.path.join(os.path.dirname(project), "prompts.log")
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script, FAKE_PI_PROMPTS=prompts_log)
+    result = cli(["fixit"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    assert result.manifest["execution"]["source"]["how"] == "council"
+    with open(prompts_log, encoding="utf-8") as handle:
+        plan = [p["message"] for p in (json.loads(line) for line in handle) if "# Plan the fix" in p["message"]]
+    assert plan, "the builder planned the finding"
+    assert "it is computed twice" in plan[0], "the review crew's correction reaches the builder beside the original claim"
+    assert "the evidence is stale; the code moved since the report" in plan[0], "the crew's info note rides too"
+    assert "the cache is fine as it stands" not in plan[0], "a note on a finding the gate skips stays with the review's record"
+    report = result.artifact("fix.md")
+    assert "it is computed twice" in report, "the report files the correction under the finding"
+    assert "the evidence is stale; the code moved since the report" in report, "the info note prints under the finding"
+    assert "the cache is fine as it stands" not in report
+    assert "Notes for the human (0)" in report, "a filed note is not in the flat ledger"
+
+
+def test_the_gate_shows_the_review_s_corrections(cli, project):
+    """The gate's fix-or-skip call weighs the corrected mechanism: the review's standing correction on a
+    finding stands in the question's context, so the human fixes or skips the thing it is now said to be."""
+    write_project_config(project, body(**{'human = "none"': 'human = "blocking"'}))
+    commit_all(project)
+    script = json.dumps(
+        [
+            {
+                "contains": "## The planned fix",
+                "reply": {"summary": "clean", "gate": {"ok": True, "ran": "grep", "evidence": "VALUE = 2"}, "open_questions": []},
+            },
+            {
+                "contains": "Phase 0",
+                "reply": review_phase0(findings=[{"claim": "the value is wrong", "severity": "blocker", "evidence": "src/mod.py:1"}]),
+            },
+            {"contains": "# Deduplicate", "reply": {"groups": [{"canonical": "F1", "duplicates": ["F2"]}]}},
+            {
+                "contains": "Round ",
+                "reply": {
+                    "positions": [{"id": "F1", "stance": "agree"}],
+                    "signoff": True,
+                    "notes": [{"note": "F1: the value is not wrong; it is computed twice", "item": "F1", "kind": "correction"}],
+                },
+            },
+            {
+                "contains": "# Plan the fix",
+                "reply": {
+                    "stages": [{"state": "the value is computed once", "gate": "grep -q 'VALUE = 2' src/mod.py", "scope": "src/mod.py"}]
+                },
+            },
+            {
+                "contains": "# Implement the fix",
+                "reply": {
+                    "summary": "fixed it",
+                    "gate_output": "ok",
+                    "changed": ["src/mod.py"],
+                    "open_issues": [],
+                },
+                "write": [{"path": "src/mod.py", "text": "VALUE = 2\n"}],
+            },
+            {"contains": "# The final check", "reply": {"ok": True, "ran": "the checks", "evidence": "ok"}},
+        ]
+    )
+    result = cli(
+        ["fixit"],
+        cwd=project,
+        env=dict(runs_env(project), FAKE_PI_SCRIPT=script),
+        timeout=150,
+        stdin="H1: fix\n",
+    )
+    assert result.returncode == 0, result.console
+    assert (
+        "correction: F1: the value is not wrong; it is computed twice" in result.console
+    ), "the gate's context carries the review's correction"
+    assert result.manifest["outcome"] == "fixed"
+
+
 def test_the_review_file_must_be_a_review_report(cli, project):
     write_project_config(project, body().replace('review = "inspect"\nreviewer = "inspect"\n', ""))
     commit_all(project)

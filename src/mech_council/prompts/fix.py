@@ -66,6 +66,10 @@ def finding_block(finding: dict) -> str:
         lines.append(f"what breaks: {finding['detail']}")
     if finding.get("evidence"):
         lines.append(f"evidence: {finding['evidence']}")
+    for correction in finding.get("corrections") or []:
+        lines.append(f"correction: {correction}")
+    for note in finding.get("notes") or []:
+        lines.append(f"note: {note}")
     return "\n".join(lines)
 
 

@@ -145,7 +145,7 @@ def question_shape(human: str) -> str:
         "A note about one item opens with its id and sets its `item`, so the report files it under that item. An item whose "
         "claim or detail names the mechanism wrong is corrected, not disagreed with: file a note under it with "
         '`kind: "correction"` — `{"note": "F2: the mechanism is actually …", "item": "F2", "kind": "correction"}` — '
-        "and the item's text stands corrected by it in the report."
+        "and the report prints it under the item, marked as a correction, beside the original text."
     )
     if human == "blocking":
         notes = (

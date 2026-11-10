@@ -24,7 +24,7 @@ from ..prompts import fix as fix_text
 from ..render.text import severity_key
 from .engine import Abort, CheckpointOutcome, Engine
 from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
-from .notes import mark_shown, raise_note, resolve_note_item, unshown
+from .notes import NOTE_MAX_CHARS, folded_away, item_notes, mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
     ANSWERED,
@@ -34,10 +34,12 @@ from .state import (
     OPEN,
     PARTIAL,
     SKIPPED,
+    STANDING,
     Docket,
     Execution,
     FindingRecord,
     Item,
+    Note,
     Question,
     normalize_text,
 )
@@ -53,6 +55,14 @@ _NO_WORK: dict = {"summary": "", "gate_output": "", "changed": [], "user_text": 
 
 def _fold(text: object, cap: int) -> str:
     return " ".join(str(text).split())[:cap]
+
+
+def _without_review_id(text: str, item_id: str) -> str:
+    """A carried note's review-run id prefix: the note is filed on the finding, which has its own id."""
+    words = text.split(None, 1)
+    if len(words) == 2 and item_id and words[0].strip(".:;,!?()[]\"'`-") == item_id:
+        return words[1]
+    return text
 
 
 class Fix:
@@ -246,7 +256,8 @@ class Fix:
         return item_id
 
     def _transfer_item(self, item: Item) -> str:
-        """A review finding onto the run's docket, where the fix work happens: its own F id."""
+        """A review finding onto the run's docket, where the fix work happens: its own F id, with the
+        review's standing notes on it, so the builder reads the corrected mechanism and its context too."""
         new = Item(
             id=self._new_f(),
             claim=item.claim,
@@ -259,7 +270,26 @@ class Fix:
             opened_round=0,
         )
         self.docket.add_item(new)
+        for note in self._riding_notes(item.id):  # the review's record of the finding rides with it
+            note_text = _without_review_id(note.text, item.id)
+            carried, _ = raise_note(self.docket, by=note.by, text=note_text, item_id=new.id, round_=0, kind=note.kind)
+            if note.shown_round is not None:
+                carried.shown_round = 0  # shown to the human in the review: the fix run does not show it again
         return new.id
+
+    def _riding_notes(self, review_id: str) -> list[Note]:
+        """The review's standing notes filed on one of its findings: what rides with the finding.
+        A note folded into one that still stands is read through the survivor, as the review's report reads it."""
+        review = self.review_docket
+        assert review is not None
+        out: list[Note] = []
+        for nid in review.note_order:
+            note = review.human_notes[nid]
+            if note.item_id != review_id or note.state != STANDING or folded_away(review, note):
+                continue
+            if note.text.strip():
+                out.append(note)
+        return out
 
     # ------------------------------------------------------------- the gate
 
@@ -278,6 +308,9 @@ class Fix:
         # the gate takes the run's first round, which finding 1's passes share
         self.docket.round = 1
         for review_id, (item, _question, _default) in self._gate_entries.items():
+            context = f"{review_id} · {item.severity} · {item.disposition}" + (f" · {item.evidence[:300]}" if item.evidence else "")
+            if corrections := self._gate_corrections(review_id):
+                context += f" · correction: {'; '.join(corrections)[:300]}"
             question, _ = raise_question(
                 self.docket,
                 text=f"fix {item.claim[:200]}",
@@ -285,7 +318,7 @@ class Fix:
                 item_id=None,
                 round_=self.docket.round,
                 options=["fix", "skip"],
-                context=f"{review_id} · {item.severity} · {item.disposition}" + (f" · {item.evidence[:300]}" if item.evidence else ""),
+                context=context,
             )
             self._gate_entries[review_id] = (item, question, _default)
         questions = [entry[1] for entry in self._gate_entries.values() if entry[1] is not None]
@@ -298,6 +331,19 @@ class Fix:
         else:
             await self._checkpoint(terminal=False, waiting=True, forced=questions)
         self._select_gated()
+
+    def _gate_corrections(self, review_id: str) -> list[str]:
+        """The review's standing corrections on a gate finding: the fix-or-skip call should weigh the
+        corrected mechanism, not only the original claim."""
+        review = self.review_docket
+        if review is None:
+            return []
+        out: list[str] = []
+        for nid in review.note_order:
+            note = review.human_notes[nid]
+            if note.item_id == review_id and note.kind == "correction" and note.state == STANDING and not folded_away(review, note):
+                out.append(note.text[:120])
+        return out
 
     def _select_gated(self) -> None:
         """The gate's decisions into the run's list: the selected findings, in the gate's order.
@@ -339,8 +385,8 @@ class Fix:
     # ------------------------------------------------------------- --review-file
 
     def _source_from_file(self) -> None:
-        """The findings of a previous review's report.json: its agreed items, by severity. No gate —
-        a curated file is the curation."""
+        """The findings of a previous review's report.json: its agreed items, by severity, with the review's standing
+        notes filed under them. No gate — a curated file is the curation."""
         try:
             with open(self.review_file, encoding="utf-8") as handle:
                 document = json.load(handle)
@@ -349,7 +395,7 @@ class Fix:
         meta = document.get("run") or {}
         if document.get("format") != "council-report" or meta.get("mode") != "review":
             raise Abort("--review-file is not a review report.json: run the review with --format json", member=CHAIR_ID)
-        items: list[Item] = []
+        items: list[tuple[str, Item]] = []
         for entry in document.get("items") or []:
             if not isinstance(entry, dict):
                 continue
@@ -357,14 +403,33 @@ class Fix:
             if not claim:
                 continue
             items.append(
-                Item(
-                    id="",
-                    claim=claim[:600],
-                    detail=str(entry.get("detail") or "")[:2000],
-                    evidence=str(entry.get("evidence") or "")[:2000],
-                    severity=map_severity(entry.get("severity")),
-                    disposition=str(entry.get("disposition") or OPEN),
+                (
+                    str(entry.get("id") or ""),
+                    Item(
+                        id="",
+                        claim=claim[:600],
+                        detail=str(entry.get("detail") or "")[:2000],
+                        evidence=str(entry.get("evidence") or "")[:2000],
+                        severity=map_severity(entry.get("severity")),
+                        disposition=str(entry.get("disposition") or OPEN),
+                    ),
                 )
+            )
+        entries = [entry for entry in document.get("notes") or [] if isinstance(entry, dict)]
+        standing_ids = {str(entry.get("id") or "") for entry in entries if entry.get("state") == STANDING}
+        notes: dict[str, list[tuple[str, str, str, int | None]]] = {}
+        for entry in entries:
+            if entry.get("state") != STANDING:
+                continue
+            folded_into = str(entry.get("folded_into") or "")
+            if folded_into and folded_into in standing_ids:
+                continue
+            text = str(entry.get("note") or "").strip()
+            if not text:
+                continue
+            kind = "correction" if entry.get("kind") == "correction" else "info"
+            notes.setdefault(str(entry.get("item") or ""), []).append(
+                (str(entry.get("seat") or ""), kind, text, entry.get("shown_round"))
             )
         self.execution.source = {
             "how": "file",
@@ -374,15 +439,20 @@ class Fix:
             "outcome": str(meta.get("outcome") or ""),
         }
         agreed = sorted(
-            (item for item in items if item.disposition == AGREED),
-            key=lambda item: (severity_key(item.severity), item.claim),
+            (pair for pair in items if pair[1].disposition == AGREED),
+            key=lambda pair: (severity_key(pair[1].severity), pair[1].claim),
         )
-        for item in agreed:
+        for old_id, item in agreed:
             item.id = self._new_f()
             self.docket.add_item(item)
             rec = FindingRecord(index=len(self.selected) + 1, finding_id=item.id, severity=item.severity, claim=item.claim)
             self.selected.append(rec)
             self.execution.findings.append(rec)
+            for seat, kind, text, shown in notes.get(old_id, ()):  # the review's record of the finding rides with it
+                note_text = _without_review_id(text, old_id)[:NOTE_MAX_CHARS]
+                carried, _ = raise_note(self.docket, by=seat, text=note_text, item_id=item.id, round_=0, kind=kind)
+                if shown is not None:
+                    carried.shown_round = 0  # shown to the human in the review: the fix run does not show it again
         self.emit("fix_review_file", path=self.review_file, agreed=len(self.selected), items=len(items))
         self.console.say(f"the review file: {len(self.selected)} agreed finding(s) to fix, in severity order")
 
@@ -536,12 +606,16 @@ class Fix:
 
     def _finding(self, rec: FindingRecord) -> dict:
         item = self.docket.items[rec.finding_id]
+        # standing only: the report's ledger may still print a retracted note the human saw, marked
+        standing = [note for note in item_notes(self.docket, rec.finding_id) if note.state == STANDING]
         return {
             "id": rec.finding_id,
             "severity": rec.severity,
             "claim": item.claim,
             "detail": item.detail,
             "evidence": item.evidence,
+            "corrections": [note.text for note in standing if note.kind == "correction"],
+            "notes": [note.text for note in standing if note.kind != "correction"],
         }
 
     def _fixed_lines(self) -> list[str]:
