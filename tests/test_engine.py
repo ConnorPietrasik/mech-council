@@ -1915,6 +1915,36 @@ def test_a_gap_longer_than_one_chunk_is_asked_to_the_end():
     assert not [r for r in records if r["event"] == "gap_declined" and r["member"] == "Agent2"], "nothing was dropped for want of an ask"
 
 
+def test_a_fold_that_deletes_a_shown_item_leaves_no_gap_for_the_removed_id():
+    """The chair's merge deletes F2 mid-round; the gap ladder must not ask for it, nor decline it under an id with no item."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "the cache ignores tenants", "tenant key missing from the cache")
+        if ask.kind == "merge":
+            if ask.round == 0:
+                return payload(groups=[])  # round 0 leaves both entries open; the fold comes in round 1
+            return payload(groups=[{"canonical": "F1", "duplicates": ["F2", "F3"]}])
+        if ask.phase == "gap":
+            return payload(positions=[{"item": item, "stance": "agree"} for item in gap_items(ask.text)], signoff=True)
+        if ask.who == "Agent3":
+            # stances F1, stays silent on F2, re-files the claim as a fresh entry
+            return payload(positions=[{"item": "F1", "stance": "agree"}], new_items=[finding("the cache ignores tenants")], signoff=True)
+        return payload(positions=[{"item": "F1", "stance": "agree"}], signoff=True)
+
+    async def main():
+        built, port, records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return built, port, records
+
+    built, port, records = asyncio.run(main())
+    assert "F2" not in built.docket.items, "the fold deleted the shown duplicate, as the chair meant"
+    assert port.count(phase="gap") == 0, "the ladder asked a seat about an item the chair deleted mid-round"
+    assert "F2" not in built.docket.stances, "a declined stance sits under an id with no item"
+    assert not [r for r in records if r["event"] == "gap_declined"], "the decline named the removed id"
+
+
 def test_a_round_of_only_closed_one_liners_asks_nothing():
     import asyncio
 

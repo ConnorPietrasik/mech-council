@@ -712,7 +712,11 @@ class Engine:
 
     def _still_missing(self, agent: str) -> list[str]:
         """What counts as missing: no stance on a shown item, and in plan mode no backing."""
-        missing = gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
+        missing = [
+            item_id
+            for item_id in gap_rules.missing_items(self.docket, agent, self.shown.get(agent, []))
+            if item_id in self.docket.items  # the chair's merge may have deleted one this round
+        ]
         if gap_rules.missing_backing(self.docket, agent):
             missing.append("backing")
         return missing
