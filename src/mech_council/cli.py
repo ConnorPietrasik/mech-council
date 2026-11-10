@@ -383,6 +383,13 @@ def _run_council(launch) -> int:
     in_place = launch.council.in_place
     what = "in-place setup" if in_place else "sandbox setup"
     hint = "" if in_place else downgrade_hint()
+    # the run directory is claimed before the sandbox is established: on a same-second collision the
+    # rename must reach `sandbox_dir` before the scratch paths are made at the old name
+    try:
+        launch.run_dir = startup.create_run_dir(launch)
+    except ConfigError as failure:
+        sys.stderr.write(f"{failure}\n")
+        return 1
     try:
         sandbox = sandbox_setup.establish(
             project=launch.council.project,
@@ -396,15 +403,16 @@ def _run_council(launch) -> int:
     except OSError as failure:
         where = f"{failure.filename} " if failure.filename else ""
         sys.stderr.write(f"{what} failed: {where}{os.strerror(failure.errno or 0)} (errno {failure.errno}).{hint}\n")
+        startup.discard_run_dir(launch)
         return 1
     except Exception as failure:
         sys.stderr.write(f"{what} failed: {failure}.{hint}\n")
+        startup.discard_run_dir(launch)
         return 1
-    try:
-        launch.run_dir = startup.create_run_dir(launch)
-    except ConfigError as failure:
-        sys.stderr.write(f"{failure}\n")
-        return 1
+    except BaseException:
+        # a signal during setup: clear the still-empty run directory, and let the signal through
+        startup.discard_run_dir(launch)
+        raise
     from .run import orchestrate
 
     try:

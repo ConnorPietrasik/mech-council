@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import sys
 import time
@@ -91,7 +92,7 @@ def convene(argv: list[str], *, environ: dict[str, str] | None = None) -> tuple[
         runs_dir=runs_dir,
         run_name=run_name,
         run_dir=os.path.join(runs_dir, run_name),
-        sandbox_dir=os.path.join(runs_dir, "sandbox", run_name),
+        sandbox_dir=_sandbox_path(runs_dir, run_name),
         notes=notes,
         output_path=output_path,
         output_overwrite=args.overwrite,
@@ -327,13 +328,26 @@ def prepare_runs_root(runs_dir: str) -> str:
     return runs_dir
 
 
+def _sandbox_path(runs_dir: str, run_name: str) -> str:
+    return os.path.join(runs_dir, "sandbox", run_name)
+
+
 def create_run_dir(launch: Launch) -> str:
     try:
         os.makedirs(launch.run_dir, mode=0o700, exist_ok=False)
     except FileExistsError:  # a second run in the same second
         launch.run_name += f"-{os.getpid()}"
         launch.run_dir = os.path.join(launch.runs_dir, launch.run_name)
-        os.makedirs(launch.run_dir, mode=0o700, exist_ok=False)
+        launch.sandbox_dir = _sandbox_path(launch.runs_dir, launch.run_name)
+        try:
+            os.makedirs(launch.run_dir, mode=0o700, exist_ok=False)
+        except OSError as failure:
+            raise ConfigError(f"could not create the run directory {launch.run_dir}: {os.strerror(failure.errno or 0)}") from failure
     except OSError as failure:
         raise ConfigError(f"could not create the run directory {launch.run_dir}: {os.strerror(failure.errno or 0)}") from failure
     return launch.run_dir
+
+
+def discard_run_dir(launch: Launch) -> None:
+    """Remove a run directory the run never filled."""
+    shutil.rmtree(launch.run_dir, ignore_errors=True)

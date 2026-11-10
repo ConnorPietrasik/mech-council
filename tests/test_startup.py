@@ -367,3 +367,71 @@ def test_an_inherited_run_marker_never_reaches_a_convene_built_by_the_harness(pr
     env = no_user_config(**runs_env(project))
     assert not {"COUNCIL_RUN_DIR", "COUNCIL_RUN_PATH"} & env.keys(), "the scrub is what keeps the guard asleep"
     launched(["review"], project, env)
+
+
+# ------------------------------------------------- the same-second collision
+
+
+def test_a_same_second_collision_renames_the_sandbox_with_the_run(project):
+    """The pid suffix is not only for the run directory: the sandbox path follows the rename."""
+    launch = launched(["review"], project)
+    original = launch.run_dir
+    os.makedirs(launch.run_dir)  # the first run of this second already claimed the name
+    run_dir = startup.create_run_dir(launch)
+    assert run_dir != original
+    assert launch.run_name.endswith(f"-{os.getpid()}")
+    assert launch.sandbox_dir == os.path.join(launch.runs_dir, "sandbox", launch.run_name), launch.sandbox_dir
+
+
+def test_the_sandbox_setup_sees_the_renamed_run(project, monkeypatch):
+    """The run directory is claimed before the sandbox is established, so the collision's rename
+    reaches the setup and the scratch paths are made at the run's own name."""
+    from mech_council import cli as cli_mod
+    from mech_council.sandbox import setup as sandbox_setup
+
+    launch = launched(["review"], project)
+    os.makedirs(launch.run_dir)  # force the collision's rename
+
+    seen: dict[str, str] = {}
+
+    class Seat:
+        def close(self):
+            return None
+
+    def establish(*, sandbox_dir, **kwargs):
+        seen["sandbox_dir"] = sandbox_dir
+        return Seat()
+
+    async def orchestrate(launch, sandbox):
+        return 0
+
+    monkeypatch.setattr(sandbox_setup, "establish", establish)
+    monkeypatch.setattr("mech_council.run.orchestrate", orchestrate)
+    assert cli_mod._run_council(launch) == 0
+    assert seen["sandbox_dir"] == launch.sandbox_dir, "the setup was handed the renamed path"
+    assert launch.sandbox_dir.endswith(f"-{os.getpid()}")
+
+
+def test_a_signal_during_setup_leaves_no_empty_run_directory(project, monkeypatch):
+    """A Ctrl-C while the sandbox is established clears the still-empty run directory, and the signal passes through."""
+    from mech_council import cli as cli_mod
+    from mech_council.sandbox import setup as sandbox_setup
+
+    launch = launched(["review"], project)
+
+    def establish(**kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sandbox_setup, "establish", establish)
+    with pytest.raises(KeyboardInterrupt):
+        cli_mod._run_council(launch)
+    assert not os.path.isdir(launch.run_dir), "the signal must not leave an empty run directory"
+
+
+def test_a_leftover_renamed_name_is_a_clean_error(project):
+    """A crashed run left the pid-suffixed name behind: the second claim fails as a ConfigError, not a raw OSError."""
+    launch = launched(["review"], project)
+    os.makedirs(launch.run_dir)  # claim the name
+    os.makedirs(os.path.join(launch.runs_dir, f"{launch.run_name}-{os.getpid()}"))  # the crashed run's leftover
+    with pytest.raises(ConfigError):
+        startup.create_run_dir(launch)
