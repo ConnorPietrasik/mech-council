@@ -42,7 +42,6 @@ def _libc() -> ctypes.CDLL:
         lib = ctypes.CDLL("libc.so.6", use_errno=True)
         lib.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
         lib.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
-        lib.unshare.argtypes = [ctypes.c_int]
         lib.prctl.argtypes = [ctypes.c_int] * 5
         _handle = lib
     return _handle
@@ -121,11 +120,8 @@ def umount2(target: str, flags: int = 0) -> None:
 def unshare(flags: int) -> None:
     try:
         os.unshare(flags)
-        return
-    except AttributeError:  # pragma: no cover — 3.12+ has it
-        pass
-    if _libc().unshare(ctypes.c_int(flags)) != 0:
-        raise MountError(f"unshare({flags:#x})", _last_error())
+    except OSError as failure:
+        raise MountError(f"unshare({flags:#x})", failure.errno or _errno.EINVAL) from None
 
 
 def prctl(option: int, value: int) -> int:

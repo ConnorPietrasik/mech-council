@@ -609,7 +609,7 @@ def test_a_setup_failure_is_reported_as_syscall_and_errno_and_the_member_never_e
         os.close(read_fd)
     assert proc.returncode == 1, proc
     assert report.startswith(launcher_mod.NS_REPORT_FAIL + " "), repr(report)
-    steps = ("unshare(CLONE_NEWNS)", "mkdir", "mount --bind", "mask", "chdir")
+    steps = ("unshare(0x20000)", "mkdir", "mount --bind", "mask", "chdir")
     assert any(step in report for step in steps), repr(report)  # names what failed
     assert not os.path.exists(marker), "the member never execed"
 
