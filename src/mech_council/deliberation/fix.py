@@ -23,7 +23,7 @@ from ..port import Port, RawAsk
 from ..prompts import fix as fix_text
 from ..render.text import severity_key
 from .engine import Abort, CheckpointOutcome, Engine
-from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
+from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, picked_option, raise_question, showable
 from .notes import NOTE_MAX_CHARS, folded_away, item_notes, mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
@@ -1099,22 +1099,10 @@ class Fix:
         )
         # the run's own gate: shown whether or not the seconding bar would clear it
         await self._checkpoint(terminal=False, waiting=True, forced=question)
-        held = question.state == ANSWERED and self._picked(question, 2)
+        held = question.state == ANSWERED and picked_option(question, 2)
         if held:
             self.console.say("the human held the run: the remaining findings stay unfixed")
         return held
-
-    @staticmethod
-    def _picked(question: Question, option_number: int) -> bool:
-        """The explicit pick of option N: its own words, or on a two-option question a bare
-        yes-word, which picks the first option. A number is stored as the option's words, so the
-        words are all there is to compare; a free-text qualifier is no pick of it."""
-        answer = (question.answer or "").strip().casefold()
-        if not answer:
-            return False
-        if answer == question.options[option_number - 1].strip().casefold():
-            return True
-        return option_number == 1 and len(question.options) == 2 and answer in ("yes", "y", "proceed", "fix", "carry on", "go ahead")
 
     async def _commit_finding(self, rec: FindingRecord) -> None:
         """The run's commit of a passed finding: the orchestrator's own commit, one per finding.

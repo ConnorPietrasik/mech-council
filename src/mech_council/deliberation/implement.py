@@ -12,12 +12,12 @@ import os
 
 from ..console import Console
 from ..crews import Crew, Crews
-from ..extraction import YES_TOKENS, Extraction, parse_replan, parse_work
+from ..extraction import Extraction, parse_replan, parse_work
 from ..humaninput import Checkpoint
 from ..port import Port
 from ..prompts import implement as impl_text
 from .engine import Abort, CheckpointOutcome, Engine, RawAsk
-from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, raise_question, showable
+from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, picked_option, raise_question, showable
 from .notes import mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
@@ -412,22 +412,9 @@ class Implement:
                 question.markers.append(NOT_WAITED)
             self.execution.approval = "recorded"
             return True
-        granted = question.state == ANSWERED and self._picked(question, 1)
+        granted = question.state == ANSWERED and picked_option(question, 1)
         self.execution.approval = "granted" if granted else "declined"
         return granted
-
-    @staticmethod
-    def _picked(question: Question, option_number: int) -> bool:
-        """The explicit pick of option N: its own words, or on a two-option question a bare
-        yes-word, which picks the first option. A number is stored as the option's words, so the
-        words are all there is to compare; a free-text qualifier is no pick of it.
-        """
-        answer = (question.answer or "").strip().casefold()
-        if not answer:
-            return False
-        if answer == question.options[option_number - 1].strip().casefold():
-            return True
-        return option_number == 1 and len(question.options) == 2 and answer in YES_TOKENS
 
     # ------------------------------------------------------------- the checkpoint
 
@@ -1087,7 +1074,7 @@ class Implement:
         )
         # the run's own gate, like the approval: shown whether or not the seconding bar would clear it
         await self._checkpoint(terminal=False, waiting=True, forced=question)
-        held = question.state == ANSWERED and self._picked(question, 2)
+        held = question.state == ANSWERED and picked_option(question, 2)
         if held:
             self.console.say("the human held the run: the remaining stages stay unbuilt")
         return held

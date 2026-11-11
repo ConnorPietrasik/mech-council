@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TypeGuard
 
+from ..extraction import YES_TOKENS
 from .state import (
     ANSWERED,
     ASKED,
@@ -78,6 +79,19 @@ def held_back(docket: Docket, question: Question) -> str:
     if moot(docket, question):
         return MOOT
     return SETTLED if settlements(question) and not question.insisted else UNBACKED
+
+
+def picked_option(question: Question, option_number: int) -> bool:
+    """The explicit pick of option N: its own words, or on a two-option question a bare
+    yes-word, which picks the first option. A number is stored as the option's words, so the
+    words are all there is to compare; a free-text qualifier is no pick of it.
+    """
+    answer = (question.answer or "").strip().casefold()
+    if not answer:
+        return False
+    if answer == question.options[option_number - 1].strip().casefold():
+        return True
+    return option_number == 1 and len(question.options) == 2 and answer in YES_TOKENS
 
 
 def _moved(question: Question | None) -> str:
