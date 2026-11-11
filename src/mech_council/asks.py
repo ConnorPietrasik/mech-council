@@ -36,7 +36,7 @@ class AskUnusable(Exception):
 
 class AskLost(Exception):
     def __init__(self, label: str, provider: str | None, model: str | None, round_: int | None, detail: str) -> None:
-        super().__init__(f"{label} failed{round_note(round_)}: {detail}")
+        super().__init__(f"{label} failed{round_note(round_)} ({provider or 'default provider'}/{model or 'pi default'}): {detail}")
         self.label, self.provider, self.model = label, provider, model
         self.round, self.detail = round_, detail
 

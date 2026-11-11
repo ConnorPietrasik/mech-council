@@ -82,10 +82,10 @@ class CheckpointOutcome:
 
 
 class Abort(Exception):
-    def __init__(self, reason: str, *, member: str = "", provider: str | None = None, model: str | None = None, round_: int = 0) -> None:
+    def __init__(self, reason: str, *, member: str = "", round_: int = 0) -> None:
         super().__init__(reason)
         self.reason, self.member = reason, member
-        self.provider, self.model, self.round = provider, model, round_
+        self.round = round_
 
 
 class Engine:
