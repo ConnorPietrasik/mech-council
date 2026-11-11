@@ -45,7 +45,6 @@ def setup_seat_main(argv: list[str]) -> int:
     except OSError as exc:
         sys.stderr.write(f"council launcher: execvp({program!r}): {exc}\n")
         return 1
-    return 1
 
 
 def _parse(argv: list[str]) -> tuple[str, list[str]]:
