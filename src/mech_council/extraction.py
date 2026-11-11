@@ -21,7 +21,6 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "id": ("id", "item", "finding", "item_id", "finding_id", "topic", "topic_id", "ref", "key"),
     "stance": ("stance", "position", "vote", "opinion", "call", "assessment"),
     "note": ("note", "comment", "reason", "why", "justification", "remark"),
-    "severity_": (),
     "positions": ("positions", "stances", "verdicts", "items", "calls", "reviews"),
     "new_items": ("new_items", "new_findings", "findings", "new", "additions", "new_topics", "topics"),
     "answers": ("answers", "replies", "responses", "qa_answers", "q_a"),
