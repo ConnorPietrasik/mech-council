@@ -20,6 +20,7 @@ class Ask:
     round: int
     kind: str = "verdict"
     text: str = ""
+    context: str | None = None  # the self-contained prompt the ask continues: what a restarted seat would be re-asked
 
 
 @dataclass
@@ -39,15 +40,18 @@ class ScriptPort:
 
     # -- the seat lanes ---------------------------------------------------------
 
-    async def ask_seats(self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False) -> dict[str, RawAsk]:
+    async def ask_seats(
+        self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False, context: dict[str, str] | None = None
+    ) -> dict[str, RawAsk]:
         out: dict[str, RawAsk] = {}
         for agent, message in batch:
-            self.asks.append(Ask(agent, phase, round_, "verdict", message))
+            ctx = (context or {}).get(agent)
+            self.asks.append(Ask(agent, phase, round_, "verdict", message, ctx))
             out[agent] = self._answer(agent, phase, round_, message)
         return out
 
-    async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round") -> RawAsk:
-        self.asks.append(Ask(agent, phase, round_, "verdict", message))
+    async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round", context: str | None = None) -> RawAsk:
+        self.asks.append(Ask(agent, phase, round_, "verdict", message, context))
         return self._answer(agent, phase, round_, message)
 
     def _answer(self, who: str, phase: str, round_: int, message: str) -> RawAsk:

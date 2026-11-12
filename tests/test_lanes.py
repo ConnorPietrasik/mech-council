@@ -724,6 +724,47 @@ def test_one_seat_dying_does_not_abandon_its_siblings():
     )
 
 
+def test_a_restart_mid_repair_re_asks_the_full_prompt_not_the_fragment():
+    """A restarted seat has no session: a re-asked repair fragment would reach a process that never saw the
+    round, so the re-ask carries the round prompt instead."""
+    original = "the round prompt, docket included"
+
+    async def main():
+        board, members, _console, _ = lanes(script={"seat1-one": [{"text": "prose, no JSON"}, GONE, {"text": verdict()}]})
+        parse_kw = {"mode": "review", "me": "seat1-one", "known_items": set()}
+        outcome = await board.ask_agent("Agent1", original, round_=3, kind="verdict", parse_kw=parse_kw, phase="round")
+        calls = members.members["seat1-one"].rpc.calls
+        return outcome, calls, members.members["seat1-one"].restarts
+
+    outcome, calls, restarts = run(main())
+    assert restarts == 1
+    assert calls[0] == original
+    assert calls[1] != calls[0], "the live seat's repair stays a fragment"
+    assert calls[2] == calls[0], "the re-ask after the restart re-delivers the full prompt, not the fragment"
+    assert outcome.data is not None and outcome.repairs == 1
+
+
+def test_a_fragment_ask_restarted_gets_its_context_not_the_fragment():
+    """A gap or defense ask continues the round prompt: a seat restarted mid-fragment is re-asked the round,
+    so a fresh process cannot answer a pass it was never shown."""
+    fragment = "you were shown these open items: F1, F2"
+    context = "the round prompt, docket included"
+
+    async def main():
+        board, members, _console, _ = lanes(script={"seat1-one": [GONE, {"text": verdict()}]})
+        parse_kw = {"mode": "review", "me": "seat1-one", "known_items": set()}
+        outcome = await board.ask_agent(
+            "Agent1", fragment, round_=3, kind="verdict", parse_kw=parse_kw, phase="gap", context=context
+        )
+        calls = members.members["seat1-one"].rpc.calls
+        return outcome, calls, members.members["seat1-one"].restarts
+
+    outcome, calls, restarts = run(main())
+    assert restarts == 1
+    assert calls == [fragment, context], "the re-ask after the restart is the context, not the fragment"
+    assert outcome.data is not None
+
+
 # ----------------------------------------------------------------- The chair's watchdog
 
 

@@ -2120,6 +2120,38 @@ def test_a_challenge_with_evidence_costs_exactly_one_defense_ask():
     assert port.count(who="Agent1", phase="defense") == 1
 
 
+def test_a_restarted_defense_re_asks_the_round_with_the_challenge():
+    """The defense fragment presumes a session, so a restarted seat is re-asked the round with the
+    challenge appended — not the fragment alone (no session) nor the round alone (hides the challenge)."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.kind == "merge":
+            return {"groups": []}
+        items = shown_items(ask.text)
+        if ask.who == "Agent1":
+            return payload(
+                positions=[{"item": i, "stance": "needs_human", "note": "this is a judgement call"} for i in items], signoff=True
+            )
+        if ask.who == "Agent2" and ask.phase != "defense":
+            return payload(positions=[{"item": i, "stance": "disagree", "evidence": "docs/policy.md:4"} for i in items], signoff=True)
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, port, _records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return port
+
+    port = asyncio.run(main())
+    round_ask = [a for a in port.asks if a.who == "Agent1" and a.phase == "round"][0]
+    defense_ask = [a for a in port.asks if a.who == "Agent1" and a.phase == "defense"][0]
+    assert defense_ask.context is not None, "a restarted seat is owed a self-contained re-ask"
+    assert defense_ask.text in defense_ask.context, "the challenge is in the re-ask"
+    assert round_ask.text in defense_ask.context, "the round it continues is in the re-ask"
+
+
 def test_every_challenge_in_a_round_reaches_the_defense():
     """Two reasoned objections in one round: the holder answers the set, not just the first."""
     import asyncio

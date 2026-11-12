@@ -23,7 +23,9 @@ class Port:
     docket: Docket
     names: dict[str, str] = field(default_factory=dict)
 
-    async def ask_seats(self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False) -> dict[str, RawAsk]:
+    async def ask_seats(
+        self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False, context: dict[str, str] | None = None
+    ) -> dict[str, RawAsk]:
         known = set(self.docket.items)
         closed = {i for i in known if self.docket.items[i].closed}
 
@@ -31,11 +33,17 @@ class Port:
             return {"mode": self.council.mode, "me": agent, "known_items": known, "closed_items": closed}
 
         outcomes = await self.lanes.ask_seats(
-            batch, round_=round_, kind="verdict", phase=phase, parse_for=parse_for, classify_unusable=classify_unusable
+            batch,
+            round_=round_,
+            kind="verdict",
+            phase=phase,
+            parse_for=parse_for,
+            classify_unusable=classify_unusable,
+            context=context,
         )
         return {agent: _raw(outcome) for agent, outcome in outcomes.items()}
 
-    async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round") -> RawAsk:
+    async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round", context: str | None = None) -> RawAsk:
         known = set(self.docket.items)
         closed = {i for i in known if self.docket.items[i].closed}
         try:
@@ -46,6 +54,7 @@ class Port:
                 kind="verdict",
                 phase=phase,
                 parse_kw={"mode": self.council.mode, "me": agent, "known_items": known, "closed_items": closed},
+                context=context,
             )
         except (AskUnusable, AskLost) as failure:
             return RawAsk(text=str(failure), failure=str(failure))

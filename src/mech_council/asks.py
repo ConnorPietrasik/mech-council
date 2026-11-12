@@ -84,8 +84,19 @@ class Lanes:
         self.prompts: dict[str, int] = {}  # prompts spent per member
 
     async def ask_agent(
-        self, agent_id: str, message: str, *, round_: int, kind: str, parse_kw: dict, phase: str = "round", classify_unusable: bool = False
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        round_: int,
+        kind: str,
+        parse_kw: dict,
+        phase: str = "round",
+        classify_unusable: bool = False,
+        context: str | None = None,
     ) -> Outcome:
+        """`context` is the self-contained prompt this ask continues: a restarted seat is re-asked it instead of a fragment.
+        It defaults to the message itself — every pass is self-contained unless it says otherwise."""
         spec = self.members.spec_for(self.members.file_base_for(agent_id))
         async with self.pools[spec.provider]:
             return await self._mediated(
@@ -97,16 +108,32 @@ class Lanes:
                 phase=phase,
                 timeout=None,
                 classify_unusable=classify_unusable,
+                context=context,
             )
 
     async def ask_seats(
-        self, batch, *, round_: int, kind: str, phase: str, parse_for, classify_unusable: bool = False
+        self,
+        batch,
+        *,
+        round_: int,
+        kind: str,
+        phase: str,
+        parse_for,
+        classify_unusable: bool = False,
+        context: dict[str, str] | None = None,
     ) -> dict[str, Outcome]:
 
         async def guarded(agent, message):
             try:
                 return await self.ask_agent(
-                    agent, message, round_=round_, kind=kind, parse_kw=parse_for(agent), phase=phase, classify_unusable=classify_unusable
+                    agent,
+                    message,
+                    round_=round_,
+                    kind=kind,
+                    parse_kw=parse_for(agent),
+                    phase=phase,
+                    classify_unusable=classify_unusable,
+                    context=(context or {}).get(agent),
                 )
             except (AskUnusable, AskLost) as failure:
                 return Outcome(text=str(failure), failure=str(failure))
@@ -213,14 +240,24 @@ class Lanes:
         phase: str,
         timeout: float | None,
         classify_unusable: bool,
+        context: str | None = None,
     ) -> Outcome:
         file_base = self.members.file_base_for(agent_id)
         label = self.members.label_for(file_base)
         who = self.members.display_for(file_base)
         outcome = Outcome()
         started = time.monotonic()
+        # the prompt a fresh process must be given, whatever this pass is asking: the pass's own, or its continuation's
+        full = context if context is not None else message
         text = await self._prompt_with_restart(
-            file_base, message, label=label, round_=round_, timeout=timeout, outcome=outcome, classify_unusable=classify_unusable
+            file_base,
+            message,
+            label=label,
+            round_=round_,
+            timeout=timeout,
+            outcome=outcome,
+            classify_unusable=classify_unusable,
+            context=full,
         )
         self.console.say(f"{who}: {kind} answered in {time.monotonic() - started:.1f}s{round_note(round_)}")
         parsed = extract(kind, text, **parse_kw)
@@ -238,6 +275,7 @@ class Lanes:
                 timeout=timeout,
                 outcome=outcome,
                 classify_unusable=False,
+                context=full,
             )
             parsed = extract(kind, text, **parse_kw)
         outcome.text = text
@@ -272,6 +310,7 @@ class Lanes:
         timeout: float | None,
         outcome: Outcome,
         classify_unusable: bool,
+        context: str,
     ) -> str:
         spec = self.members.spec_for(file_base)
         who = self.members.display_for(file_base)
@@ -302,6 +341,10 @@ class Lanes:
                 raise AskLost(
                     who, spec.provider, spec.model, round_, f"{detail}; the restart failed too: {restart_error}"
                 ) from restart_error
+            if context != message:
+                self.console.event("ask_recontexted", member=label, **round_field(round_))
+                self.console.say(f"{who}: the restart wiped the seat's context — re-asking the full prompt, not the fragment")
+                message = context
         raise AskLost(who, spec.provider, spec.model, round_, detail)
 
     async def _prompt(self, file_base: str, message: str, *, timeout: float | None, label: str) -> Answer:

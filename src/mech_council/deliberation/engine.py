@@ -131,6 +131,7 @@ class Engine:
         self._asked_of_human: set[str] = set()  # asks a waiting checkpoint actually put in front of the human
         self._insists: list[tuple[str, str, int]] = []  # (seat, ask id, round): read once every answer of the pass landed
         self._stale = False
+        self._round_prompt: dict[str, str] = {}  # seat → its last round prompt: the context a fragment pass re-asks after a restart
 
     def new_id(self) -> str:
         while f"{self.adapter.id_prefix}{self._next_item}" in self.docket.items:
@@ -355,19 +356,16 @@ class Engine:
         batch = []
         for agent in self.docket.roster:
             docket_text = self.brief.docket(self.docket, agent)
-            batch.append(
-                (
-                    agent,
-                    self.brief.round(
-                        mode=self.docket.mode,
-                        goal=self.goal,
-                        project=self.project,
-                        me=agent,
-                        docket=docket_text,
-                        phase0_summary=self._phase0_summary.get(agent, ""),
-                    ),
-                )
+            prompt = self.brief.round(
+                mode=self.docket.mode,
+                goal=self.goal,
+                project=self.project,
+                me=agent,
+                docket=docket_text,
+                phase0_summary=self._phase0_summary.get(agent, ""),
             )
+            self._round_prompt[agent] = prompt
+            batch.append((agent, prompt))
         results = await self.port.ask_seats(batch, round_=round_)
         rejected: list[str] = []
         for agent in self.docket.roster:
@@ -696,7 +694,9 @@ class Engine:
                 )
             if not batch:
                 break
-            results = await self.port.ask_seats(batch, round_=round_, phase="gap")
+            # a seat restarted since the round ask gets the round prompt, not the gap fragment: it has no session
+            context = {agent: self._round_prompt[agent] for agent in plan if agent in self._round_prompt}
+            results = await self.port.ask_seats(batch, round_=round_, phase="gap", context=context)
             for agent in plan:
                 cause = pending[agent][1]
                 result = results.get(agent) or RawAsk(failure="no answer")
@@ -780,7 +780,11 @@ class Engine:
             self.emit("escalation_challenged", item=item_id, asker=asker, by=[c["by"] for c in fresh], round=round_)
             question = self.docket.questions.get(escalation.question_id)
             text = question.text if question else ""
-            result = await self.port.ask_seat(asker, self.brief.defense(item_id, fresh, text), round_=round_, phase="defense")
+            challenge = self.brief.defense(item_id, fresh, text)
+            round_prompt = self._round_prompt.get(asker)
+            # a restarted seat has no session: its re-ask is the round with the challenge, not the fragment alone
+            context = f"{round_prompt}\n\n{challenge}" if round_prompt is not None else None
+            result = await self.port.ask_seat(asker, challenge, round_=round_, phase="defense", context=context)
             if result.failure:
                 raise Abort(result.failure, member=asker, round_=round_)
             defended = self._apply_defense(item_id, asker, result, round_)
