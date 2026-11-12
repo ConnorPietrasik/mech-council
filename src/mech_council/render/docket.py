@@ -47,9 +47,6 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
             if record.evidence:
                 line += f" | evidence: {record.evidence}"
             out.append(line)
-        missing = [a for a in docket.roster if docket.stance(item.id, a) is None]
-        if missing:
-            out.append("    no current stance: " + _who(missing, viewer))
         for escalation in docket.standing_escalations(item.id):
             question = docket.questions.get(escalation.question_id)
             if question is None:
