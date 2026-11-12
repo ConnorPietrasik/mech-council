@@ -16,6 +16,7 @@ from .state import (
     Escalation,
     Question,
     normalize_text,
+    one_line,
 )
 
 
@@ -189,7 +190,7 @@ def answer_by_seat(docket: Docket, *, qid: str, agent: str, text: str, round_: i
         return question, "you ask it: retract it if you no longer need the answer"
     if not text.strip():
         return question, "an empty answer changes nothing"
-    question.peer_answers[agent] = text.strip()[:1200]
+    question.peer_answers[agent] = one_line(text)[:1200]
     question.peer_answer_round = max(question.peer_answer_round, round_)
     return question, ""
 
@@ -346,6 +347,7 @@ def _raise_or_merge(
     hold: bool = False,
 ) -> tuple[Question, bool]:
     """An ask the item hold raises joins the ask that already stands for that item, whoever worded it first."""
+    text, context = one_line(text), one_line(context)
     standing = item_ask(docket, item_id) if hold and item_id else None
     for qid in docket.question_order:
         existing = docket.questions[qid]
@@ -395,8 +397,8 @@ def raise_direction_ask(docket: Docket, *, text: str, context: str, options: lis
     """The council's split, put to the human once."""
     question = Question(
         id=f"H{docket.next_question}",
-        text=text,
-        context=context,
+        text=one_line(text),
+        context=one_line(context),
         menu=_menu(CHAIR_ID, options),
         askers=[CHAIR_ID],
         raised_by=[CHAIR_ID],
@@ -421,6 +423,7 @@ def refresh_question(
     round_: int = 0,
 ) -> bool:
     """A seat restating an ask on the docket: only the seat whose words these are may reword them."""
+    text, context = one_line(text), one_line(context)
     changed = False
     mine = _their_words(question, asker)
     if mine:
@@ -456,7 +459,7 @@ def _menu(asker: str, options: list[str] | None) -> dict[str, tuple[str, str]]:
     for option in options or []:
         key = normalize_text(option)
         if key:
-            menu.setdefault(key, (option, asker))
+            menu.setdefault(key, (one_line(option), asker))
     return menu
 
 
@@ -534,6 +537,7 @@ def record_stance(
 ) -> list[tuple[str, dict]]:
     from .state import Stance
 
+    note, evidence = one_line(note), one_line(evidence)
     record = Stance(stance=stance, note=note, evidence=evidence, round=round_)
     docket.stances.setdefault(item_id, {})[agent] = record
     events: list[tuple[str, dict]] = []

@@ -37,6 +37,11 @@ def _item_lines(item: ListItem, depth: int = 0) -> list[str]:
     return lines
 
 
+def _cell(cell: Text) -> str:
+    """A table cell holds one line: a pipe adds a column, a newline breaks the row."""
+    return " ".join(_inline(cell).split()).replace("\\|", "|").replace("|", "\\|")
+
+
 def block_lines(block: Block) -> list[str]:
     if isinstance(block, Heading):
         return ["#" * block.level + " " + _inline(block.text)]
@@ -53,8 +58,8 @@ def block_lines(block: Block) -> list[str]:
             out += block_lines(inner)
         return out
     table = block
-    head = "| " + " | ".join(_inline(cell) for cell in table.header) + " |"
-    rows = ["| " + " | ".join(_inline(cell) for cell in row) + " |" for row in table.rows]
+    head = "| " + " | ".join(_cell(cell) for cell in table.header) + " |"
+    rows = ["| " + " | ".join(_cell(cell) for cell in row) + " |" for row in table.rows]
     return [head, "|" + "---|" * len(table.header)] + rows
 
 

@@ -1,2 +1,3 @@
+Normalize truncation length
 EVENTUALLY: A cool browser UI or something that can show the streams of each agent + allow direct messaging or whatever
 EVENTUALLY: Reference docker container for super easy download / setup?

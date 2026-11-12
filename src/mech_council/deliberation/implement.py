@@ -36,6 +36,7 @@ from .state import (
     Question,
     StageRecord,
     normalize_text,
+    one_line,
 )
 from .termination import direction_rule, unsettled_questions
 from .tree import DIFF_CAP, Tree
@@ -85,7 +86,7 @@ _APPROVAL_STAGES = 12
 
 
 def _fold(text: object, cap: int) -> str:
-    flat = " ".join(str(text or "").split())
+    flat = one_line(str(text or ""))
     return flat[:cap] + ("…" if len(flat) > cap else "")
 
 
@@ -270,14 +271,14 @@ class Implement:
         artifact = engine.direction_plan(token)
         stages = [
             {
-                "state": str(stage.get("state") or "").strip(),
-                "gate": str(stage.get("gate") or "").strip(),
-                "scope": str(stage.get("scope") or "").strip(),
-                "exceptions": [str(e) for e in stage.get("exceptions") or [] if str(e).strip()],
+                "state": one_line(str(stage.get("state") or "")),
+                "gate": one_line(str(stage.get("gate") or "")),
+                "scope": one_line(str(stage.get("scope") or "")),
+                "exceptions": [one_line(str(e)) for e in stage.get("exceptions") or [] if str(e).strip()],
                 "kind": "code",
             }
             for stage in artifact.get("stages") or []
-            if str(stage.get("state") or "").strip()
+            if one_line(str(stage.get("state") or ""))
         ]
         if not stages:
             raise Abort(f"the adopted plan ({self.names.get(token, token)}) names no stages to build")
@@ -512,7 +513,7 @@ class Implement:
         for qid, text in outcome.recommendations.items():
             question = self.docket.questions.get(qid)
             if question is not None:
-                question.recommendation, question.recommendation_round = text, self.docket.round
+                question.recommendation, question.recommendation_round = one_line(text), self.docket.round
 
     # ------------------------------------------------------------- the crews
 
@@ -900,7 +901,7 @@ class Implement:
             parsed = result.data
             assert isinstance(parsed, Extraction), "an answered, kept verdict always carries its parse"
             for entry in parsed.data.get("new_items") or []:
-                claim = str(entry.get("claim") or "")[:600]
+                claim = one_line(str(entry.get("claim") or ""))[:600]
                 standing = self._open_item_for(claim)
                 if standing is not None:
                     # the same defect under the same words: one item, the re-report joins it
@@ -912,8 +913,8 @@ class Implement:
                 item = Item(
                     id=self._new_c(),
                     claim=claim,
-                    detail=str(entry.get("detail") or "")[:2000],
-                    evidence=str(entry.get("evidence") or "")[:2000],
+                    detail=one_line(str(entry.get("detail") or ""))[:2000],
+                    evidence=one_line(str(entry.get("evidence") or ""))[:2000],
                     severity=str(entry.get("severity") or "minor"),
                     raised_by=[agent],
                     opened_round=rec.index,
@@ -1122,7 +1123,7 @@ class Implement:
             )
         for line in data.get("say_to") or []:
             self.docket.queue_message(to=line["to"], from_=rec.builder, text=line["text"], stage=rec.index)
-        rec.open_items = [str(o) for o in data.get("open_issues") or []]
+        rec.open_items = [one_line(str(o)) for o in data.get("open_issues") or [] if one_line(str(o))]
         rec.changed.extend(dict.fromkeys(data.get("changed") or []))
         self._record_user_text(rec, data)
         if fix_pass is not None:

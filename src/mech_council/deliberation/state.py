@@ -41,8 +41,13 @@ CHAIR_ID = "chair"
 WAITING = "waiting for the human"
 
 
+def one_line(text: str) -> str:
+    """Free text as it prints: whitespace collapsed, so it holds a single line."""
+    return " ".join((text or "").split())
+
+
 def normalize_text(text: str) -> str:
-    return " ".join((text or "").split()).casefold()
+    return one_line(text).casefold()
 
 
 def note_key(text: str) -> str:
@@ -379,7 +384,7 @@ class Docket:
 
     def queue_message(self, *, to: str, from_: str, text: str, stage: int = 0) -> None:
         """A `say_to` line, waiting for its target's next prompt."""
-        self.peer_messages.append(PeerMessage(to=to, from_=from_, text=text, stage=stage))
+        self.peer_messages.append(PeerMessage(to=to, from_=from_, text=one_line(text), stage=stage))
 
     def drain_messages(self, agent_id: str) -> list[PeerMessage]:
         """The `say_to` lines waiting for this seat, cleared on the way to its next prompt."""
@@ -392,8 +397,10 @@ class Docket:
         return [self.items[i] for i in self.order if self.items[i].closed]
 
     def add_item(self, item: Item) -> Item:
+        """Registers the item; its text prints on single-line surfaces, so it enters collapsed."""
         if item.id in self.items:
             return self.items[item.id]
+        item.claim, item.detail, item.evidence = one_line(item.claim), one_line(item.detail), one_line(item.evidence)
         self.items[item.id] = item
         self.order.append(item.id)
         self.stances.setdefault(item.id, {})

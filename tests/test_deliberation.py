@@ -518,6 +518,18 @@ def test_two_seats_holding_one_item_raise_one_ask_together():
     assert escalations.effective_class(docket, first) == "blocking", "two declared stops on the one ask about their item"
 
 
+def test_multi_line_words_enter_the_docket_on_one_line():
+    """Seat prose prints on single-line surfaces — stance lines, asks, notes — so it enters collapsed."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE, note="fine,\nbut see the retry path", evidence="a\n\nb")
+    record = docket.stances["F1"]["Agent1"]
+    assert (record.note, record.evidence) == ("fine, but see the retry path", "a b")
+    question, _ = escalations.raise_question(docket, text="which tenant\nowns the key?", asker="Agent1", item_id="F1", round_=1)
+    assert question.text == "which tenant owns the key?"
+    note, _ = notes.raise_note(docket, by="Agent2", text="heads up:\nthe deploy is frozen", item_id=None, round_=1)
+    assert note.text == "heads up: the deploy is frozen"
+
+
 def test_a_seat_that_shares_an_ask_does_not_reword_it():
     """Two seats, one ask: the words the human reads belong to the seat that raised it first."""
     docket = docket_with(3)
@@ -751,7 +763,7 @@ def test_the_asker_owns_the_text_and_its_revised_menu_arrives_whole():
         docket, text="  Which RETENTION? ", asker="Agent1", item_id=None, blocking=False, round_=2, options=["no cache at all"]
     )
     assert again is question and updated, "the same key, retitled by its own asker: latest asker round wins"
-    assert question.text == "  Which RETENTION? "
+    assert question.text == "Which RETENTION?", "the new wording, on one line"
     assert question.options == ["no cache at all"], "the re-ask is the menu now"
 
 

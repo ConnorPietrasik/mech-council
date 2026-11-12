@@ -6,8 +6,9 @@ import re
 
 from mech_council.deliberation import dispositions, escalations, state
 from mech_council.render import docket as docket_render
-from mech_council.render import preview, report_fix, report_implement, report_plan, report_review
+from mech_council.render import markdown, preview, report_fix, report_implement, report_plan, report_review
 from mech_council.render.context import Interrupted, ReportContext, RosterRow, minimal_report
+from mech_council.render.doc import T, Table
 
 
 def build(mode="review", n=3, goal="g"):
@@ -112,6 +113,23 @@ def test_an_answered_question_is_still_shown_to_the_seats_that_must_follow_it():
     open_asks, answers = text.split("## Human answers", 1)
     assert question.id in answers and "answered, round 2" in answers
     assert question.id not in open_asks, "an answered ask prints as an answer, not as a question still holding the run"
+
+
+def test_a_multi_line_claim_holds_its_docket_heading():
+    """Item text prints on single-line surfaces — the docket heading chief among them — so it enters collapsed."""
+    docket = build()
+    entry = item(docket, "F1", "the gate\naccepts an empty output\nand still passes | plainly", evidence="gate\nruns here")
+    assert entry.claim == "the gate accepts an empty output and still passes | plainly"
+    assert entry.evidence == "gate runs here"
+    heading = [line for line in docket_render.render(docket, "Agent1").splitlines() if line.startswith("### F1")]
+    assert len(heading) == 1 and entry.claim in heading[0], "the whole claim sits on the heading line"
+
+
+def test_a_table_cell_carries_a_pipe_and_newline_without_breaking_its_row():
+    cell = Table(header=(T("finding"), T("claim")), rows=((T("F1"), T("a | b\nc")), (T("F2"), T("a \\| b"))))
+    rows = markdown.block_lines(cell)
+    assert all(row.replace("\\|", "").count("|") == 3 for row in rows), rows
+    assert rows[-1] == "| F2 | a \\| b |", "an already-escaped pipe is not escaped again"
 
 
 # ------------------------------------------------------ The review report

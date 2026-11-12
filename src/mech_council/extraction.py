@@ -5,7 +5,18 @@ import re
 from dataclasses import dataclass, field
 
 from .deliberation.notes import NOTE_MAX_CHARS, NOTE_MAX_PER_REPLY
-from .deliberation.state import ABSTAIN, AGREE, CHAIR_ID, DECLINED, DISAGREE, MERGED, NEEDS_HUMAN, NO_PREFERENCE, STANCES
+from .deliberation.state import (
+    ABSTAIN,
+    AGREE,
+    CHAIR_ID,
+    DECLINED,
+    DISAGREE,
+    MERGED,
+    NEEDS_HUMAN,
+    NO_PREFERENCE,
+    STANCES,
+    one_line,
+)
 
 
 #: fold case and drop `_`/`-`: `validationGate`/`VALIDATION_GATE` → `validation_gate`.
@@ -610,7 +621,7 @@ def _notes(value: object) -> list[dict]:
             continue
         item = text_of(pick(entry, "item")).strip() or None
         kind = text_of(pick(entry, "kind", ("type",))).casefold() or "info"
-        out.append({"text": text[:NOTE_MAX_CHARS], "item": item, "kind": kind})
+        out.append({"text": one_line(text)[:NOTE_MAX_CHARS], "item": item, "kind": kind})
     return out[:NOTE_MAX_PER_REPLY]
 
 
@@ -640,7 +651,7 @@ def _retract_note(value: object) -> list[dict]:
         if not token or any(one["id"] == token[0] for one in out):
             continue
         reason = text_of(pick(entry, "reason")).strip() or said or text_of(pick(entry, "note")).strip()
-        out.append({"id": token[0], "reason": reason[:NOTE_MAX_CHARS]})
+        out.append({"id": token[0], "reason": one_line(reason)[:NOTE_MAX_CHARS]})
     return out
 
 
@@ -773,21 +784,21 @@ def parse_phase0(payload: str, *, mode: str) -> Extraction:
                 if isinstance(stage, dict):
                     clean_stages.append(
                         {
-                            "state": text_of(pick(stage, "state")),
-                            "gate": text_of(pick(stage, "gate")),
-                            "scope": text_of(pick(stage, "scope")),
-                            "exceptions": _strings(pick(stage, "exceptions")),
+                            "state": one_line(text_of(pick(stage, "state"))),
+                            "gate": one_line(text_of(pick(stage, "gate"))),
+                            "scope": one_line(text_of(pick(stage, "scope"))),
+                            "exceptions": [one_line(e) for e in _strings(pick(stage, "exceptions"))],
                         }
                     )
                 elif isinstance(stage, str):
-                    clean_stages.append({"state": stage, "gate": "", "scope": "", "exceptions": []})
+                    clean_stages.append({"state": one_line(stage), "gate": "", "scope": "", "exceptions": []})
         out.data["plan"] = {
             "text": text_of(pick(approach, "claim")) if isinstance(approach, dict) else "",
             "stages": clean_stages,
             "constraints": _strings(pick(approach, "constraints")),
             "risks": _strings(pick(approach, "risks")),
             "assumptions": _strings(pick(approach, "assumptions")),
-            "rejected_alternatives": _strings(pick(approach, "rejected_alternatives")),
+            "rejected_alternatives": [one_line(e) for e in _strings(pick(approach, "rejected_alternatives"))],
         }
         if not clean_stages and not out.data["plan"]["text"]:
             out.errors.append("the plan carries no stages")
@@ -890,7 +901,7 @@ def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
     question = text_of(pick(data, "question")).strip()
     if not question:
         return None, ["the direction reply carried no `question`"]
-    return {"question": question[:600], "context": text_of(pick(data, "context")).strip()[:600]}, []
+    return {"question": one_line(question)[:600], "context": one_line(text_of(pick(data, "context")))[:600]}, []
 
 
 def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
@@ -912,9 +923,9 @@ def _agreed(value: object) -> list[dict]:
         return out
     for entry in value:
         if isinstance(entry, str):
-            point, agents = text_of(entry), []
+            point, agents = one_line(text_of(entry)), []
         elif isinstance(entry, dict):
-            point = text_of(pick(entry, "point")) or text_of(pick(entry, "claim"))
+            point = one_line(text_of(pick(entry, "point")) or text_of(pick(entry, "claim")))
             listed = pick(entry, "agents") or pick(entry, "agent") or []
             agents = _strings(listed) if isinstance(listed, list) else _strings([listed])
         else:
@@ -1080,14 +1091,14 @@ def _clean_stages(value: object) -> list[dict]:
         return clean
     for stage in value:
         if isinstance(stage, str):
-            clean.append({"state": stage, "gate": "", "scope": "", "exceptions": [], "kind": "code"})
+            clean.append({"state": one_line(stage), "gate": "", "scope": "", "exceptions": [], "kind": "code"})
         elif isinstance(stage, dict):
             clean.append(
                 {
-                    "state": text_of(pick(stage, "state")),
-                    "gate": text_of(pick(stage, "gate")),
-                    "scope": text_of(pick(stage, "scope")),
-                    "exceptions": _strings(pick(stage, "exceptions")),
+                    "state": one_line(text_of(pick(stage, "state"))),
+                    "gate": one_line(text_of(pick(stage, "gate"))),
+                    "scope": one_line(text_of(pick(stage, "scope"))),
+                    "exceptions": [one_line(e) for e in _strings(pick(stage, "exceptions"))],
                     "kind": text_of(pick(stage, "kind")),
                 }
             )

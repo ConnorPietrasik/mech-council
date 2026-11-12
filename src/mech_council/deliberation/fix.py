@@ -42,6 +42,7 @@ from .state import (
     Note,
     Question,
     normalize_text,
+    one_line,
 )
 from .termination import unsettled_questions
 from .tree import DIFF_CAP, Tree
@@ -54,7 +55,7 @@ _NO_WORK: dict = {"summary": "", "gate_output": "", "changed": [], "user_text": 
 
 
 def _fold(text: object, cap: int) -> str:
-    return " ".join(str(text).split())[:cap]
+    return one_line(str(text))[:cap]
 
 
 def _without_review_id(text: str, item_id: str) -> str:
@@ -399,7 +400,7 @@ class Fix:
         for entry in document.get("items") or []:
             if not isinstance(entry, dict):
                 continue
-            claim = str(entry.get("claim") or "").strip()
+            claim = one_line(str(entry.get("claim") or ""))
             if not claim:
                 continue
             items.append(
@@ -408,8 +409,8 @@ class Fix:
                     Item(
                         id="",
                         claim=claim[:600],
-                        detail=str(entry.get("detail") or "")[:2000],
-                        evidence=str(entry.get("evidence") or "")[:2000],
+                        detail=one_line(str(entry.get("detail") or ""))[:2000],
+                        evidence=one_line(str(entry.get("evidence") or ""))[:2000],
                         severity=map_severity(entry.get("severity")),
                         disposition=str(entry.get("disposition") or OPEN),
                     ),
@@ -447,7 +448,7 @@ class Fix:
             self.selected.append(rec)
             self.execution.findings.append(rec)
             for seat, kind, text, shown in notes.get(old_id, ()):  # the review's record of the finding rides with it
-                note_text = _without_review_id(text, old_id)[:NOTE_MAX_CHARS]
+                note_text = one_line(_without_review_id(text, old_id))[:NOTE_MAX_CHARS]
                 carried, _ = raise_note(self.docket, by=seat, text=note_text, item_id=item.id, round_=0, kind=kind)
                 if shown is not None:
                     carried.shown_round = 0  # shown to the human in the review: the fix run does not show it again
@@ -598,7 +599,7 @@ class Fix:
         for qid, text in outcome.recommendations.items():
             question = self.docket.questions.get(qid)
             if question is not None:
-                question.recommendation, question.recommendation_round = text, self.docket.round
+                question.recommendation, question.recommendation_round = one_line(text), self.docket.round
 
     # ------------------------------------------------------------- a finding
 
@@ -893,7 +894,7 @@ class Fix:
             parsed = result.data
             assert isinstance(parsed, Extraction), "an answered, kept verdict always carries its parse"
             for entry in parsed.data.get("new_items") or []:
-                claim = str(entry.get("claim") or "")[:600]
+                claim = one_line(str(entry.get("claim") or ""))[:600]
                 standing = self._open_item_for(claim)
                 if standing is not None:
                     if agent not in standing.also_reported_by:
@@ -904,8 +905,8 @@ class Fix:
                 item = Item(
                     id=self._new_c(),
                     claim=claim,
-                    detail=str(entry.get("detail") or "")[:2000],
-                    evidence=str(entry.get("evidence") or "")[:2000],
+                    detail=one_line(str(entry.get("detail") or ""))[:2000],
+                    evidence=one_line(str(entry.get("evidence") or ""))[:2000],
                     severity=str(entry.get("severity") or "minor"),
                     raised_by=[agent],
                     opened_round=rec.index,

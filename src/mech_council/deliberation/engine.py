@@ -55,6 +55,7 @@ from .state import (
     Item,
     RoundRecord,
     Stance,
+    one_line,
 )
 from .termination import evaluate
 
@@ -144,9 +145,9 @@ class Engine:
     def add_item(self, entry: dict, raiser: str, round_: int) -> Item:
         item = Item(
             id=self.new_id(),
-            claim=entry.get("claim", "").strip()[:600],
-            detail=entry.get("detail", "")[:2000],
-            evidence=entry.get("evidence", "")[:2000],
+            claim=one_line(entry.get("claim", ""))[:600],
+            detail=one_line(entry.get("detail", ""))[:2000],
+            evidence=one_line(entry.get("evidence", ""))[:2000],
             severity=entry.get("severity", "minor"),
             raised_by=[raiser],
             opened_round=round_,
@@ -227,7 +228,7 @@ class Engine:
         for conflict in comparison.get("conflicts") or []:
             item = Item(
                 id=self.new_id(),
-                claim=conflict.get("claim", "")[:600],
+                claim=one_line(conflict.get("claim", ""))[:600],
                 detail="; ".join(f"{p.get('agent')}: {p.get('claim')}" for p in conflict.get("positions") or []),
                 severity="major",
                 raised_by=[CHAIR_ID],
@@ -235,7 +236,7 @@ class Engine:
             )
             self.docket.add_item(item)
         for gap_text in comparison.get("uncovered") or []:
-            self.docket.add_item(Item(id=self.new_id(), claim=gap_text[:600], raised_by=[CHAIR_ID], opened_round=0))
+            self.docket.add_item(Item(id=self.new_id(), claim=one_line(gap_text)[:600], raised_by=[CHAIR_ID], opened_round=0))
         self.emit(
             "chair_compare",
             agreed=len(self.docket.agreed_points),
@@ -296,7 +297,7 @@ class Engine:
         except Abort as failure:
             self.emit("chair_direction_unreadable", round=round_, reason=str(failure))
             return {}
-        return {key: str(wording.get(key) or "")[:600] for key in ("question", "context")}
+        return {key: one_line(str(wording.get(key) or ""))[:600] for key in ("question", "context")}
 
     def _split_listing(self, split: tuple[str, ...]) -> str:
         blocks = []
@@ -337,9 +338,9 @@ class Engine:
 
     def direction_option(self, token: str) -> str:
         plan = self._direction_plan(token)
-        states = [_one_line(state) for state in _stage_states(plan)]
+        states = [_menu_line(state) for state in _stage_states(plan)]
         tail = " → ".join(states[:_MENU_STAGES]) + (" → …" if len(states) > _MENU_STAGES else "")
-        claim = _one_line(plan.get("text") or "")
+        claim = _menu_line(plan.get("text") or "")
         if claim:
             return f"{token}: {claim}" + (f" → {tail}" if tail else "")
         return f"{token}: {tail}" if tail else token
@@ -532,7 +533,7 @@ class Engine:
                 # only the seat the question was put to may answer it
                 self.emit("qa_answer_not_addressed", member=agent, question=qa.id, asked_of=qa.to, round=round_)
                 continue
-            qa.answer = entry.get("text") or entry.get("answer") or ""
+            qa.answer = one_line(entry.get("text") or entry.get("answer") or "")
 
     def _latest_unanswered(self, *, answered_by: str, addressed_to: str):
         matches = [qa for qa in self.docket.qa.values() if qa.asker == addressed_to and qa.to == answered_by and not qa.answer]
@@ -545,7 +546,11 @@ class Engine:
                 self.emit("qa_question_unmatched", member=agent, to=target, round=round_)
                 continue
             qa = QA(
-                id=f"Q{self.docket.next_qa}", asker=agent, to=target, text=entry.get("text") or entry.get("question") or "", round=round_
+                id=f"Q{self.docket.next_qa}",
+                asker=agent,
+                to=target,
+                text=one_line(entry.get("text") or entry.get("question") or ""),
+                round=round_,
             )
             self.docket.next_qa += 1
             self.docket.qa[qa.id] = qa
@@ -1320,7 +1325,7 @@ class Engine:
         for qid, text in outcome.recommendations.items():
             question = self.docket.questions.get(qid)
             if question is not None:
-                question.recommendation, question.recommendation_round = text, round_
+                question.recommendation, question.recommendation_round = one_line(text), round_
         if not outcome.any_answer:
             return
         if at_ceiling and not self.checkpoint_moved:
@@ -1368,7 +1373,8 @@ _SPLIT_ROUNDS = 3
 _MENU_STAGES = 3
 
 
-def _one_line(text: str, width: int = 90) -> str:
+def _menu_line(text: str, width: int = 90) -> str:
+    """The first line of a plan, clipped for the human's menu: unlike one_line it drops the rest."""
     line = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
     return line if len(line) <= width else line[: width - 1] + "…"
 
