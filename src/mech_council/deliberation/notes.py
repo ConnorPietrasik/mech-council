@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import TypeGuard
 
-from .state import RETRACTED, STANDING, Docket, Item, Note, note_key, one_line
+from .state import MAX_FIELD_CHARS, RETRACTED, STANDING, Docket, Item, Note, note_key, one_line
 
-NOTE_MAX_CHARS = 2000
 NOTE_MAX_PER_REPLY = 6
 NOTE_KINDS = ("info", "correction")
 
@@ -52,7 +51,7 @@ def retract_note(docket: Docket, *, nid: str, agent: str, round_: int, reason: s
     if note.by != agent:
         return None, f"{note.by} wrote that note: only {note.by} retracts it — dispute it with an item and evidence"
     note.state, note.retracted_round, note.updated_round = RETRACTED, round_, round_
-    note.retract_reason = one_line(reason)[:NOTE_MAX_CHARS]
+    note.retract_reason = one_line(reason)[:MAX_FIELD_CHARS]
     return note, ""
 
 

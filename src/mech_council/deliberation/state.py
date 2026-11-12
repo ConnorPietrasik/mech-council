@@ -41,6 +41,11 @@ CHAIR_ID = "chair"
 WAITING = "waiting for the human"
 
 
+#: hard cap on a single recorded text field (claim, note, answer, evidence): an emergency
+#: bound on a runaway seat's output, not a style limit
+MAX_FIELD_CHARS = 4000
+
+
 def one_line(text: str) -> str:
     """Free text as it prints: whitespace collapsed, so it holds a single line."""
     return " ".join((text or "").split())

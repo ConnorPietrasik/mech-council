@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..deliberation.state import MAX_FIELD_CHARS
+
 SANDBOX = """\
 # Your workspace
 
@@ -345,7 +347,7 @@ def repair_ask(mode: str, phase: str, error: str, previous: str, human: str = "b
             "Reply again with the same task's JSON shape, nothing else changed:",
             schema_hint(mode, phase=phase, human=human),
             "Your previous answer, truncated:",
-            (previous or "")[:4000],
+            (previous or "")[:MAX_FIELD_CHARS],
         ]
     )
 

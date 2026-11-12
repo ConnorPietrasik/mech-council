@@ -42,6 +42,7 @@ from .state import (
     DECLINED,
     DISAGREE,
     GO,
+    MAX_FIELD_CHARS,
     MERGED,
     NEEDS_HUMAN,
     QA,
@@ -145,9 +146,9 @@ class Engine:
     def add_item(self, entry: dict, raiser: str, round_: int) -> Item:
         item = Item(
             id=self.new_id(),
-            claim=one_line(entry.get("claim", ""))[:600],
-            detail=one_line(entry.get("detail", ""))[:2000],
-            evidence=one_line(entry.get("evidence", ""))[:2000],
+            claim=one_line(entry.get("claim", ""))[:MAX_FIELD_CHARS],
+            detail=one_line(entry.get("detail", ""))[:MAX_FIELD_CHARS],
+            evidence=one_line(entry.get("evidence", ""))[:MAX_FIELD_CHARS],
             severity=entry.get("severity", "minor"),
             raised_by=[raiser],
             opened_round=round_,
@@ -228,7 +229,7 @@ class Engine:
         for conflict in comparison.get("conflicts") or []:
             item = Item(
                 id=self.new_id(),
-                claim=one_line(conflict.get("claim", ""))[:600],
+                claim=one_line(conflict.get("claim", ""))[:MAX_FIELD_CHARS],
                 detail="; ".join(f"{p.get('agent')}: {p.get('claim')}" for p in conflict.get("positions") or []),
                 severity="major",
                 raised_by=[CHAIR_ID],
@@ -236,7 +237,7 @@ class Engine:
             )
             self.docket.add_item(item)
         for gap_text in comparison.get("uncovered") or []:
-            self.docket.add_item(Item(id=self.new_id(), claim=one_line(gap_text)[:600], raised_by=[CHAIR_ID], opened_round=0))
+            self.docket.add_item(Item(id=self.new_id(), claim=one_line(gap_text)[:MAX_FIELD_CHARS], raised_by=[CHAIR_ID], opened_round=0))
         self.emit(
             "chair_compare",
             agreed=len(self.docket.agreed_points),
@@ -297,7 +298,7 @@ class Engine:
         except Abort as failure:
             self.emit("chair_direction_unreadable", round=round_, reason=str(failure))
             return {}
-        return {key: one_line(str(wording.get(key) or ""))[:600] for key in ("question", "context")}
+        return {key: one_line(str(wording.get(key) or ""))[:MAX_FIELD_CHARS] for key in ("question", "context")}
 
     def _split_listing(self, split: tuple[str, ...]) -> str:
         blocks = []

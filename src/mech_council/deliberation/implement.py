@@ -26,6 +26,7 @@ from .state import (
     CHAIR_ID,
     DECLINED,
     IMPLEMENTED,
+    MAX_FIELD_CHARS,
     NEEDS_OUTCOME,
     NO_PREFERENCE,
     PARTIAL,
@@ -901,7 +902,7 @@ class Implement:
             parsed = result.data
             assert isinstance(parsed, Extraction), "an answered, kept verdict always carries its parse"
             for entry in parsed.data.get("new_items") or []:
-                claim = one_line(str(entry.get("claim") or ""))[:600]
+                claim = one_line(str(entry.get("claim") or ""))[:MAX_FIELD_CHARS]
                 standing = self._open_item_for(claim)
                 if standing is not None:
                     # the same defect under the same words: one item, the re-report joins it
@@ -913,8 +914,8 @@ class Implement:
                 item = Item(
                     id=self._new_c(),
                     claim=claim,
-                    detail=one_line(str(entry.get("detail") or ""))[:2000],
-                    evidence=one_line(str(entry.get("evidence") or ""))[:2000],
+                    detail=one_line(str(entry.get("detail") or ""))[:MAX_FIELD_CHARS],
+                    evidence=one_line(str(entry.get("evidence") or ""))[:MAX_FIELD_CHARS],
                     severity=str(entry.get("severity") or "minor"),
                     raised_by=[agent],
                     opened_round=rec.index,

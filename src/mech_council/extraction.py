@@ -4,13 +4,14 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from .deliberation.notes import NOTE_MAX_CHARS, NOTE_MAX_PER_REPLY
+from .deliberation.notes import NOTE_MAX_PER_REPLY
 from .deliberation.state import (
     ABSTAIN,
     AGREE,
     CHAIR_ID,
     DECLINED,
     DISAGREE,
+    MAX_FIELD_CHARS,
     MERGED,
     NEEDS_HUMAN,
     NO_PREFERENCE,
@@ -621,7 +622,7 @@ def _notes(value: object) -> list[dict]:
             continue
         item = text_of(pick(entry, "item")).strip() or None
         kind = text_of(pick(entry, "kind", ("type",))).casefold() or "info"
-        out.append({"text": one_line(text)[:NOTE_MAX_CHARS], "item": item, "kind": kind})
+        out.append({"text": one_line(text)[:MAX_FIELD_CHARS], "item": item, "kind": kind})
     return out[:NOTE_MAX_PER_REPLY]
 
 
@@ -651,7 +652,7 @@ def _retract_note(value: object) -> list[dict]:
         if not token or any(one["id"] == token[0] for one in out):
             continue
         reason = text_of(pick(entry, "reason")).strip() or said or text_of(pick(entry, "note")).strip()
-        out.append({"id": token[0], "reason": one_line(reason)[:NOTE_MAX_CHARS]})
+        out.append({"id": token[0], "reason": one_line(reason)[:MAX_FIELD_CHARS]})
     return out
 
 
@@ -901,7 +902,7 @@ def parse_direction(payload: str) -> tuple[dict | None, list[str]]:
     question = text_of(pick(data, "question")).strip()
     if not question:
         return None, ["the direction reply carried no `question`"]
-    return {"question": one_line(question)[:600], "context": one_line(text_of(pick(data, "context")))[:600]}, []
+    return {"question": one_line(question)[:MAX_FIELD_CHARS], "context": one_line(text_of(pick(data, "context")))[:MAX_FIELD_CHARS]}, []
 
 
 def parse_comparison(payload: str) -> tuple[dict | None, list[str]]:
@@ -1028,7 +1029,7 @@ def _say_to(value: object, refused: list[dict[str, str]]) -> list[dict]:
         if not _SEAT_ID.fullmatch(who):
             refused.append({"field": "say_to", "about": who, "why": "must be a seat ID (AgentN)", "counts": "dropped"})
             continue
-        out.append({"to": who, "text": text[:1000]})
+        out.append({"to": who, "text": text[:MAX_FIELD_CHARS]})
     return out
 
 
@@ -1042,7 +1043,7 @@ def _addressed(value: object) -> list[dict]:
         item = text_of(pick(entry, "id")).strip()
         how = text_of(pick(entry, "how")).strip()
         if _ITEM_ID.fullmatch(item) and how:
-            out.append({"id": item, "how": how[:2000]})
+            out.append({"id": item, "how": how[:MAX_FIELD_CHARS]})
     return out
 
 

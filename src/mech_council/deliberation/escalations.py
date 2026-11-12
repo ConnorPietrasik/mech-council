@@ -8,6 +8,7 @@ from .state import (
     ASKED,
     CHAIR_ID,
     DISAGREE,
+    MAX_FIELD_CHARS,
     NEEDS_HUMAN,
     RETIRED,
     STANDING,
@@ -190,7 +191,7 @@ def answer_by_seat(docket: Docket, *, qid: str, agent: str, text: str, round_: i
         return question, "you ask it: retract it if you no longer need the answer"
     if not text.strip():
         return question, "an empty answer changes nothing"
-    question.peer_answers[agent] = one_line(text)[:1200]
+    question.peer_answers[agent] = one_line(text)[:MAX_FIELD_CHARS]
     question.peer_answer_round = max(question.peer_answer_round, round_)
     return question, ""
 

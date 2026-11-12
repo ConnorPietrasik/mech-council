@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 from .deliberation.engine import CheckpointOutcome
 from .deliberation.escalations import effective_class, showable, stop_holders
-from .deliberation.state import ASKED, Docket, HumanMessage, Note, Question
+from .deliberation.state import ASKED, MAX_FIELD_CHARS, Docket, HumanMessage, Note, Question
 from .deliberation.termination import unsettled_questions
 from .humanio import EOF
 
@@ -409,4 +409,4 @@ def _ids(pending: Sequence[str]) -> str:
 def _clip(text: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()][:6]
     joined = " ".join(lines)
-    return joined if len(joined) <= 600 else joined[:600] + " …"
+    return joined if len(joined) <= MAX_FIELD_CHARS else joined[:MAX_FIELD_CHARS] + " …"

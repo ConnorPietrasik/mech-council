@@ -24,12 +24,13 @@ from ..prompts import fix as fix_text
 from ..render.text import severity_key
 from .engine import Abort, CheckpointOutcome, Engine
 from .escalations import HELD_BACK, NO_HUMAN, NOT_WAITED, effective_class, held_back, picked_option, raise_question, showable
-from .notes import NOTE_MAX_CHARS, folded_away, item_notes, mark_shown, raise_note, resolve_note_item, unshown
+from .notes import folded_away, item_notes, mark_shown, raise_note, resolve_note_item, unshown
 from .state import (
     AGREED,
     ANSWERED,
     CHAIR_ID,
     FIXED,
+    MAX_FIELD_CHARS,
     NOTHING_TO_FIX,
     OPEN,
     PARTIAL,
@@ -408,9 +409,9 @@ class Fix:
                     str(entry.get("id") or ""),
                     Item(
                         id="",
-                        claim=claim[:600],
-                        detail=one_line(str(entry.get("detail") or ""))[:2000],
-                        evidence=one_line(str(entry.get("evidence") or ""))[:2000],
+                        claim=claim[:MAX_FIELD_CHARS],
+                        detail=one_line(str(entry.get("detail") or ""))[:MAX_FIELD_CHARS],
+                        evidence=one_line(str(entry.get("evidence") or ""))[:MAX_FIELD_CHARS],
                         severity=map_severity(entry.get("severity")),
                         disposition=str(entry.get("disposition") or OPEN),
                     ),
@@ -448,7 +449,7 @@ class Fix:
             self.selected.append(rec)
             self.execution.findings.append(rec)
             for seat, kind, text, shown in notes.get(old_id, ()):  # the review's record of the finding rides with it
-                note_text = one_line(_without_review_id(text, old_id))[:NOTE_MAX_CHARS]
+                note_text = one_line(_without_review_id(text, old_id))[:MAX_FIELD_CHARS]
                 carried, _ = raise_note(self.docket, by=seat, text=note_text, item_id=item.id, round_=0, kind=kind)
                 if shown is not None:
                     carried.shown_round = 0  # shown to the human in the review: the fix run does not show it again
@@ -894,7 +895,7 @@ class Fix:
             parsed = result.data
             assert isinstance(parsed, Extraction), "an answered, kept verdict always carries its parse"
             for entry in parsed.data.get("new_items") or []:
-                claim = one_line(str(entry.get("claim") or ""))[:600]
+                claim = one_line(str(entry.get("claim") or ""))[:MAX_FIELD_CHARS]
                 standing = self._open_item_for(claim)
                 if standing is not None:
                     if agent not in standing.also_reported_by:
@@ -905,8 +906,8 @@ class Fix:
                 item = Item(
                     id=self._new_c(),
                     claim=claim,
-                    detail=one_line(str(entry.get("detail") or ""))[:2000],
-                    evidence=one_line(str(entry.get("evidence") or ""))[:2000],
+                    detail=one_line(str(entry.get("detail") or ""))[:MAX_FIELD_CHARS],
+                    evidence=one_line(str(entry.get("evidence") or ""))[:MAX_FIELD_CHARS],
                     severity=str(entry.get("severity") or "minor"),
                     raised_by=[agent],
                     opened_round=rec.index,
