@@ -70,6 +70,7 @@ class _Activity:
         self.started, self.last_event = started, last_event
         self.events, self.last_tool, self.last_event_name = 0, "", ""
         self.last_tool_args = {}
+        self.compacting = False
 
     def age(self, now=None):
         return (now or time.monotonic()) - self.last_event
@@ -322,6 +323,7 @@ def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
         # A peer idle with activity of its own; a wedge that has taken two more events since it began.
         members.members["seat2-two"].rpc.activity = _Activity(started=time.monotonic(), last_event=time.monotonic())
         members.members["seat1-one"].rpc.activity.events = 2
+        members.members["seat1-one"].rpc.activity.compacting = True
         rows = board.digest()
         task.cancel()
         return rows
@@ -329,6 +331,64 @@ def test_the_digest_lists_the_members_in_flight_and_reads_their_live_activity():
     rows = run(main())
     assert [row["agent"] for row in rows] == ["Agent1"], "only the seat being asked is in the digest"
     assert rows[0]["events"] == 2, "the row carries the activity as it stands, not as it was when the ask began"
+    assert rows[0]["compacting"] is True, "a compaction in flight is the row's to carry"
+
+
+def test_the_digest_line_shows_a_compacting_seat_without_the_idle_claim():
+    """The console line is where a reader of the log spots it: compacting is work, not an idle stall."""
+
+    async def main():
+        board, _members, console, council_ = lanes(script={"chair": [{"text": '{"decisions": []}'}]})
+        rows = [
+            {
+                "agent": "Agent1",
+                "tool_name": "bash",
+                "last_event": "compaction_start",
+                "compacting": True,
+                "idle": 436.0,
+                "elapsed": 834.0,
+                "events": 2191,
+                "last_tool": "grep -r docker.sock compose/",
+            },
+        ]
+        await Chair(council_, board, console, Brief(mode="review", project="/proj")).digest(rows)
+        return console.lines
+
+    lines = run(main())
+    assert "watchdog: chair pass over one compacting 436s" in lines, "the line says compacting, not bash idle"
+
+
+def test_the_chairs_watchdog_prompt_names_the_compaction_and_withholds_the_stale_args():
+    """What the chair actually reads: the seat is marked compacting, and the last tool's args — the thing that
+    reads as a hung grep — are not in the prompt at all."""
+
+    rows = [
+        {
+            "agent": "Agent1",
+            "tool_name": "bash",
+            "last_event": "compaction_start",
+            "compacting": True,
+            "idle": 436.0,
+            "elapsed": 834.0,
+            "events": 2191,
+            "last_tool": "grep -r docker.sock compose/",
+        },
+        {
+            "agent": "Agent2",
+            "tool_name": "read",
+            "last_event": "tool_execution_end",
+            "compacting": False,
+            "idle": 12.0,
+            "elapsed": 60.0,
+            "events": 9,
+            "last_tool": "path=src/app.py",
+        },
+    ]
+    prompt = Brief(mode="review", project="/proj").watchdog(rows)
+    assert "Agent1: compacting" in prompt
+    assert "grep -r docker.sock" not in prompt, "the stale args are withheld while the seat is compacting"
+    assert "path=src/app.py" in prompt, "an ordinary seat still gets its args"
+    assert "tool_execution_end" in prompt, "an ordinary seat's last event type is shown"
 
 
 def test_the_digest_line_names_the_seat_it_is_watching():

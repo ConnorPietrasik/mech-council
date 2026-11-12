@@ -63,8 +63,16 @@ class Brief:
 def render_digest(rows: list[dict]) -> str:
     lines = []
     for row in rows:
+        if row.get("compacting"):
+            # its last tool's args are stale: showing them reads as a hung tool call
+            lines.append(
+                f"- {row['agent']}: compacting · "
+                f"{row['idle']:.0f}s since the last event · {row['elapsed']:.0f}s in this ask · "
+                f"{row['events']} event(s)"
+            )
+            continue
         lines.append(
-            f"- {row['agent']}: {row.get('tool_name') or 'no tool call yet'} · "
+            f"- {row['agent']}: {row.get('tool_name') or 'no tool call yet'} (last event: {row.get('last_event') or 'none'}) · "
             f"{row['idle']:.0f}s since the last event · {row['elapsed']:.0f}s in this ask · "
             f"{row['events']} event(s)\n"
             f"    args: {row['last_tool'] or '(none)'}"

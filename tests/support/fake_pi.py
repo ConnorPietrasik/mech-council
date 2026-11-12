@@ -13,6 +13,7 @@ added, because a key it does not mention is a key a test author will not find:
 {"contains": "Phase 0", "index": 0, "reply": {...} or "raw text", "text": "...", "wrap": true, "sidechain": true,
  "thinking": "...", "tools": [{"name": "read", "args": {}, "result": "...", "is_error": true}],
  "write": [{"path": "f.py", "text": "..."}],
+ "events": [{"type": "compaction_start", "...": "..."}, {"sleep": 2}],
  "once": true, "sleep": 30, "stderr": "...", "retry": "overloaded", "die": 2, "stop_reason": "stop", "error_message": "...",
  "no_settle": true, "aborted": true}
 """
@@ -99,6 +100,17 @@ def reply_to(prompt: str, index: int) -> None:
         sys.stderr.flush()
     if entry.get("retry"):
         say({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "errorMessage": entry.get("retry")})
+    for item in entry.get("events") or []:
+        # Raw records straight onto the pipe, in order; a `sleep` item waits, polling for abort.
+        if "sleep" in item:
+            deadline = time.monotonic() + float(item["sleep"])
+            while time.monotonic() < deadline and not STATE["abort"]:
+                time.sleep(0.02)
+            if STATE["abort"]:
+                say({"type": "agent_settled", "aborted": True})
+                return
+        else:
+            say(item)
     for tool in entry.get("tools") or []:
         say({"type": "tool_execution_start", "toolName": tool.get("name", "read"), "args": tool.get("args") or {}})
         say(

@@ -26,6 +26,7 @@ class Activity:
     last_tool: str = ""
     last_event_name: str = ""
     last_tool_args: dict = field(default_factory=dict)
+    compacting: bool = False
 
     def age(self, now: float | None = None) -> float:
         return (now or time.monotonic()) - self.last_event
@@ -132,10 +133,15 @@ class PiRpc:
     def _note_activity(self, record: dict) -> None:
         if self.activity is None:
             return
+        kind = record.get("type")
+        if kind == "compaction_start":
+            self.activity.compacting = True
+        elif kind == "compaction_end":
+            self.activity.compacting = False
         self.activity.events += 1
         self.activity.last_event = time.monotonic()
-        self.activity.last_event_name = str(record.get("type") or "")
-        if record.get("type") == "tool_execution_start":
+        self.activity.last_event_name = str(kind or "")
+        if kind == "tool_execution_start":
             self.activity.last_tool = str(record.get("toolName") or "")
             args = record.get("args")
             self.activity.last_tool_args = args if isinstance(args, dict) else {}

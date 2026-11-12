@@ -57,8 +57,15 @@ WATCHDOG = """\
 # Watchdog
 
 Some seats have work in flight. For each one below you get how long it has been running,
-how long since its last event, how many events it has produced, and a preview of its last
-tool call.
+how long since its last event, how many events it has produced, the type of its last
+event, and a preview of its last tool call.
+
+A seat marked `compacting` is summarizing its own context to fit the model's window.
+Nothing else is in flight while it does that: the silence is the summarization request
+itself, which sends the whole session to the model and can legitimately take many
+minutes. It is also the only thing that will let the seat's next request fit again, and
+a restart throws the context away with it — keep a compacting seat, and restart one
+only when it is still compacting across several of your passes.
 
 Be conservative: long tool output is legitimate, a big test run is legitimate. Restart
 only a seat that is clearly stuck. **If unsure, keep.**

@@ -83,6 +83,7 @@ class Chair:
             "watchdog_pass",
             agents=[row["agent"] for row in rows],
             tools=[row.get("tool_name") or "" for row in rows],
+            compacting=[bool(row.get("compacting")) for row in rows],
             elapsed=[row["elapsed"] for row in rows],
             idle=[row["idle"] for row in rows],
         )
@@ -103,5 +104,10 @@ class Chair:
 def _digest_line(rows: list[dict], names: dict[str, str]) -> str:
     from .render.text import name_of
 
-    parts = "; ".join(f"{name_of(row['agent'], names)} {row.get('tool_name') or 'no tool'} {row['idle']:.0f}s idle" for row in rows)
+    parts = "; ".join(
+        f"{name_of(row['agent'], names)} compacting {row['idle']:.0f}s"
+        if row.get("compacting")
+        else f"{name_of(row['agent'], names)} {row.get('tool_name') or 'no tool'} {row['idle']:.0f}s idle"
+        for row in rows
+    )
     return f"watchdog: chair pass over {parts}"

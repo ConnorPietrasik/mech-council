@@ -196,6 +196,7 @@ class Lanes:
                     "events": activity.events,
                     "tool_name": activity.last_tool,
                     "last_event": activity.last_event_name,
+                    "compacting": activity.compacting,
                     "last_tool": preview.preview(activity.last_tool_args, project=self.council.project, tool_name=activity.last_tool),
                 }
             )

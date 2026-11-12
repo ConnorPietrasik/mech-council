@@ -129,12 +129,15 @@ class ReportContext:
             items.append(ListItem(T("it was asking you: ", ", ".join(cut.waiting_on))))
         for row in cut.in_flight:
             who = caption(str(row.get("agent", "?")), self.captions)
-            tool = str(row.get("tool_name") or "")
-            last = str(row.get("last_tool") or "")
-            if tool:
-                doing = T((tool, "code"), f" {last}") if last else T((tool, "code"))
+            if row.get("compacting"):
+                doing = T("compacting its own context")
             else:
-                doing = T(f"last event: {row.get('last_event') or 'none yet'}")
+                tool = str(row.get("tool_name") or "")
+                last = str(row.get("last_tool") or "")
+                if tool:
+                    doing = T((tool, "code"), f" {last}") if last else T((tool, "code"))
+                else:
+                    doing = T(f"last event: {row.get('last_event') or 'none yet'}")
             items.append(ListItem(T(f"in flight: {who} — ", doing, f" ({row.get('elapsed', 0)} s, idle {row.get('idle', 0)} s)")))
         if items:
             blocks.append(List(tuple(items)))

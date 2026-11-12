@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import sys
+import time
 from typing import cast
 
 import pytest
@@ -255,6 +256,43 @@ def test_a_sidechains_agent_end_does_not_end_the_ask():
     answer, events = run(main())
     assert any(e.get("isSidechain") for e in events), "a sub-agent did end"
     assert answer.text == "the real answer" and answer.settled and not answer.errored
+
+
+def test_a_compaction_in_flight_is_flagged_on_the_activity_until_its_end():
+    """The watchdog's only window into a compaction is this flag: compaction_start sets it, compaction_end clears it."""
+
+    async def main():
+        child, rpc, events = await start(
+            [
+                {
+                    "contains": "",
+                    "reply": "done",
+                    "events": [
+                        {"type": "compaction_start", "reason": "threshold"},
+                        {"sleep": 2},
+                        {"type": "compaction_end", "reason": "threshold", "aborted": False, "willRetry": False},
+                    ],
+                }
+            ]
+        )
+        try:
+            task = asyncio.create_task(rpc.ask("go"))
+            deadline = time.monotonic() + 5
+            while (activity := rpc.activity) is None or not activity.compacting:
+                assert time.monotonic() < deadline, "the compaction_start never reached the activity"
+                await asyncio.sleep(0.02)
+            assert activity.last_event_name == "compaction_start", "while compacting, the last event is the compaction's start"
+            answer = await asyncio.wait_for(task, 10)
+            return answer, rpc.activity, events
+        finally:
+            await rpc.stop()
+            child.terminate()
+            await child.wait()
+
+    _answer, activity, events = run(main())
+    assert activity.compacting is False, "the end of the compaction clears the flag"
+    kinds = [event.get("type") for event in events]
+    assert kinds.index("compaction_start") < kinds.index("compaction_end")
 
 
 def test_a_child_that_closes_its_stdout_ends_every_wait():
