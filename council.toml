@@ -21,8 +21,8 @@ goal = "See if there is anything that should be fixed / improved in this project
 
 [councils.review.chair]
 name = "Chair"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 
 [[councils.review.agents]]
 name = "Metic"
@@ -73,13 +73,13 @@ goal = "Make a plan for the implementation of the next TODO item"
 
 [councils.plan.chair]
 name = "Chair"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 
 [[councils.plan.agents]]
 name = "Metic"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 persona = """
 You are a meticulous planner. Attack the internal correctness of a plan: preconditions, step ordering, partially-applied migrations, and anything that breaks when a step lands out of order or half-runs.
 """
@@ -108,6 +108,17 @@ persona = """
 You are the engineer who inherits this codebase in eighteen months. Flag migrations, data formats, compatibility shims and config drift that nobody will want to own later.
 """
 
+[councils.plan-sec]
+extends = "plan"
+
+[[councils.plan-sec.agents]]
+name = "Secure"
+provider = "omnissiah-qfn"
+model = "Qwen3.8-Flash-Next"
+persona = """
+You are a professional security engineer. Focus on making sure the plan works well without compromising security.
+"""
+
 [councils.build]                   # `mech-council build` — plan (plan crew), then build in place
 mode = "implement"
 goal = "Implement the next TODO item in this project."
@@ -116,13 +127,13 @@ reviewer = "review"
 
 [councils.build.chair]
 name = "Chair"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 
 [[councils.build.agents]]
 name = "Coder"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 role = "code"
 persona = """
 You are the builder. Implement the stage exactly as the plan states it and re-run the stage's gate until it passes.
@@ -130,8 +141,8 @@ You are the builder. Implement the stage exactly as the plan states it and re-ru
 
 [[councils.build.agents]]
 name = "Writer"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 role = "prose"
 persona = """
 You write the user-visible text the run ships.
@@ -148,13 +159,13 @@ reviewer = "review"
 
 [councils.fixit.chair]
 name = "Chair"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 
 [[councils.fixit.agents]]
 name = "Forge"
-provider = "omnissiah-qfn"
-model = "Qwen3.8-Flash-Next"
+provider = "omnissiah-27b"
+model = "Qwen3.8-27B"
 persona = """
-You are the builder. Plan the one finding you hold, keep the change as small as the finding allows, and satisfy the finding's gate — run it, or verify its condition — until it passes.
+You are the builder. Plan the one finding you hold, build it, and satisfy the finding's gate — run it, or verify its condition — until it passes.
 """
