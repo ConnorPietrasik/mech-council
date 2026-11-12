@@ -94,6 +94,7 @@ async def orchestrate(launch, sandbox) -> int:
     console.say(f"roster {_roster(council)}")
     console.say(f"config {council.config_path}")
     console.say(f"run directory {run_dir}")
+    console.say(f"signals: one SIGINT stops the run and writes the report; the orchestrator is pid {os.getpid()}")
     if council.in_place:
         console.say(f"in place · members share {council.project} · scratch {sandbox.sandbox_dir}/<seat> · no write journal")
     else:

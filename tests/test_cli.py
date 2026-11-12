@@ -175,6 +175,15 @@ def test_an_aborted_run_exits_one_with_a_minimal_report(cli, project):
     assert report and "aborted" in report.lower()
 
 
+def test_the_log_names_the_pid_a_background_signal_must_reach(cli, project):
+    """Without a terminal there is no `Ctrl+C`: the operator signals the pid the run's own log names."""
+    script = json.dumps([{"contains": "", "die": True}])
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=script)
+    result = cli(["review"], cwd=project, env=env, timeout=120)
+    orchestrator = result.manifest["pids"]["orchestrator"]
+    assert f"pid {orchestrator}" in result.console, result.console
+
+
 def test_a_config_error_exits_one_and_leaves_the_canary_empty(cli, project, canary):
     write_project_config(project, '[councils.review]\nmode = "planning"\n')
     result = cli(["review"], cwd=project)

@@ -169,6 +169,13 @@ Notes (`N1`) print once, at the next checkpoint, and are listed again in the rep
 One `Ctrl+C` stops the deliberation and still writes the report. A second one kills the members and
 ends the run within two seconds, with no guarantee the report lands.
 
+A run in the background takes the first press as a `SIGINT` to the **orchestrator** — the pid the
+log's `signals:` line names at start, or `pids.orchestrator` in the run's `run.json`
+(`pids.supervisor` relays a signal it gets, so either python process is a safe target). Send it
+once and wait: the ask in flight is interrupted at once and the report is written before the
+process exits (code 130). A `SIGINT` aimed at the shell that launched the run is ignored — a shell
+started in the background ignores `SIGINT` — so the run keeps working as if nothing happened.
+
 ## What you get
 
 The report is the one artifact every run writes. The rest of the run directory is a verbosity
