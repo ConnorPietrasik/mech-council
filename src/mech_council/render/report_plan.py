@@ -38,6 +38,7 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converge
     blocks += _assumptions(docket, context)
     blocks += _agreed_points(docket, context)
     blocks += _decision_points(docket, context)
+    blocks += folded_ids(docket)
     blocks += _human_input(docket, context)
     blocks += _notes(docket, context, under=set(docket.items))
     blocks += _qa(docket, context)
@@ -248,6 +249,14 @@ def _decision_points(docket: Docket, context: ReportContext) -> list[Block]:
             group.append(List(tuple(after)))
         blocks.append(Group(tuple(group)))
     return blocks
+
+
+def folded_ids(docket: Docket) -> list[Block]:
+    """The ids the chair folded away: what a stale reference in the record means now."""
+    if not docket.item_aliases:
+        return []
+    items = tuple(ListItem(T(f"{old} → {docket.resolve_item(new)}")) for old, new in docket.item_aliases.items())
+    return [Heading(2, T(f"Folded ids — name the survivor, not the folded one ({len(docket.item_aliases)})")), List(items)]
 
 
 def _human_input(docket: Docket, context: ReportContext) -> list[Block]:

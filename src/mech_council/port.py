@@ -26,11 +26,10 @@ class Port:
     async def ask_seats(
         self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False, context: dict[str, str] | None = None
     ) -> dict[str, RawAsk]:
-        known = set(self.docket.items)
-        closed = {i for i in known if self.docket.items[i].closed}
+        known = set(self.docket.items) | set(self.docket.item_aliases)
 
         def parse_for(agent: str) -> dict:
-            return {"mode": self.council.mode, "me": agent, "known_items": known, "closed_items": closed}
+            return {"mode": self.council.mode, "me": agent, "known_items": known}
 
         outcomes = await self.lanes.ask_seats(
             batch,
@@ -44,8 +43,7 @@ class Port:
         return {agent: _raw(outcome) for agent, outcome in outcomes.items()}
 
     async def ask_seat(self, agent: str, message: str, *, round_: int, phase: str = "round", context: str | None = None) -> RawAsk:
-        known = set(self.docket.items)
-        closed = {i for i in known if self.docket.items[i].closed}
+        known = set(self.docket.items) | set(self.docket.item_aliases)
         try:
             outcome = await self.lanes.ask_agent(
                 agent,
@@ -53,7 +51,7 @@ class Port:
                 round_=round_,
                 kind="verdict",
                 phase=phase,
-                parse_kw={"mode": self.council.mode, "me": agent, "known_items": known, "closed_items": closed},
+                parse_kw={"mode": self.council.mode, "me": agent, "known_items": known},
                 context=context,
             )
         except (AskUnusable, AskLost) as failure:

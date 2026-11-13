@@ -363,6 +363,53 @@ def test_a_landed_fold_is_not_offered_again():
     assert [a.round for a in port.asks if a.kind == "merge"] == [0], "a landed fold was re-offered"
 
 
+def test_a_stance_on_a_folded_item_id_lands_on_the_survivor():
+    """The fold keeps no item under the old id, but a seat stancing it from memory still counts, under the id that survives."""
+    import asyncio
+
+    async def main():
+        built, _port, _records = engine(reply=lambda ask: payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}]))
+        built.docket.add_item(Item(id="F1", claim="the cache ignores tenants", severity="major", opened_round=0))
+        built.docket.add_item(Item(id="F2", claim="tenant key missing from the cache", severity="major", opened_round=1))
+        await built._merge_new_items(round_=1)
+        built._apply_verdict("Agent3", payload(positions=[{"item": "F2", "stance": "agree"}], signoff=True), round_=2)
+        return built
+
+    built = asyncio.run(main())
+    assert built.docket.item_aliases.get("F2") == "F1", "the fold owes a mapping for the id it deleted"
+    assert built.docket.stance("F1", "Agent3") is not None, "the stale id stanced the claim, under its surviving id"
+    assert built.docket.stance("F2", "Agent3") is None, "no stance sits under an id with no item"
+
+
+def test_a_gap_answer_on_a_folded_item_id_lands_on_the_survivor():
+    """The gap ladder asks only for ids that still stand: a seat answering a folded one from memory still counts, once."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug", "another bug")
+        if ask.kind == "merge":
+            return payload(groups=[{"canonical": "F1", "duplicates": ["F2"]}])
+        if ask.who == "Agent2" and ask.phase == "gap":
+            return payload(positions=[{"item": "F2", "stance": "agree"}], signoff=True)
+        if ask.who == "Agent2":
+            return payload(positions=[], signoff=True)  # silent on the whole docket
+        return stance_all(ask, "agree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=1)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    assert built.docket.item_aliases.get("F2") == "F1", "the fold never landed"
+    record = built.docket.stance("F1", "Agent2")
+    assert record is not None and not record.declined, "a memory of the old id is an answer to the survivor, not a recorded silence"
+    assert record.stance == AGREE
+    assert built.docket.stance("F2", "Agent2") is None, "no stance sits under an id with no item"
+    assert not [r for r in records if r["event"] == "gap_declined" and r["member"] == "Agent2"], "the gap was answered, not exhausted"
+
+
 def test_a_group_that_grouped_nothing_is_offered_again():
     """A fold the guard blocked grouped nothing: the canonical is re-offered, the answered duplicate is not."""
     import asyncio

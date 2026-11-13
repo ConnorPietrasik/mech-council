@@ -481,14 +481,12 @@ def parse_verdict(
     mode: str,
     me: str,
     known_items: set[str] | None = None,
-    closed_items: set[str] | None = None,
 ) -> Extraction:
     data, error = find_json(payload, VERDICT_FIELDS)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
     out: Extraction = Extraction(data={})
     known = known_items or set()
-    closed = closed_items or set()
     unknown: list[str] = []
 
     positions = pick(data, "positions") or []
@@ -517,8 +515,6 @@ def parse_verdict(
             "note": text_of(pick(entry, "note")),
             "evidence": text_of(pick(entry, "evidence")),
         }
-        if raw_id in closed:
-            item["on_closed"] = True
         clean_positions.append(item)
     if positions and dropped and not clean_positions:
         out.errors.append("`positions` was present but every entry was invalid")

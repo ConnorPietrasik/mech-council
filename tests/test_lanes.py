@@ -753,9 +753,7 @@ def test_a_fragment_ask_restarted_gets_its_context_not_the_fragment():
     async def main():
         board, members, _console, _ = lanes(script={"seat1-one": [GONE, {"text": verdict()}]})
         parse_kw = {"mode": "review", "me": "seat1-one", "known_items": set()}
-        outcome = await board.ask_agent(
-            "Agent1", fragment, round_=3, kind="verdict", parse_kw=parse_kw, phase="gap", context=context
-        )
+        outcome = await board.ask_agent("Agent1", fragment, round_=3, kind="verdict", parse_kw=parse_kw, phase="gap", context=context)
         calls = members.members["seat1-one"].rpc.calls
         return outcome, calls, members.members["seat1-one"].restarts
 

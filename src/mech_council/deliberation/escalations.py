@@ -115,14 +115,39 @@ def _other_ledger(docket: Docket, qid: str, agent: str) -> str:
     return f'{qid} is a note of yours, not an ask: retract it with `retract_note: ["{qid}"]`'
 
 
+def _unknown_id(docket: Docket, qid: str, agent: str) -> str:
+    """A name that is not an open ask: an item, a folded item, a note, or nothing at all."""
+    if qid in docket.items:
+        return f"{qid} is an item, not an ask: asks carry the H ids — to raise one over it use `human_input`"
+    if qid in docket.item_aliases:
+        return f"{qid} was folded into {docket.resolve_item(qid)}: name the survivor, not the folded id"
+    return _other_ledger(docket, qid, agent) or "no open question with that id"
+
+
+def _stale_ask_reason(docket: Docket, question: Question) -> str:
+    """Where an ask went, for a seat that names it after it stopped being open."""
+    if question.moot_with:
+        item = docket.items.get(question.moot_with)
+        state = f" as {item.disposition}" if (item is not None and item.closed) else ""
+        return (
+            f"that ask is moot: its item {question.moot_with} was settled{state} — ask over no item what the "
+            f"closure left open, or stance {question.moot_with} again to reopen it"
+        )
+    if question.state == ANSWERED and question.answer:
+        return f"that ask is answered (round {question.answer_round}): {question.answer}"
+    if question.retracted_by:
+        return f"that ask was retracted by {question.retracted_by} in round {question.retracted_round}"
+    return "no open question with that id"
+
+
 def _open_ask(docket: Docket, qid: str, agent: str) -> tuple[Question | None, str]:
     question = docket.questions.get(qid)
     if question is None:
-        return None, _other_ledger(docket, qid, agent) or "no open question with that id"
+        return None, _unknown_id(docket, qid, agent)
     if moved := _moved(question):
         return question, moved
     if question.state != ASKED:
-        return None, "no open question with that id"
+        return None, _stale_ask_reason(docket, question)
     if question.direction_ask:
         # the camps own this ask, not a seat
         return question, "the split ask belongs to the camps, not to a seat"
@@ -219,11 +244,11 @@ def retract(docket: Docket, *, qid: str, agent: str, round_: int) -> tuple[Quest
     """Drop one asker: the ask survives until the last asker walks away. An answered one goes moot, never void."""
     question = docket.questions.get(qid)
     if question is None:
-        return None, _other_ledger(docket, qid, agent) or "no open question with that id"
+        return None, _unknown_id(docket, qid, agent)
     if moved := _moved(question):
         return question, moved
     if question.state not in (ASKED, ANSWERED):
-        return None, "no open question with that id"
+        return None, _stale_ask_reason(docket, question)
     if question.direction_ask:
         return question, "the split ask belongs to the camps, not to a seat"
     if agent not in question.askers:

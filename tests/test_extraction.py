@@ -173,9 +173,11 @@ def test_a_position_against_an_unknown_id_is_logged_not_dropped():
     assert [p["item"] for p in out.data["positions"]] == ["F1"]
 
 
-def test_a_position_on_a_closed_item_is_kept_and_marked():
-    out = parse_verdict(verdict(**positions(("F1", "disagree"))), mode="review", me="Agent1", known_items=set(KNOWN), closed_items={"F1"})
-    assert out.data["positions"][0]["on_closed"] is True, "the reopen path owns it"
+def test_a_position_on_a_closed_item_is_kept():
+    """The reopen path reads stances on closed items: parsing must not drop them as unknown."""
+    out = parse_verdict(verdict(**positions(("F1", "disagree"))), mode="review", me="Agent1", known_items=set(KNOWN))
+    assert [p["item"] for p in out.data["positions"]] == ["F1"], "a closed id is still a known id"
+    assert out.data["unknown_items"] == []
 
 
 # --------------------------------------------------------------------------- a flag a seat sent as a word

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypeGuard
 
-from .state import MAX_FIELD_CHARS, RETRACTED, STANDING, Docket, Item, Note, note_key, one_line
+from .state import MAX_FIELD_CHARS, RETRACTED, STANDING, Docket, Note, note_key, one_line
 
 NOTE_MAX_PER_REPLY = 6
 NOTE_KINDS = ("info", "correction")
@@ -55,22 +55,26 @@ def retract_note(docket: Docket, *, nid: str, agent: str, round_: int, reason: s
     return note, ""
 
 
-def item_named(text: str, items: dict[str, Item]) -> str | None:
-    """The docket item a note names up front, when its first word is one."""
+def item_named(text: str, docket: Docket) -> str | None:
+    """The docket item a note names up front, when its first word is one: a folded one reads as its survivor."""
     words = text.split(None, 1)
     if not words:
         return None
     first = words[0].strip(".:;,!?()[]\"'`-")
-    return first if first in items else None
+    if first not in docket.items and first not in docket.item_aliases:
+        return None
+    return docket.resolve_item(first)
 
 
 def resolve_note_item(docket: Docket, entry: dict) -> str | None:
     """The item a note links to: its `item` field when that is a docket item, else the item its text opens with."""
     item_id = entry.get("item")
+    if item_id:
+        item_id = docket.resolve_item(item_id)
     if item_id and item_id not in docket.items:
         item_id = None
     if item_id is None:
-        item_id = item_named(entry["text"], docket.items)
+        item_id = item_named(entry["text"], docket)
     return item_id
 
 

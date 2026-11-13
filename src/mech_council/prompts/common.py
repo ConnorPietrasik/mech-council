@@ -44,6 +44,11 @@ human what you cannot settle.
   to knock it down, not because somebody asserted it. Cite the file, the line or the
   command output that shows it.
 - Peers are numbers. You are shown `AgentN`, never a name: who reported a claim is never a reason to believe or to fold.
+- Every id you name is one the docket handed out: items by the id they were shown with, asks by
+  their `H` id, notes by their `N` id. The chair folds duplicates into the id raised first, and a
+  folded id answers as its survivor — name the survivor; the docket's Folded section shows where
+  every folded id went. Never number your own items or scratch notes: an invented id that
+  collides with a docket id is read as the docket's item, and nothing else.
 - Silence is never consent and never rejection: you are asked for a stance on every open
   item, and an answer you withhold is asked for. `abstain` is always valid, costs
   nothing, and neither endorses nor blocks — abstain rather than going quiet.

@@ -90,6 +90,41 @@ def test_a_closed_item_still_prints_its_id_so_it_can_be_reopened():
     assert "F1" in text and "agreed" in text
 
 
+def test_a_folded_id_keeps_a_line_pointing_at_its_survivor():
+    """The chair's fold deletes the item, but the docket keeps the id's mapping so a stale reference resolves."""
+    docket = build()
+    item(docket, "F1", "the cache ignores tenants")
+    docket.item_aliases["F2"] = "F1"
+    text = docket_render.render(docket, "Agent2")
+    folded = section(text, "Folded findings — name the survivor, not the folded id (1)")
+    assert "F2 → F1" in folded, "the deleted id still points at the claim that survived"
+    assert docket.resolve_item("F2") == "F1"
+
+
+def test_a_folded_id_reaches_the_final_survivor_when_the_survivor_was_folded_too():
+    """A fold of a folded id leaves one pointer per old id, and it reaches the claim that still stands."""
+    docket = build()
+    item(docket, "F4", "the tenant key is missing from the cache")
+    docket.item_aliases["F2"] = "F1"
+    docket.item_aliases["F1"] = "F4"
+    text = docket_render.render(docket, "Agent2")
+    folded = section(text, "Folded findings — name the survivor, not the folded id (2)")
+    assert "F2 → F4" in folded, "the old id points at the claim that still stands, not at a fold it has passed"
+
+
+def test_the_report_prints_folded_ids_so_the_record_keeps_no_silent_gap():
+    """A report that numbers to T150 owes a line for every id it deleted, not a hole."""
+    docket = build()
+    item(docket, "F1", "a settled claim")
+    entry = item(docket, "F3", "another settled claim")
+    entry.disposition, entry.closed_round = state.AGREED, 1
+    docket.item_aliases["F2"] = "F1"
+    for render in (report_review.render, report_plan.render):
+        text = render(docket, context())
+        folded = section(text, "Folded ids — name the survivor, not the folded one (1)")
+        assert "F2 → F1" in folded
+
+
 def test_open_human_requests_print_with_their_effective_class():
     docket = build()
     item(docket, "F1", "a call only a human can make")

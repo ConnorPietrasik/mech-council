@@ -390,14 +390,13 @@ class Engine:
         self.previous_signature = current
 
     def _apply_verdict(self, agent: str, text: str, round_: int) -> None:
-        known = set(self.docket.items)
-        closed = {i for i in known if self.docket.items[i].closed}
-        parsed = parse_verdict(text, mode=self.docket.mode, me=agent, known_items=known, closed_items=closed)
+        known = set(self.docket.items) | set(self.docket.item_aliases)
+        parsed = parse_verdict(text, mode=self.docket.mode, me=agent, known_items=known)
         data = parsed.data
         for raw_id in data.get("unknown_items") or []:
             self.emit("verdict_unknown_findings", member=agent, id=raw_id, round=round_)
         for position in data.get("positions") or []:
-            item = self.docket.items.get(position["item"])
+            item = self.docket.items.get(self.docket.resolve_item(position["item"]))
             if item is None:
                 continue
             self._stance(
@@ -561,7 +560,7 @@ class Engine:
         for entry in entries:
             item_id = entry.get("item")
             if round_ == 0:
-                named = item_id or item_named(entry["text"], self.docket.items)
+                named = item_id or item_named(entry["text"], self.docket)
                 if named:
                     self.emit(
                         "verdict_unknown_findings",
@@ -572,11 +571,13 @@ class Engine:
                     )
                 item_id = None
             else:
+                if item_id:
+                    item_id = self.docket.resolve_item(item_id)
                 if item_id and item_id not in self.docket.items:
                     self.emit("verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a note named an unknown item")
                     item_id = None
                 if item_id is None:
-                    item_id = item_named(entry["text"], self.docket.items)
+                    item_id = item_named(entry["text"], self.docket)
             note, updated = raise_note(
                 self.docket, by=asker, text=entry["text"], item_id=item_id, round_=round_, kind=entry.get("kind", "info")
             )
@@ -601,6 +602,8 @@ class Engine:
     def _human_input(self, entries: list[dict], asker: str, round_: int) -> None:
         for entry in entries:
             item_id = entry.get("item")
+            if item_id:
+                item_id = self.docket.resolve_item(item_id)
             if item_id and item_id not in self.docket.items:
                 self.emit(
                     "verdict_unknown_findings", member=asker, id=item_id, round=round_, reason="a human_input entry named an unknown item"
@@ -732,16 +735,16 @@ class Engine:
             result.text or "",
             mode=self.docket.mode,
             me=agent,
-            known_items=set(self.docket.items),
-            closed_items={i for i in self.docket.items if self.docket.items[i].closed},
+            known_items=set(self.docket.items) | set(self.docket.item_aliases),
         ).data
         asked_items = [c for c in chunk if c != "backing"]
         landed = 0
         for position in data.get("positions") or []:
-            if position["item"] not in asked_items:
+            item_id = self.docket.resolve_item(position["item"])
+            if item_id not in asked_items:
                 continue
             self._stance(
-                item_id=position["item"],
+                item_id=item_id,
                 agent=agent,
                 stance=position["stance"],
                 note=position.get("note", ""),
@@ -750,9 +753,9 @@ class Engine:
             )
             landed += 1
             # A gap answer may withdraw a sign-off, never re-grant it.
-            if self.docket.signoffs.get(agent) == round_ and position["item"] in self.shown.get(agent, []):
+            if self.docket.signoffs.get(agent) == round_ and item_id in self.shown.get(agent, []):
                 del self.docket.signoffs[agent]
-                self.emit("signoff_revoked", member=agent, round=round_, item=position["item"])
+                self.emit("signoff_revoked", member=agent, round=round_, item=item_id)
         if "backing" in chunk:
             token = data.get("backing")
             if token:
@@ -809,12 +812,11 @@ class Engine:
             result.text or "",
             mode=self.docket.mode,
             me=asker,
-            known_items=set(self.docket.items),
-            closed_items={i for i in self.docket.items if self.docket.items[i].closed},
+            known_items=set(self.docket.items) | set(self.docket.item_aliases),
         ).data
         note, evidence, restated = "", "", False
         for position in data.get("positions") or []:
-            if position["item"] != item_id:
+            if self.docket.resolve_item(position["item"]) != item_id:
                 continue
             restated = position["stance"] == NEEDS_HUMAN
             note, evidence = position.get("note", ""), position.get("evidence", "")
@@ -827,7 +829,8 @@ class Engine:
                 round_=round_,
             )
         for entry in data.get("human_input") or []:
-            if entry.get("item") == item_id and entry.get("question"):
+            named = entry.get("item")
+            if named and self.docket.resolve_item(named) == item_id and entry.get("question"):
                 question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
                 escalation = self.docket.escalations.get((item_id, asker))
                 # only a standing hold owns an ask; a defense that released the item does not adopt its ask
@@ -922,6 +925,7 @@ class Engine:
             for duplicate in duplicates:
                 source = self.docket.items.pop(duplicate)
                 self.docket.order.remove(duplicate)
+                self.docket.item_aliases[duplicate] = canonical
                 self.docket.stances.pop(duplicate, None)
                 for agent in source.raised_by + source.also_reported_by:
                     if agent not in target.raised_by and agent not in target.also_reported_by:
@@ -1099,15 +1103,14 @@ class Engine:
         self.emit("peer_pass_start", round=round_, asks=[q.id for q in weighing])
         message = self.brief.peer_pass(self._ask_listing(weighing))
         results = await self.port.ask_seats([(agent, message) for agent in self.docket.roster], round_=round_, phase="seconding")
-        known = set(self.docket.items)
-        closed = {i for i in known if self.docket.items[i].closed}
+        known = set(self.docket.items) | set(self.docket.item_aliases)
         replies: dict[str, dict] = {}
         for agent in self.docket.roster:
             result = results.get(agent) or RawAsk()
             # a seat that fails this pass simply says nothing
             if result.failure or result.rejected:
                 continue
-            replies[agent] = parse_verdict(result.text or "", mode=self.docket.mode, me=agent, known_items=known, closed_items=closed).data
+            replies[agent] = parse_verdict(result.text or "", mode=self.docket.mode, me=agent, known_items=known).data
         # answers and seconds land before any insistence is read, and releases go last: a releasing stance takes
         # its own stop and ask with it
         for agent, data in replies.items():
@@ -1122,7 +1125,7 @@ class Engine:
     def _release_holds(self, agent: str, data: dict, round_: int) -> None:
         """On that pass only one stance is read: a seat letting go of an item it holds."""
         for position in data.get("positions") or []:
-            item_id, stance = position["item"], position["stance"]
+            item_id, stance = self.docket.resolve_item(position["item"]), position["stance"]
             if stance == NEEDS_HUMAN:
                 reason = "opening or keeping a hold is a round's work: leave the item out of this reply"
             elif self.docket.is_standing(item_id, agent):

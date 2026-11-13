@@ -51,6 +51,7 @@ def build(docket: Docket | None, context: ReportContext, *, reason: str = "") ->
         "roster": [{"id": row.id, "name": row.name, "model": row.model} for row in context.roster],
         "chair": {"name": context.chair_name, "model": context.chair_model},
         "items": [],
+        "item_aliases": [],
         "questions": [],
         "notes": [],
         "messages": [],
@@ -66,6 +67,7 @@ def build(docket: Docket | None, context: ReportContext, *, reason: str = "") ->
     if context.aborted_reason:
         out["run"]["aborted_reason"] = context.aborted_reason
     out["items"] = [_item(docket, item_id) for item_id in docket.order]
+    out["item_aliases"] = [[old, docket.resolve_item(new)] for old, new in docket.item_aliases.items()]
     out["questions"] = [_question(docket, qid) for qid in docket.question_order]
     out["notes"] = [_note(docket.human_notes[nid]) for nid in docket.note_order]
     out["messages"] = [dataclasses.asdict(message) for message in docket.human_messages]

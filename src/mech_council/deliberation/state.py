@@ -335,6 +335,8 @@ class Docket:
     roster: list[str] = field(default_factory=list)  # protocol ids, Agent1..N
     items: dict[str, Item] = field(default_factory=dict)
     order: list[str] = field(default_factory=list)
+    #: a folded item's id → the id the chair kept for it: stale references redirect, the report shows no gap
+    item_aliases: dict[str, str] = field(default_factory=dict)
     stances: dict[str, dict[str, Stance]] = field(default_factory=dict)
     signoffs: dict[str, int] = field(default_factory=dict)
     escalations: dict[tuple[str, str], Escalation] = field(default_factory=dict)
@@ -451,6 +453,14 @@ class Docket:
 
     def question(self, qid: str) -> Question | None:
         return self.questions.get(qid)
+
+    def resolve_item(self, item_id: str) -> str:
+        """The id an item now stands under: a folded id follows its alias to the survivor."""
+        seen: set[str] = set()
+        while item_id in self.item_aliases and item_id not in seen:
+            seen.add(item_id)
+            item_id = self.item_aliases[item_id]
+        return item_id
 
     def questions_for_item(self, item_id: str) -> list[Question]:
         return [q for q in (self.questions[i] for i in self.question_order) if q.item_id == item_id]

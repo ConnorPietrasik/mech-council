@@ -26,7 +26,7 @@ from ..sandbox.journal import printable
 from .context import ReportContext
 from .doc import Block, Group, Heading, List, ListItem, Paragraph, Part, Report, T
 from .markdown import render_md
-from .report_plan import note_line
+from .report_plan import folded_ids, note_line
 from .text import caption, severity_key
 
 
@@ -40,6 +40,7 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "") -> Repor
     blocks += _disputed(docket, buckets["disputed"], context)
     blocks += _rejected(docket, buckets["rejected"], context)
     blocks += _never_vetted(docket, buckets["unseen"], context)
+    blocks += folded_ids(docket)
     blocks += _sandbox_writes(context)
     blocks += _sandbox_limits(docket, context)
     blocks += _notes(docket, context)

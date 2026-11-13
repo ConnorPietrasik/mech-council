@@ -67,6 +67,12 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
                 out.append(f"  - {entry}")
         out.append("")
 
+    if docket.item_aliases:
+        out.append(f"## Folded {noun} — name the survivor, not the folded id ({len(docket.item_aliases)})")
+        for old, new in docket.item_aliases.items():
+            out.append(f"- {old} → {docket.resolve_item(new)}")
+        out.append("")
+
     shown_asks, weighing, answered_asks = _ask_sections(docket)
     if shown_asks:
         out.append(f"## Questions for the human ({len(shown_asks)})")

@@ -469,6 +469,60 @@ def test_the_fold_keeps_the_words_of_the_ask_raised_first():
     assert docket.questions["H4"].merged_into == "H3", "the groups the chair worded well still fold"
 
 
+def test_naming_a_stale_ask_says_where_it_went():
+    """A seat that names an ask after it stopped standing gets its fate, not a bare refusal."""
+    docket = docket_with(3)
+    # retracted: the last asker walked away
+    escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
+    escalations.retract(docket, qid="H1", agent="Agent1", round_=2)
+    question, reason = escalations.second(docket, qid="H1", agent="Agent2", round_=3)
+    assert question is None and "Agent1" in reason and "no open question" not in reason
+
+    # answered: the human's word stands
+    escalations.raise_question(docket, text="which colour file?", asker="Agent1", item_id=None, round_=3)
+    ask = docket.questions["H2"]
+    ask.state, ask.answer, ask.answer_round = ANSWERED, "tokens.json", 4
+    _, reason = escalations.second(docket, qid="H2", agent="Agent3", round_=5)
+    assert "tokens.json" in reason and "no open question" not in reason
+
+    # moot: the council settled the item it asked about
+    escalations.raise_question(docket, text="which tenant owns the key?", asker="Agent1", item_id="F1", round_=5)
+    docket.items["F1"].disposition, docket.items["F1"].closed_round = AGREED, 6
+    escalations.moot_item_asks(docket, item_id="F1", disposition=AGREED, round_=6)
+    _, reason = escalations.second(docket, qid="H3", agent="Agent2", round_=7)
+    assert "F1" in reason and "no open question" not in reason
+
+
+def test_naming_an_item_in_an_ask_field_names_the_item():
+    """An item id is not an ask id: the refusal says which one it is, so the seat stops guessing."""
+    docket = docket_with(3)
+    for call in (
+        lambda: escalations.second(docket, qid="F1", agent="Agent2", round_=1),
+        lambda: escalations.answer_by_seat(docket, qid="F1", agent="Agent2", text="it is fine", round_=1),
+        lambda: escalations.insist(docket, qid="F1", agent="Agent1", round_=1, seen=0),
+        lambda: escalations.retract(docket, qid="F1", agent="Agent1", round_=1),
+    ):
+        question, reason = call()
+        assert question is None and reason.startswith("F1 is an item")
+
+
+def test_naming_a_folded_item_in_an_ask_field_names_the_survivor():
+    """A folded id is not an ask either: the refusal points at the id the claim now stands under."""
+    docket = docket_with(3)
+    docket.item_aliases["F2"] = "F1"
+    question, reason = escalations.second(docket, qid="F2", agent="Agent2", round_=1)
+    assert question is None and reason.startswith("F2 was folded into F1")
+
+
+def test_a_folded_item_id_resolves_to_the_survivor_the_fold_reaches():
+    """The chair's fold deletes the duplicate, but the id it deleted keeps answering as the survivor."""
+    docket = docket_with(3)
+    assert docket.resolve_item("F1") == "F1", "an un-folded id is its own survivor"
+    docket.item_aliases["F2"] = "F1"
+    docket.item_aliases["F3"] = "F2"
+    assert docket.resolve_item("F3") == "F1", "a fold of a folded id reaches the survivor"
+
+
 def test_a_fold_cannot_launder_the_answer_a_seat_gave_and_then_asked_about():
     """The fold makes the seat that answered one of the asks it absorbs an asker of the survivor; the answer stays on the record."""
     docket = docket_with(3)
@@ -897,6 +951,14 @@ def test_an_id_from_the_other_ledger_moves_nothing_in_either_ledger():
     assert (docket.human_notes["N1"].state, ask.state) == (STANDING, ASKED), "a crossed id changes neither ledger"
     notes.retract_note(docket, nid="N1", agent="Agent1", round_=3)
     assert escalations.second(docket, qid="N1", agent="Agent2", round_=4)[0] is None, "a retracted note is not an open ask either"
+
+
+def test_a_note_opening_with_a_folded_id_files_under_the_survivor():
+    """A folded id at the head of a note reads as the surviving item, so the link survives the fold."""
+    docket = docket_with(3)
+    docket.item_aliases["F2"] = "F1"
+    assert notes.resolve_note_item(docket, {"text": "F2: the mechanism is a race"}) == "F1"
+    assert notes.resolve_note_item(docket, {"text": "the mechanism is a race"}) is None, "no item named, no link"
 
 
 def test_a_correction_names_the_item_it_corrects():
