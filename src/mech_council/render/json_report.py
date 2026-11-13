@@ -132,6 +132,7 @@ def _question(docket: Docket, qid: str) -> dict:
     return {
         "id": q.id,
         "askers": list(q.askers),
+        "raised_by": list(q.raised_by),
         "blocked_by": list(q.blocked_by),
         "item": q.item_id,
         "raised_round": q.raised_round,

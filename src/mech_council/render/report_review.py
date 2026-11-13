@@ -408,7 +408,8 @@ def _open_questions(docket: Docket, context: ReportContext) -> list[Block]:
                 out.append(ListItem(T("item: ", (item.id, "bold"), f" {item.claim} → ", (state, "code"), f' (reported under "{section}")')))
         else:
             out.append(ListItem(T("stands on its own: no item")))
-        out.append(ListItem(T("asked by: ", _names(question.askers, context))))
+        # a fold empties askers onto the survivor; raised_by keeps the origin
+        out.append(ListItem(T("asked by: ", _names(question.askers or question.raised_by, context))))
         if question.blocked_by:
             out.append(
                 ListItem(

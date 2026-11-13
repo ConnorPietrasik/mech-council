@@ -923,6 +923,7 @@ def _write_human_input(run_dir: str, docket: Docket | None, console: Console) ->
             {
                 "id": q.id,
                 "askers": list(q.askers),
+                "raised_by": list(q.raised_by),
                 "blocked_by": list(q.blocked_by),
                 "item": q.item_id,
                 "raised_round": q.raised_round,

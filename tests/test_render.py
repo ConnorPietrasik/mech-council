@@ -353,6 +353,23 @@ def test_a_retracted_ask_is_reported_as_dropped_by_named_seat():
     assert "withdrawn" in ledger(text, "H1") and "Metic" in section(text, "Open questions")
 
 
+def test_a_folded_ask_still_names_who_raised_it():
+    """The fold moves the askers onto the survivor and empties the folded id's list: neither report
+    may print the folded ask as nobody's."""
+    docket = build()
+    escalations.raise_question(docket, text="which tenant owns the cache key?", asker="Agent1", item_id=None, blocking=False, round_=1)
+    escalations.raise_question(docket, text="who is accountable for tenancy?", asker="Agent2", item_id=None, blocking=False, round_=1)
+    _, reason = escalations.merge_asks(docket, groups=[{"canonical": "H1", "duplicates": ["H2"]}], round_=2)
+    assert reason == "" and docket.questions["H2"].askers == [], "the fold is the case this test stands on"
+
+    block = section(report_review.render(docket, context()), "Open questions").split("### H2")[1]
+    assert "asked by: Senior" in block and "(nobody" not in block
+
+    human_input = section(report_plan.render(docket, context(mode="plan")), "Human input")
+    line = next(row for row in human_input.splitlines() if row.startswith("- H2"))
+    assert "Senior" in line and "(nobody)" not in line
+
+
 def test_a_human_answer_is_attributed_to_the_human_never_to_a_seat():
     docket = build()
     item(docket, "F1", "a call")

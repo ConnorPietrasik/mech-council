@@ -287,7 +287,9 @@ def _human_input(docket: Docket, context: ReportContext) -> list[Block]:
             subs.append(ListItem(T("a seat answered it: the council took that answer as settlement, so this was never put to you")))
         else:
             subs.append(ListItem(T("assumed in its place: whatever the council did with it — never settled")))
-        items.append(ListItem(T(f"{question.id} ({state}) ", _names(question.askers, context), f": {question.text}"), sub=tuple(subs)))
+        # a fold empties askers onto the survivor; raised_by keeps the folded id's own origin
+        who = _names(question.askers or question.raised_by, context)
+        items.append(ListItem(T(f"{question.id} ({state}) ", who, f": {question.text}"), sub=tuple(subs)))
     blocks.append(List(tuple(items)))
     return blocks
 
