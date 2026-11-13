@@ -90,6 +90,26 @@ def test_a_closed_item_still_prints_its_id_so_it_can_be_reopened():
     assert "F1" in text and "agreed" in text
 
 
+def test_a_disputed_item_shows_its_hearing_deadline_and_a_split_is_marked_terminal():
+    """The seats can see both budgets: the disputed item the round the bar rules on, the split that no challenge reopens."""
+    docket = build()
+    entry = item(docket, "F1", "the cache ignores tenants")
+    stance(docket, "F1", "Agent1", state.AGREE)
+    stance(docket, "F1", "Agent2", state.DISAGREE, note="refuted", evidence="x.py:2")
+    stance(docket, "F1", "Agent3", state.ABSTAIN)
+    dispositions.closure_pass(docket, 1)
+    docket.round = 2
+    text = docket_render.render(docket, "Agent1")
+    open_ = section(text, "Open findings")
+    assert "[disputed]" in open_ and "the bar rules in round 4" in open_
+    for round_ in (2, 3, 4):
+        dispositions.closure_pass(docket, round_)
+    assert entry.disposition == state.SPLIT
+    text = docket_render.render(docket, "Agent1")
+    settled = section(text, "Settled findings")
+    assert "F1" in settled and "terminal" in settled
+
+
 def test_a_folded_id_keeps_a_line_pointing_at_its_survivor():
     """The chair's fold deletes the item, but the docket keeps the id's mapping so a stale reference resolves."""
     docket = build()
@@ -196,6 +216,21 @@ def test_every_bucket_lands_where_the_spec_puts_it():
     assert text.index("## Disputed findings") < disputed_line
     assert text.index("## Never vetted") < unseen_line
     assert "F3" in text[text.index("## Never vetted") :]
+
+
+def test_a_split_item_is_reported_as_a_split_not_a_consensus():
+    docket = build()
+    item(docket, "F1", "the bar never met")
+    stance(docket, "F1", "Agent1", state.AGREE)
+    stance(docket, "F1", "Agent2", state.DISAGREE, note="refuted", evidence="x.py:2")
+    stance(docket, "F1", "Agent3", state.ABSTAIN)
+    for round_ in (1, 2, 3, 4):
+        dispositions.closure_pass(docket, round_)
+    assert docket.items["F1"].disposition == state.SPLIT
+    text = report_review.render(docket, context())
+    split = section(text, "Split findings")
+    assert "F1" in split and "the bar never met" in split
+    assert "F1" not in section(text, "Consensus findings"), "a split is not a consensus"
 
 
 def test_an_item_nobody_stanced_says_who_never_saw_it():

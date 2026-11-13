@@ -15,6 +15,7 @@ from ..deliberation.state import (
     REJECTED,
     RETRACTED,
     SKIPPED,
+    SPLIT,
     STANDING,
     UNHEARD,
     UNSEEN,
@@ -38,6 +39,7 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "") -> Repor
     blocks += _consensus(docket, buckets["agreed"], context)
     blocks += _not_fully_vetted(docket, buckets["unheard"] + buckets["human"] + buckets["reopened"], context)
     blocks += _disputed(docket, buckets["disputed"], context)
+    blocks += _split(docket, buckets["split"], context)
     blocks += _rejected(docket, buckets["rejected"], context)
     blocks += _never_vetted(docket, buckets["unseen"], context)
     blocks += folded_ids(docket)
@@ -55,10 +57,20 @@ def render(docket: Docket, context: ReportContext, *, run_dir: str = "") -> str:
 
 
 def _bucket(docket: Docket) -> dict[str, list[Item]]:
-    out: dict[str, list[Item]] = {"agreed": [], "unheard": [], "disputed": [], "rejected": [], "unseen": [], "human": [], "reopened": []}
+    out: dict[str, list[Item]] = {
+        "agreed": [],
+        "unheard": [],
+        "disputed": [],
+        "split": [],
+        "rejected": [],
+        "unseen": [],
+        "human": [],
+        "reopened": [],
+    }
     for item in docket.items.values():
         if item.closed:
-            out["agreed" if item.disposition == AGREED else "rejected"].append(item)
+            key = {AGREED: "agreed", REJECTED: "rejected", SPLIT: "split"}[item.disposition]
+            out[key].append(item)
             continue
         state = derive(docket, item.id)
         if state in (AGREED, REJECTED):  # derived but not yet closed: report the state
@@ -195,6 +207,40 @@ def _disputed(docket: Docket, items: list[Item], context: ReportContext) -> list
                     )
                 )
             )
+        for item_note in item_notes(docket, item.id):
+            out.append(note_line(item_note, context))
+        group.append(List(tuple(out)))
+        blocks.append(Group(tuple(group)))
+    return blocks
+
+
+def _split(docket: Docket, items: list[Item], context: ReportContext) -> list[Block]:
+    blocks: list[Block] = [Heading(2, T(f"Split findings ({len(items)})"))]
+    if not items:
+        return blocks + [Paragraph(T("No dispute outlasted its budget: nothing ended on a split."))]
+    blocks.append(Paragraph(T(("The council disagreed past its bar for the budget of rounds and recorded the split.", "italic"))))
+    for item in _sorted(items):
+        group: list[Block] = [Heading(3, T(f"{item.id} · {item.severity} · {item.claim}"))]
+        out: list[ListItem] = []
+        out.append(ListItem(T(f"closed split in round {item.closed_round}")))
+        for agent in docket.roster:
+            record = docket.stance(item.id, agent)
+            if record is None:
+                continue
+            tag = T(" ", ("declined", "code")) if record.declined else T()
+            out.append(
+                ListItem(
+                    T(
+                        f"{caption(agent, context.captions)} — ",
+                        (record.stance, "bold"),
+                        f" (round {record.round}): {record.note or '(no note)'}",
+                        *([T(f" | evidence: {record.evidence}")] if record.evidence else []),
+                        tag,
+                    )
+                )
+            )
+        for note in item.history:
+            out.append(ListItem(T("history: ", note)))
         for item_note in item_notes(docket, item.id):
             out.append(note_line(item_note, context))
         group.append(List(tuple(out)))
@@ -472,6 +518,7 @@ def _section_for(state: str) -> str:
         UNHEARD: "Not fully vetted",
         UNSEEN: "Never vetted",
         DISPUTED: "Disputed findings",
+        SPLIT: "Split findings",
         HUMAN: "Not fully vetted",
     }.get(state, state)
 

@@ -72,7 +72,8 @@ DECIDE — stance every open decision point, with evidence.
 CONVERGE — `backing` is mandatory and is exactly one of `AgentN`, `merged: <label>` (a
 label you spelled out in a `revised_plan`), or `no_preference`. It is restated every
 round; `abstain` is never a legal backing, and a `merged:` token you never wrote down is not
-{split}
+{split} A label is the identity of a direction: revising your plan keeps its label, so the
+council reads your camp by the plan it stands for, not by the words of the latest revision.
 IMPROVE — new decision points, a revised plan of your own, questions and answers.
 {escalate}
 

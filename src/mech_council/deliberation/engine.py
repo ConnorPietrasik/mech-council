@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from ..extraction import parse_phase0, parse_verdict
 from ..modes.base import adapter_for
 from . import gaps as gap_rules
-from .dispositions import closure_pass, derive
+from .dispositions import MAX_REOPENS, closure_pass, derive
 from .escalations import (
     HELD_BACK,
     NO_HUMAN,
@@ -43,11 +43,11 @@ from .state import (
     DISAGREE,
     GO,
     MAX_FIELD_CHARS,
-    MERGED,
     NEEDS_HUMAN,
     QA,
     ROUND_LIMIT,
     SKIPPED,
+    SPLIT,
     STALEMATE,
     STANDING,
     WAITING,
@@ -307,7 +307,7 @@ class Engine:
         for token in split:
             lines = [f"### {token}"]
             for agent in self.docket.roster:
-                if self.docket.backing.get(agent) != token:
+                if self.docket.direction_origin(agent) != token:
                     continue
                 approach = self.docket.approaches.get(agent)
                 artifact = approach.artifact() if approach else {}
@@ -317,20 +317,9 @@ class Engine:
         return "\n\n".join(blocks)
 
     def _direction_plan(self, token: str) -> dict:
-        if not token.startswith(MERGED):
-            approach = self.docket.approaches.get(token)
-            return approach.artifact() if approach else {}
-        label = token.partition(MERGED)[2].strip()
-        fallback: dict = {}
-        for agent in self.docket.roster:
-            approach = self.docket.approaches.get(agent)
-            if approach is None or self.docket.backing.get(agent) != token:
-                continue
-            for revision in approach.revisions:
-                if revision.get("name") == label:
-                    return revision
-            fallback = fallback or approach.artifact()
-        return fallback
+        # a direction is the seat whose plan it is, so its plan text is that seat's own latest plan
+        approach = self.docket.approaches.get(token)
+        return approach.artifact() if approach else {}
 
     def direction_plan(self, token: str) -> dict:
         """The adopted direction's plan, as the implement run reads it: text and its gated stages."""
@@ -622,14 +611,20 @@ class Engine:
                 )
                 item_id = None
             if item_id and self.docket.items[item_id].closed:
+                item = self.docket.items[item_id]
+                if item.disposition == SPLIT:
+                    hint = "the recorded split stands, no stance reopens it"
+                elif item.reopen_count >= MAX_REOPENS:
+                    hint = f"it was already reopened {item.reopen_count} times, the closure stands"
+                else:
+                    hint = "or stance the item again to reopen it"
                 self.emit(
                     "verdict_ask_refused",
                     member=asker,
                     id=item_id,
                     field="human_input",
                     round=round_,
-                    reason=f"{item_id} is settled as {self.docket.items[item_id].disposition}: ask over no item what the closure left "
-                    "open, or stance the item again to reopen it",
+                    reason=f"{item_id} is settled as {item.disposition}: ask over no item what the closure left open, {hint}",
                 )
                 item_id = None
             question, updated = self._re_or_raise(asker, item_id=item_id, entry=entry, round_=round_)
@@ -989,7 +984,8 @@ class Engine:
         """Close what the seats settled, and moot the deferred asks about the items they settled."""
         for event, fields in closure_pass(self.docket, round_, reopen=reopen):
             self.emit(event, **fields)
-            if event == "item_closed":
+            if event == "item_closed" and fields["disposition"] != SPLIT:
+                # a split is not an answer: the asks about it stay on the record, open and un-mooted
                 for moot, detail in moot_item_asks(self.docket, item_id=fields["id"], disposition=fields["disposition"], round_=round_):
                     self.emit(moot, **detail)
 

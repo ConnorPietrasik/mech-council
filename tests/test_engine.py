@@ -6,8 +6,24 @@ import re
 
 import pytest
 
+from mech_council.deliberation import dispositions
 from mech_council.deliberation.engine import Abort, Engine
-from mech_council.deliberation.state import ABSTAIN, AGREE, AGREED, DECLINED, DEMOTED, RETRACTED, STANDING, WITHDRAWN, Docket, Item, Stance
+from mech_council.deliberation.state import (
+    ABSTAIN,
+    AGREE,
+    AGREED,
+    ASKED,
+    DECLINED,
+    DEMOTED,
+    DISAGREE,
+    RETRACTED,
+    SPLIT,
+    STANDING,
+    WITHDRAWN,
+    Docket,
+    Item,
+    Stance,
+)
 from mech_council.prompts import common
 from mech_council.prompts import plan as plan_text
 from mech_council.prompts.brief import Brief
@@ -1749,6 +1765,85 @@ def test_an_ask_the_seats_settled_on_cannot_be_raised_against_the_item_that_sett
     assert "moot" not in late.markers
 
 
+def test_the_refusal_over_a_settled_item_names_what_will_reopen_it():
+    """The message a seat gets must not promise a reopen the council will not grant: a split reopens
+    on nothing, an exhausted challenge budget on nothing (a fresh closure's stance is covered e2e)."""
+    built, _port, records = engine()
+    docket = built.docket
+    docket.add_item(Item(id="F1", claim="the bar never met", severity="major", opened_round=0))
+    docket.add_item(Item(id="F2", claim="the guard is bypassed", severity="major", opened_round=0))
+    for agent in docket.roster:
+        docket.stances["F1"][agent] = Stance(stance=ABSTAIN, round=1)
+        docket.stances["F2"][agent] = Stance(stance=AGREE, round=1)
+    docket.stances["F1"]["Agent1"] = Stance(stance=AGREE, round=1)
+    docket.stances["F1"]["Agent2"] = Stance(stance=DISAGREE, note="the guard is bypassed", evidence="x.py:2", round=1)
+    for round_ in range(1, 7):
+        if round_ in (2, 4, 6):
+            docket.stances["F2"]["Agent2"] = Stance(stance=DISAGREE, note="new evidence", evidence="x.py:3", round=round_)
+        elif round_ in (3, 5):
+            docket.stances["F2"]["Agent2"] = Stance(stance=AGREE, round=round_)
+        dispositions.closure_pass(docket, round_)
+    assert docket.items["F1"].disposition == SPLIT
+    assert (docket.items["F2"].closed, docket.items["F2"].reopen_count) == (True, 2)
+    built._human_input([{"question": "does the split cover the edge case?", "item": "F1"}], "Agent1", 6)
+    built._human_input([{"question": "is the budget really spent?", "item": "F2"}], "Agent1", 6)
+    refused = {r["id"]: r["reason"] for r in records if r["event"] == "verdict_ask_refused"}
+    assert "no stance reopens" in refused["F1"], refused
+    assert "already reopened 2 times" in refused["F2"], refused
+
+
+def test_an_ask_on_a_split_item_stays_open_in_the_record_but_holds_nothing():
+    """A split settles nothing: the ask about it is never mooted, so the record carries it open,
+    while the ask about a closed item is mooted out — and neither holds the run."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            if ask.who == "Agent1":
+                return payload(findings=[finding("the cache ignores tenants")])
+            if ask.who == "Agent2":
+                return payload(findings=[finding("the export loops every row")])
+            return payload(findings=[])
+        if ask.kind == "merge":
+            return payload(groups=[])
+        positions = []
+        for item in shown_items(ask.text):
+            if item == "F1":
+                entry = {"item": item, "stance": {"Agent1": "agree", "Agent2": "disagree", "Agent3": "abstain"}[ask.who]}
+                if entry["stance"] == "disagree":
+                    entry.update(note="the key path bypasses it", evidence="x.py:2")
+            else:
+                entry = {"item": item, "stance": "agree"}
+            positions.append(entry)
+        asks = []
+        if ask.round == 1:
+            if ask.who == "Agent1":
+                asks.append({"question": "which side of the split holds?", "item": "F1"})
+            if ask.who == "Agent3":
+                asks.append({"question": "does the export need a config?", "item": "F2"})
+        if ask.who == "Agent3":  # the same question every round: the run's only movement, so it never goes stale
+            return payload(
+                positions=positions, human_input=asks, questions=[{"to": "Agent2", "question": "what does x.py:2 show?"}], signoff=True
+            )
+        if ask.who == "Agent2" and ask.round >= 2:
+            return payload(
+                positions=positions, human_input=asks, answers=[{"to": "Agent3", "answer": "it bypasses the guard"}], signoff=True
+            )
+        return payload(positions=positions, human_input=asks, signoff=True)
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=4)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert (built.docket.items["F1"].closed, built.docket.items["F1"].disposition) == (True, SPLIT)
+    split_ask = next(q for q in built.docket.questions.values() if q.item_id == "F1")
+    closed_ask = next(q for q in built.docket.questions.values() if q.item_id == "F2")
+    assert split_ask.state == ASKED and not split_ask.moot_with, "a split is not an answer: its ask stays open in the record"
+    assert closed_ask.state == WITHDRAWN and closed_ask.moot_with == "F2"
+    assert outcome == "consensus", [r["event"] for r in records]
+
+
 def test_a_declared_stop_outranks_the_closure_that_would_moot_its_ask():
     """A majority saying the run cannot go on without you outranks the seats settling the item."""
     import asyncio
@@ -2519,7 +2614,8 @@ def test_a_split_on_the_last_round_is_asked_however_busy_the_council_was():
 
 
 def test_renaming_a_merge_is_no_movement_to_a_split():
-    """The clock counts camps, not labels: renaming the merge every round moves nothing, and the split is asked at three."""
+    """The clock counts camps, not labels: renaming the merge every round moves nothing, and the
+    run is stale — so the split is asked at two, a full round before it used to be."""
     import asyncio
 
     def reply(ask):
@@ -2534,9 +2630,71 @@ def test_renaming_a_merge_is_no_movement_to_a_split():
         return await built.run(), built, records
 
     outcome, built, records = asyncio.run(main())
-    assert next(r for r in records if r["event"] == "direction_ask")["round"] == 3, "the camps never changed, whatever they were called"
-    assert built.docket.direction_ask().options == ["Agent1: do it → done", "merged: v3: do it → done"], "the current label is the menu's"
+    assert next(r for r in records if r["event"] == "direction_ask")["round"] == 2, "the camps never changed, whatever they were called"
+    options = built.docket.direction_ask().options
+    assert options == ["Agent1: do it → done", "Agent2: do it → done"], "a label no plan spells out is the backer's own plan"
     assert outcome == "needs_human"
+
+
+def test_a_council_that_agrees_on_one_plan_converges_however_each_seat_words_its_backing():
+    """The round-4 record: every seat backs one plan, and its owner backs it under its own label.
+    That is one direction, so there is no split to ask about and no round to spend on one."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(approach=dict(PLANS))
+        if ask.kind == "compare":
+            return payload(agreed=[], conflicts=[], uncovered=[])
+        if ask.who == "Agent2":
+            return payload(
+                positions=[],
+                backing="merged: gate",
+                signoff=True,
+                revised_plan={"name": "gate", "text": "the gated plan", "stages": [PLANS["stages"][0]]},
+            )
+        return payload(positions=[], backing="Agent2", signoff=True)
+
+    async def main():
+        built, _port, records = engine(reply=reply, mode="plan", max_rounds=4)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus"
+    assert built.docket.direction_ask() is None, "every seat is on one plan: there is no split to ask about"
+    assert not [r for r in records if r["event"] == "direction_ask"]
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1], "the second round would be spent on nothing"
+
+
+def test_a_holdout_gets_its_budget_and_the_bar_rules_so_the_run_ends():
+    """The round-10 docket: one seat's reasoned objection stands every round. The objection gets a
+    hearing of full rounds, the bar then rules, and the run ends — one holdout cannot veto forever."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return payload(findings=[finding("the cache ignores tenants")] if ask.who == "Agent1" else [])
+        if ask.kind == "merge":
+            return payload(groups=[])
+        positions = [{"item": item, "stance": "agree"} for item in shown_items(ask.text)]
+        if ask.who == "Agent3":  # the one who objects, objecting on the record, every round
+            positions = [{**p, "stance": "disagree", "note": "the key path bypasses it", "evidence": "x.py:2"} for p in positions]
+            if positions:
+                return payload(positions=positions, questions=[{"to": "Agent2", "question": "what does x.py:2 show?"}], signoff=True)
+        if ask.who == "Agent2" and ask.round >= 2:
+            return payload(positions=positions, answers=[{"to": "Agent3", "answer": "it bypasses the guard"}], signoff=True)
+        return payload(positions=positions, signoff=True)
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=10)
+        return await built.run(), built, records
+
+    outcome, built, records = asyncio.run(main())
+    assert outcome == "consensus", [r["event"] for r in records]
+    item = built.docket.items["F1"]
+    assert (item.closed, item.disposition) == (True, "agreed")
+    assert any("bar held" in entry for entry in item.history), item.history
+    assert [r["round"] for r in records if r["event"] == "round_summary"] == [1, 2, 3, 4], "the hearing is three rounds, not ten"
 
 
 def test_a_split_menu_offers_the_directions_in_ids_and_prints_them_in_names():
@@ -2572,11 +2730,11 @@ def test_a_split_menu_offers_the_directions_in_ids_and_prints_them_in_names():
     ask = built.docket.direction_ask()
     assert ask.options == [
         "Agent1: do it → done",
-        "merged: ship the gate first: the gate is green → the helper is called",
-    ]
+        "Agent2: the gate is green → the helper is called",
+    ], "the direction is the seat's plan, keyed to the seat, whatever its latest label is"
     menu = render_ask_set(built.docket, [ask], names=NAMES, waiting=True)
     assert "1) Metic: do it → done" in menu, menu
-    assert "2) the merge `ship the gate first`: the gate is green" in menu, menu
+    assert "2) Senior: the gate is green" in menu, menu
     assert "Metic gates before anything ships" in menu and "Metic buys a safe first release" in menu, menu
     assert "Agent" not in menu, "the console leaves an id where the human needs a name"
     assert "Agent1" in ask.text, "what the seats are shown keeps the id they answer with"

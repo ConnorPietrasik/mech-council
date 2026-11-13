@@ -24,11 +24,10 @@ from .state import (
     ANSWERED,
     ASKED,
     CHAIR_ID,
-    DECLINED,
     IMPLEMENTED,
     MAX_FIELD_CHARS,
+    MERGED,
     NEEDS_OUTCOME,
-    NO_PREFERENCE,
     PARTIAL,
     SKIPPED,
     Docket,
@@ -304,9 +303,10 @@ class Implement:
             self._adopted(token, "consensus", "every planner backs it")
             return token
         counts: dict[str, int] = {}
-        for backing in plan_docket.backing.values():
-            if backing not in (None, NO_PREFERENCE, DECLINED):  # the same camps directions() counts: a decline is not one
-                counts[backing] = counts.get(backing, 0) + 1
+        for agent in plan_docket.roster:
+            origin = plan_docket.direction_origin(agent)  # the same camps directions() counts: a decline is not one
+            if origin:
+                counts[origin] = counts.get(origin, 0) + 1
         if counts:
             best = max(sorted(counts), key=lambda t: counts[t])
             if counts[best] >= plan_docket.bar():  # bar() is the strict-majority threshold: n//2 + 1
@@ -315,6 +315,9 @@ class Implement:
         message = impl_text.pick_task(self.goal, [(t, engine.direction_option(t)[:300]) for t in plan_docket.directions()])
         # the D1 tie-break is the run's chair's pass (D2): the planner crew is done with its own
         picked = (await self._port(self.crews["builder"]).chair_pick(message)).get("backing") or ""
+        if picked.startswith(MERGED):
+            # a label the chair answers with is the writer's plan: read it as that seat's direction
+            picked = plan_docket.direction_for(picked, CHAIR_ID)
         if picked not in plan_docket.directions():
             raise Abort(f"the run's chair picked {picked!r}, which is not one of the plans' directions")
         self._adopted(picked, "chair", "the run's chair picked it")

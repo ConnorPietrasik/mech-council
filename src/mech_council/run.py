@@ -382,7 +382,7 @@ async def _deliberate(council: Council, members: Members, console: Console, brak
         max_rounds=council.max_rounds,
         grace_rounds=council.grace_rounds,
         names=names,
-        emit=_emitter(console, names, council.human),
+        emit=_emitter(console, names, council.human, council.verbosity),
     )
     watchdog = Watchdog(council=council, lanes=lanes, chair=chair, console=console)
     watchdog.start()
@@ -429,7 +429,7 @@ async def _implement_deliberate(crews: Crews, console: Console, brake: Brake, do
             checkpoint=checkpoint,
             console=console,
             plan_file=plan_file,
-            emit=_emitter(console, crews.names(), crews["builder"].council.human),
+            emit=_emitter(console, crews.names(), crews["builder"].council.human, crews["builder"].council.verbosity),
         ),
     )
 
@@ -447,7 +447,7 @@ async def _fix_deliberate(crews: Crews, console: Console, brake: Brake, docket: 
             checkpoint=checkpoint,
             console=console,
             review_file=review_file,
-            emit=_emitter(console, crews.names(), crews["builder"].council.human),
+            emit=_emitter(console, crews.names(), crews["builder"].council.human, crews["builder"].council.verbosity),
         ),
     )
 
@@ -490,11 +490,15 @@ def _messenger(lanes: Lanes):
     return send
 
 
-def _emitter(console: Console, names: dict[str, str], human: str):
+def _emitter(console: Console, names: dict[str, str], human: str, verbosity: int):
+    # per-item churn: the event stream takes it at every verbosity, the log line only at debug
+    debug_events = ("item_closed", "item_reopened")
 
     def emit(name: str, **fields) -> None:
         fields = {key: value for key, value in fields.items() if not callable(value)}
         console.event(name, **fields)
+        if verbosity < DEBUG and name in debug_events:
+            return
         line = _summary_line(name, fields, names, human=human)
         if line:
             console.say(line)
@@ -511,6 +515,13 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
         return f"chair merged {fields['groups']} duplicate group(s)"
     if name == "chair_compare":
         return f"chair comparison: {fields['agreed']} agreed point(s), {fields['conflicts']} conflict(s), {fields['uncovered']} uncovered"
+    if name == "item_closed":
+        return f"{fields['id']} closed {fields['disposition']} in round {fields['round']}"
+    if name == "item_reopened":
+        return (
+            f"{fields['id']} reopened in round {fields['round']} by {name_of(fields['challenger'], names)} "
+            f"({fields['reason']}) — was {fields['prior_disposition']} in round {fields['prior_round']}"
+        )
     if name == "direction_ask":
         held = ", ".join(direction_label(token, names) for token in fields["directions"])
         tail = {

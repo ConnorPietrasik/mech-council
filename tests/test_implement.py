@@ -816,6 +816,40 @@ def test_a_majority_backed_direction_is_adopted_and_a_split_goes_to_the_run_chai
     assert chosen == "aborted"
 
 
+def test_the_chair_may_name_a_direction_by_the_label_its_plan_carries():
+    """A merged label is the writer's plan, not a new direction: the chair's pick of it resolves
+    to the seat the direction is keyed on, so it is a pick, not an invention."""
+    import asyncio
+    import types
+    from typing import cast
+
+    from mech_council.deliberation.engine import Engine
+    from mech_council.deliberation.implement import Implement
+    from mech_council.deliberation.state import Approach, Docket, Execution
+
+    class PickPort:
+        async def chair_pick(self, message):
+            return {"backing": "merged: gate"}
+
+    docket = Docket(mode="plan", goal="g", roster=["Agent1", "Agent2", "Agent3"], chair_name="Chair", seconding=True, human="blocking")
+    docket.backing = {"Agent1": "Agent1", "Agent2": "Agent2", "Agent3": "Agent3"}
+    docket.approaches["Agent2"] = Approach(agent="Agent2", original="plan two")
+    docket.approaches["Agent2"].revisions.append({"name": "gate", "round": 1, "text": "the gated plan", "stages": []})
+    host = types.SimpleNamespace(
+        docket=docket,
+        execution=Execution(),
+        goal="g",
+        names={a: a for a in docket.roster},
+        console=types.SimpleNamespace(say=lambda line: None),
+        crews={"builder": "builder-crew"},
+    )
+    host._port = lambda crew: PickPort()
+    host._adopted = types.MethodType(Implement._adopted, host)
+    engine = types.SimpleNamespace(direction_option=lambda t: t)
+    chosen = asyncio.run(Implement._resolve_direction(cast("Implement", host), docket, cast("Engine", engine)))
+    assert (chosen, host.execution.adopted_how) == ("Agent2", "chair")
+
+
 def test_declined_backings_are_not_a_majority_camp():
     """A planner that declined to name a backing is not a camp: a decline that meets the bar never
     wins the adoption — the run's chair picks from the directions the plans named instead."""

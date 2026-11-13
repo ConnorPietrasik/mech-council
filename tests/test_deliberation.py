@@ -20,10 +20,12 @@ from mech_council.deliberation.state import (
     OPEN,
     REJECTED,
     SKIPPED,
+    SPLIT,
     STANDING,
     UNHEARD,
     UNSEEN,
     WITHDRAWN,
+    Approach,
     Docket,
     Item,
     Stance,
@@ -150,16 +152,143 @@ def test_closed_items_are_never_re_derived():
 
 
 def test_a_reasoned_challenge_reopens_and_the_ladder_applies_again():
+    """The reopen is a dispute, not a wipe: the closure's supporters keep their stances."""
     docket = docket_with(3)
     for agent in docket.roster:
         stance(docket, "F1", agent, AGREE, round=1)
+    docket.stances["F1"]["Agent3"] = Stance(stance=ABSTAIN, round=1, declined=True)
     dispositions.closure_pass(docket, 1)
     stance(docket, "F1", "Agent2", DISAGREE, note="wrong on X", round=2)
     events = dispositions.closure_pass(docket, 2)
     assert [name for name, _ in events] == ["item_reopened"]
     assert docket.items["F1"].disposition == OPEN
-    assert docket.stances["F1"] == {}, "reopen clears every stance record, declined included"
-    assert dispositions.derive(docket, "F1") == UNSEEN
+    # The supporters' records survive, so the item re-derives as the dispute — never back to unseen.
+    # The declined record is dropped: a seat the ladder gave up on is asked again.
+    assert sorted(docket.stances["F1"]) == ["Agent1", "Agent2"]
+    assert docket.stances["F1"]["Agent2"].stance == DISAGREE
+    assert dispositions.derive(docket, "F1") == DISPUTED
+
+
+def test_a_needs_human_challenge_keeps_its_hold_across_the_reopen():
+    """A hold raised as the challenge is why the item reopens: the escalation survives, the item
+    stands human for the defense — it does not re-close under the same disposition."""
+    docket = docket_with(3)
+    for agent in docket.roster:
+        stance(docket, "F1", agent, AGREE, round=1)
+    dispositions.closure_pass(docket, 1)
+    stance(docket, "F1", "Agent3", NEEDS_HUMAN, note="which side?", round=2)
+    events = dispositions.closure_pass(docket, 2)
+    assert [name for name, _ in events] == ["item_reopened"]
+    assert docket.is_standing("F1", "Agent3"), "the hold is the challenge: it stands"
+    assert dispositions.derive(docket, "F1") == HUMAN
+    assert dispositions.closure_pass(docket, 3) == [], "a standing hold holds the item open"
+    assert not docket.items["F1"].closed
+
+
+def test_the_closure_events_carry_everything_the_console_line_prints():
+    """The emitted fields must round-trip through the run's line: a missing key kills a debug run."""
+    from mech_council.run import _summary_line
+
+    docket = docket_with(3)
+    for agent in docket.roster:
+        stance(docket, "F1", agent, AGREE, round=1)
+    dispositions.closure_pass(docket, 1)
+    stance(docket, "F1", "Agent2", DISAGREE, note="wrong on X", round=2)
+    for name, fields in dispositions.closure_pass(docket, 2):
+        assert _summary_line(name, fields, {"Agent2": "Senior"}), name
+    stance(docket, "F1", "Agent2", AGREE, round=3)
+    for name, fields in dispositions.closure_pass(docket, 3):
+        assert _summary_line(name, fields, {"Agent2": "Senior"}), name
+
+
+def test_item_events_are_recorded_at_every_verbosity_and_printed_only_at_debug():
+    """Per-item churn always goes to the record; the log line is a debug convenience."""
+    import io
+
+    from mech_council.cli import DEBUG, SUMMARY
+    from mech_council.console import Console
+    from mech_council.run import _emitter
+
+    for verbosity in (0, SUMMARY):
+        console = Console(stream=io.StringIO(), verbosity=verbosity)
+        _emitter(console, {}, "human", verbosity)("item_closed", id="F1", disposition="agreed", round=2)
+        assert [r["event"] for r in console.events()] == ["item_closed"], verbosity
+        assert [line for line in console.lines if not line.startswith("[event]")] == [], verbosity
+    console = Console(stream=io.StringIO(), verbosity=DEBUG)
+    _emitter(console, {"Agent2": "Senior"}, "human", DEBUG)(
+        "item_reopened", id="F1", prior_disposition="agreed", prior_round=1, challenger="Agent2", reason="cited evidence", round=2
+    )
+    assert [r["event"] for r in console.events()] == ["item_reopened"]
+    assert [line for line in console.lines if not line.startswith("[event]")], "at debug the reopen prints a summary line"
+
+
+def test_an_item_spends_its_challenge_budget_and_the_closure_stands():
+    docket = docket_with(3)
+    for agent in docket.roster:
+        stance(docket, "F1", agent, AGREE, round=1)
+    dispositions.closure_pass(docket, 1)
+    for challenger, round_ in (("Agent2", 2), ("Agent3", 4)):
+        stance(docket, "F1", challenger, DISAGREE, note="new evidence", round=round_)
+        assert [name for name, _ in dispositions.closure_pass(docket, round_)] == ["item_reopened"], f"challenge {round_}"
+        for agent in docket.roster:
+            stance(docket, "F1", agent, AGREE, round=round_ + 1)
+        assert [name for name, _ in dispositions.closure_pass(docket, round_ + 1)] == ["item_closed"], f"re-closed after challenge {round_}"
+        assert docket.items["F1"].closed, f"re-closed after challenge {round_}"
+    stance(docket, "F1", "Agent2", DISAGREE, note="more evidence", round=6)
+    assert dispositions.closure_pass(docket, 6) == []
+    assert (docket.items["F1"].closed, docket.items["F1"].disposition) == (True, AGREED)
+    assert any("refused" in entry for entry in docket.items["F1"].history)
+
+
+def test_a_dispute_that_outlives_its_budget_closes_by_the_bar():
+    """One reasoned objection holds an item disputed; on the budget the bar rules over the refutation."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE)
+    stance(docket, "F1", "Agent2", AGREE)
+    stance(docket, "F1", "Agent3", DISAGREE, note="refuted by X")
+    for round_ in (1, 2, 3):
+        dispositions.closure_pass(docket, round_)
+        assert not docket.items["F1"].closed, f"round {round_}: the refutation is still within its budget"
+    events = dispositions.closure_pass(docket, 4)
+    assert [name for name, _ in events] == ["item_closed"]
+    assert (docket.items["F1"].closed, docket.items["F1"].disposition) == (True, AGREED)
+    assert any("bar held" in entry for entry in docket.items["F1"].history)
+
+
+def test_a_dispute_below_the_bar_freezes_as_the_recorded_split():
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE)
+    stance(docket, "F1", "Agent2", DISAGREE, note="refuted by X")
+    stance(docket, "F1", "Agent3", ABSTAIN)
+    for round_ in (1, 2, 3, 4):
+        dispositions.closure_pass(docket, round_)
+    assert (docket.items["F1"].closed, docket.items["F1"].disposition) == (True, SPLIT)
+    assert any("split" in entry for entry in docket.items["F1"].history)
+    # A split is terminal: a later challenge reopens nothing, a human hold included.
+    stance(docket, "F1", "Agent3", DISAGREE, note="fresh evidence", round=5)
+    assert dispositions.closure_pass(docket, 5) == []
+    stance(docket, "F1", "Agent1", NEEDS_HUMAN, note="which side?")
+    assert dispositions.closure_pass(docket, 6) == []
+    assert docket.items["F1"].disposition == SPLIT
+
+
+def test_an_episode_resumed_after_unseen_gets_a_full_budget_again():
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE)
+    stance(docket, "F1", "Agent2", AGREE)
+    stance(docket, "F1", "Agent3", DISAGREE, note="refuted")
+    dispositions.closure_pass(docket, 1)
+    dispositions.closure_pass(docket, 2)
+    docket.stances["F1"] = {}
+    dispositions.closure_pass(docket, 3)  # unseen: the episode ends
+    stance(docket, "F1", "Agent1", AGREE, round=4)
+    stance(docket, "F1", "Agent2", AGREE, round=4)
+    stance(docket, "F1", "Agent3", DISAGREE, note="refuted again", round=4)
+    for round_ in (4, 5, 6):
+        dispositions.closure_pass(docket, round_)
+        assert not docket.items["F1"].closed, f"round {round_}: the resumed episode still has its budget"
+    dispositions.closure_pass(docket, 7)
+    assert docket.items["F1"].disposition == AGREED
 
 
 def test_the_report_s_closure_pass_closes_and_never_reopens():
@@ -274,6 +403,44 @@ def test_a_declined_split_ask_is_a_needs_human_while_two_directions_stand():
     assert termination.evaluate(docket)[0] == termination.NEEDS_OUTCOME
 
 
+def test_a_merged_label_names_its_writers_plan_not_a_new_direction():
+    docket = docket_with(3, mode="plan", items=0)
+    docket.approaches["Agent3"] = Approach(agent="Agent3", original="the original plan")
+    docket.approaches["Agent3"].revisions.append({"name": "gate", "round": 1, "text": "the gated plan", "stages": []})
+    docket.backing.update({"Agent1": "Agent3", "Agent2": "merged: gate", "Agent3": "merged: gate"})
+    assert docket.directions() == ("Agent3",)
+    assert docket.camps() == (("Agent1", "Agent2", "Agent3"),)
+
+
+def test_a_label_the_backer_wrote_beats_a_same_named_plan_earlier_in_the_roster():
+    docket = docket_with(3, mode="plan", items=0)
+    docket.approaches["Agent1"] = Approach(agent="Agent1", original="plan one")
+    docket.approaches["Agent1"].revisions.append({"name": "gate", "round": 1, "text": "a gate", "stages": []})
+    docket.approaches["Agent3"] = Approach(agent="Agent3", original="plan three")
+    docket.approaches["Agent3"].revisions.append({"name": "gate", "round": 1, "text": "a different gate", "stages": []})
+    docket.backing["Agent3"] = "merged: gate"
+    assert docket.direction_origin("Agent3") == "Agent3", "the backer's own spelling of the label is their own plan"
+
+
+def test_a_merged_label_no_plan_spells_out_reads_as_the_backers_own_plan():
+    docket = docket_with(3, mode="plan", items=0)
+    docket.backing.update({"Agent1": "Agent2", "Agent3": "merged: never-written", "Agent2": NO_PREFERENCE})
+    assert docket.directions() == ("Agent2", "Agent3")
+    assert docket.camps() == (("Agent1",), ("Agent3",))
+
+
+def test_all_seats_on_one_plan_is_one_direction_however_they_word_it():
+    """The round-4 record: every seat backing one plan, one of them via its own label — that is convergence."""
+    docket = docket_with(3, mode="plan", items=0)
+    for agent in docket.roster:
+        docket.signoffs[agent] = 1
+    docket.approaches["Agent3"] = Approach(agent="Agent3", original="the plan")
+    docket.approaches["Agent3"].revisions.append({"name": "gate", "round": 1, "text": "the gated plan", "stages": []})
+    docket.backing.update({"Agent1": "Agent3", "Agent2": "Agent3", "Agent3": "merged: gate"})
+    agreed, token, _reason = termination.direction_rule(docket)
+    assert (agreed, token) == (True, "Agent3")
+
+
 def test_an_ask_needs_a_second_seat_before_the_human_sees_it():
     docket = docket_with(3)
     question, _ = escalations.raise_question(docket, text="which brand palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
@@ -285,6 +452,31 @@ def test_an_ask_needs_a_second_seat_before_the_human_sees_it():
     assert escalations.second(docket, qid="H9", agent="Agent3", round_=2)[0] is None, "no such ask to back"
     escalations.second(docket, qid="H1", agent="Agent1", round_=2)
     assert question.askers == ["Agent1", "Agent2"], "a seat that asks it already cannot second it"
+
+
+def test_a_split_does_not_moot_the_asks_about_it():
+    """A split is not an answer: a seconded ask on a split item stands — showable, and no
+    held-back reason — while an agreed closure is the council's answer and moots its asks."""
+    docket = docket_with(3)
+    stance(docket, "F1", "Agent1", AGREE)
+    stance(docket, "F1", "Agent2", DISAGREE, note="refuted by X", evidence="x.py:2")
+    stance(docket, "F1", "Agent3", ABSTAIN)
+    for round_ in (1, 2, 3, 4):
+        dispositions.closure_pass(docket, round_)
+    assert docket.items["F1"].disposition == SPLIT
+    question, _ = escalations.raise_question(docket, text="which side holds?", asker="Agent1", item_id="F1", blocking=False, round_=4)
+    escalations.second(docket, qid="H1", agent="Agent2", round_=5)
+    assert not escalations.moot(docket, question), "a split settles nothing: the ask stands"
+    assert escalations.showable(docket, question), "seconded and un-mooted: the human may still answer it"
+    assert escalations.held_back(docket, question) == ""
+    settled = docket_with(3)
+    for agent in settled.roster:
+        stance(settled, "F1", agent, AGREE)
+    dispositions.closure_pass(settled, 1)
+    other, _ = escalations.raise_question(settled, text="which side was right?", asker="Agent1", item_id="F1", blocking=False, round_=1)
+    assert escalations.moot(settled, other), "an agreed closure is the council's answer: its asks are moot"
+    assert not escalations.showable(settled, other)
+    assert escalations.held_back(settled, other) == escalations.MOOT
 
 
 def test_only_the_split_ask_and_the_knob_bypass_the_second():

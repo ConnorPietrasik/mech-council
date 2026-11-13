@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from ..deliberation.dispositions import derive
+from ..deliberation.dispositions import DISPUTE_ROUNDS, MAX_REOPENS, derive
 from ..deliberation.escalations import MOOT, SETTLED, UNBACKED, effective_class, held_back, showable, stop_holders
 from ..deliberation.notes import folded_away
-from ..deliberation.state import ANSWERED, ASKED, NO_PREFERENCE, STANDING, Docket, Question
+from ..deliberation.state import ANSWERED, ASKED, DISPUTED, NO_PREFERENCE, SPLIT, STANDING, Docket, Question
 from ..modes.base import adapter_for
 
 
@@ -28,6 +28,9 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
         if item.evidence:
             out.append(f"    evidence: {item.evidence}")
         out.append(f"    severity: {item.severity} · raised by {_who(item.raised_by, viewer)}")
+        if state == DISPUTED:
+            since = item.disputed_since or docket.round
+            out.append(f"    the bar rules in round {since + DISPUTE_ROUNDS}: agreed if the bar is met, the split recorded if not")
         if item.also_reported_by:
             out.append(f"    also reported by {_who(item.also_reported_by, viewer)}")
         for agent in docket.roster:
@@ -60,9 +63,14 @@ def render(docket: Docket, viewer: str, *, extra_sections: list[tuple[str, str]]
 
     closed = docket.closed_items()
     if closed:
-        out.append(f"## Settled {noun} — challenge them by stancing, never by silence ({len(closed)})")
+        out.append(
+            f"## Settled {noun} — a challenge is a fresh stance with new evidence; each item takes {MAX_REOPENS} challenges, "
+            f"then the closure stands ({len(closed)})"
+        )
         for item in closed:
             out.append(f"- {item.id} [{item.disposition}, round {item.closed_round}] {item.claim}")
+            if item.disposition == SPLIT:
+                out.append("  - terminal: the recorded split stands, no challenge reopens it")
             for entry in item.history:
                 out.append(f"  - {entry}")
         out.append("")

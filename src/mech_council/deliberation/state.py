@@ -6,7 +6,7 @@ AGREE, DISAGREE, NEEDS_HUMAN, ABSTAIN = "agree", "disagree", "needs_human", "abs
 STANCES = (AGREE, DISAGREE, NEEDS_HUMAN, ABSTAIN)
 
 OPEN = "open"
-AGREED, UNHEARD, UNSEEN, DISPUTED, HUMAN, REJECTED = ("agreed", "unheard", "unseen", "disputed", "human", "rejected")
+AGREED, UNHEARD, UNSEEN, DISPUTED, HUMAN, REJECTED, SPLIT = ("agreed", "unheard", "unseen", "disputed", "human", "rejected", "split")
 
 STANDING, WITHDRAWN, RETIRED, DEMOTED = "standing", "withdrawn", "retired", "demoted"
 ASKED, ANSWERED, SKIPPED = "asked", "answered", "skipped"
@@ -88,10 +88,14 @@ class Item:
     history: list[str] = field(default_factory=list)  # "consensus in 2, reopened in 4 by Agent3"
     markers: list[str] = field(default_factory=list)  # sandbox_artifact / sandbox_limit
     artifact_by: str = ""  # the member whose upper holds an artifact
+    #: how many times this item has been reopened: its challenge budget
+    reopen_count: int = 0
+    #: the round a current disputed episode began, 0 when not disputed
+    disputed_since: int = 0
 
     @property
     def closed(self) -> bool:
-        return self.disposition in (AGREED, REJECTED)
+        return self.disposition in (AGREED, REJECTED, SPLIT)
 
 
 @dataclass
@@ -434,18 +438,45 @@ class Docket:
     def standing_escalations(self, item_id: str) -> list[Escalation]:
         return [e for (iid, _a), e in self.escalations.items() if iid == item_id and e.state == STANDING]
 
+    def direction_origin(self, agent: str) -> str:
+        """The direction a seat's backing stands for, keyed to the seat whose plan it is.
+
+        `merged: <label>` names the plan its writer spelled out, so the direction is that
+        seat's plan — the label is its wording, not a new direction.
+        """
+        token = self.backing.get(agent)
+        if token in (None, NO_PREFERENCE, DECLINED):
+            return ""
+        return self.direction_for(token, agent)
+
+    def direction_for(self, token: str, backer: str) -> str:
+        """The direction a raw backing token names: a seat token is itself; a merged label, the seat
+        whose plan it is — the label's speller first, then the roster, and the backer where no plan
+        spells the label out."""
+        if not token.startswith(MERGED):
+            return token
+        label = token.partition(MERGED)[2].strip()
+        own = self.approaches.get(backer)
+        if own is not None and any(revision.get("name") == label for revision in own.revisions):
+            return backer
+        for seat in self.roster:
+            approach = self.approaches.get(seat)
+            if approach is not None and any(revision.get("name") == label for revision in approach.revisions):
+                return seat
+        return backer
+
     def directions(self) -> tuple[str, ...]:
-        """The directions the seats actually named."""
-        named = {self.backing[a] for a in self.roster if self.backing.get(a) not in (None, NO_PREFERENCE, DECLINED)}
+        """The directions the seats actually name, by the seat whose plan each is."""
+        named = {origin for origin in (self.direction_origin(a) for a in self.roster) if origin}
         return tuple(sorted(named))
 
     def camps(self) -> tuple[tuple[str, ...], ...]:
         """The seats grouped by the direction they name."""
         groups: dict[str, list[str]] = {}
         for agent in self.roster:
-            token = self.backing.get(agent)
-            if token not in (None, NO_PREFERENCE, DECLINED):
-                groups.setdefault(token, []).append(agent)
+            origin = self.direction_origin(agent)
+            if origin:
+                groups.setdefault(origin, []).append(agent)
         return tuple(sorted(tuple(group) for group in groups.values()))
 
     def direction_ask(self) -> Question | None:

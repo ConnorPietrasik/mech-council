@@ -50,7 +50,7 @@ def signature(docket: Docket) -> tuple:
     # Who signed, not when.
     parts = [tuple(items), tuple(sorted(docket.signoffs)), escalations, questions, answered_qa, answered_human]
     if docket.mode == "plan":
-        parts.append(tuple(sorted(docket.backing.items())))
+        parts.append(tuple(sorted((agent, docket.direction_origin(agent)) for agent in docket.roster)))
         parts.append(sum(len(approach.revisions) for approach in docket.approaches.values()))
     return tuple(parts)
 

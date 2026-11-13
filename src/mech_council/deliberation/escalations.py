@@ -11,6 +11,7 @@ from .state import (
     MAX_FIELD_CHARS,
     NEEDS_HUMAN,
     RETIRED,
+    SPLIT,
     STANDING,
     WITHDRAWN,
     Docket,
@@ -38,8 +39,9 @@ def stop_holders(docket: Docket, question: Question) -> list[str]:
 
 
 def showable(docket: Docket, question: Question) -> bool:
-    """Whether an ask is shown to the human: the decision it asks about is still open, a second seat
-    backs it, and no peer answer holds it back unless a seat that raised the ask itself insisted.
+    """Whether an ask is shown to the human: its item was not settled (a split settles nothing), a
+    second seat backs it, and no peer answer holds it back unless a seat that raised the ask itself
+    insisted.
     """
     if moot(docket, question):
         return False
@@ -56,11 +58,14 @@ def settlements(question: Question) -> dict[str, str]:
 
 
 def moot(docket: Docket, question: Question) -> bool:
-    """Whether the council has settled the very item this ask asks about — unless seats are declared to stop for it."""
+    """Whether the council has settled the very item this ask asks about — a split is a recorded
+    disagreement, not a settlement, so its asks stand — unless seats are declared to stop for it."""
     if question.item_id is None or question.direction_ask:
         return False
     item = docket.items.get(question.item_id)
-    return item is not None and item.closed and len(stop_holders(docket, question)) < docket.bar()
+    if item is None or item.disposition == SPLIT:
+        return False
+    return item.closed and len(stop_holders(docket, question)) < docket.bar()
 
 
 #: why an ask is kept from the human, as the reports print it

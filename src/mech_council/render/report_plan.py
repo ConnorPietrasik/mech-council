@@ -6,7 +6,6 @@ from ..deliberation.notes import item_notes, report_notes
 from ..deliberation.state import (
     ANSWERED,
     ASKED,
-    MERGED,
     NO_PREFERENCE,
     REJECTED,
     RETRACTED,
@@ -57,8 +56,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
     if not converged:
         blocks.append(Paragraph(T("The council did not settle a direction. The candidates, side by side:")))
         items: list[ListItem] = []
-        for token in sorted({t for t in docket.backing.values() if t != NO_PREFERENCE}):
-            backers = [a for a in docket.roster if docket.backing.get(a) == token]
+        for token in docket.directions():
+            backers = [a for a in docket.roster if docket.direction_origin(a) == token]
             items.append(ListItem(T((token, "code"), f" — backed by {_names(backers, context)}")))
         shrug = [a for a in docket.roster if docket.backing.get(a) == NO_PREFERENCE]
         if shrug:
@@ -83,7 +82,7 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
         blocks.append(List(tuple(items)))
         blocks.append(Paragraph(T("No direction is printed for you to follow: nobody chose one.")))
         return blocks
-    artifact, note = resolve_direction(docket, converged, context.captions)
+    artifact, note = resolve_direction(docket, converged)
     token_items: list[ListItem] = [ListItem(T("converged token: ", (converged, "code")))]
     if context.interrupted is not None:
         cut_note = f"{context.interrupted.name} ended the run with this direction holding the majority, not settled"
@@ -101,25 +100,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
     return blocks
 
 
-def resolve_direction(docket: Docket, token: str, captions: dict[str, str]) -> tuple[dict | None, str]:
-    if token.startswith(MERGED):
-        label = token.partition(MERGED)[2].strip()
-        for agent in docket.roster:
-            approach = docket.approaches.get(agent)
-            if approach is None:
-                continue
-            for revision in reversed(approach.revisions):
-                if revision.get("name") == label:
-                    return revision, ""
-        best = _fullest_backer(docket, token)
-        if best is None:
-            return None, "the merge was never written down and no seat backs it"
-        agent, artifact = best
-        return artifact, (
-            f"the merge was never written down — this is {caption(agent, captions)}'s own plan, the fullest one backing that token"
-        )
-    agent = token
-    approach = docket.approaches.get(agent)
+def resolve_direction(docket: Docket, token: str) -> tuple[dict | None, str]:
+    approach = docket.approaches.get(token)
     if approach is not None:
         return approach.artifact(), ""
     best = _fullest_backer(docket, token)
@@ -129,7 +111,7 @@ def resolve_direction(docket: Docket, token: str, captions: dict[str, str]) -> t
 def _fullest_backer(docket: Docket, token: str):
     best = None
     for agent in docket.roster:
-        if docket.backing.get(agent) != token:
+        if docket.direction_origin(agent) != token:
             continue
         approach = docket.approaches.get(agent)
         if approach is None:
@@ -142,7 +124,7 @@ def _fullest_backer(docket: Docket, token: str):
 
 
 def _stages(docket: Docket, context: ReportContext, converged: str | None) -> list[Block]:
-    artifact, _ = resolve_direction(docket, converged, context.captions) if converged else (None, "")
+    artifact, _ = resolve_direction(docket, converged) if converged else (None, "")
     blocks: list[Block] = [Heading(2, T("Stages"))]
     if not artifact or not artifact.get("stages"):
         return blocks + [Paragraph(T("No stages were settled."))]
