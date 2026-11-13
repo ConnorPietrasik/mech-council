@@ -69,10 +69,17 @@ def probe(name: str) -> tuple[int | None, str | None]:
 
 
 def _auth(api_key: object) -> str | None:
-    # A literal key only: "$NAME" and "!command" forms are pi's to resolve, and "none" is a placeholder, not a key
-    if isinstance(api_key, str) and api_key not in ("", "none") and not api_key.startswith(("$", "!")):
-        return f"Bearer {api_key}"
-    return None
+    """A Bearer header from the entry's apiKey: a literal, or `$NAME`/`${NAME}` read from the environment.
+    `!command` is pi's to run, and "none" a placeholder: the probe goes unauthenticated then."""
+    if not isinstance(api_key, str) or api_key in ("", "none") or api_key.startswith("!"):
+        return None
+    if api_key.startswith("${") and api_key.endswith("}"):
+        key = os.environ.get(api_key[2:-1], "")
+    elif api_key.startswith("$"):
+        key = os.environ.get(api_key[1:], "")
+    else:
+        key = api_key
+    return f"Bearer {key}" if key else None
 
 
 def _fetch(url: str, auth: str | None) -> object | None:

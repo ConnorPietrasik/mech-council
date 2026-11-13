@@ -51,6 +51,45 @@ def test_a_projects_models_json_is_not_pi_s_so_the_probe_ignores_it(ground, monk
     assert entry is not None and entry["baseUrl"].endswith("8080/v1"), "pi reads only the agent dir's models.json"
 
 
+def _answer_capturing(monkeypatch, payload):
+    """Stub urlopen: serve a JSON body and record the outgoing Authorization header."""
+    seen: dict[str, str | None] = {}
+
+    def fake_urlopen(request, timeout=None):
+        seen["auth"] = request.get_header("Authorization")
+        return io.BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return seen
+
+
+def test_an_env_api_key_is_resolved_so_the_probe_sends_it(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text(MODEL.replace('"apiKey": "none"', '"apiKey": "$PROBE_TEST_KEY"'))
+    monkeypatch.setenv("PROBE_TEST_KEY", "sekrit")
+    seen = _answer_capturing(monkeypatch, {"server": {"max_num_seqs": 4}})
+    assert probe.probe("omnissiah") == (4, None)
+    assert seen["auth"] == "Bearer sekrit"
+
+
+def test_a_braced_env_api_key_is_resolved_too(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text(MODEL.replace('"apiKey": "none"', '"apiKey": "${PROBE_TEST_KEY}"'))
+    monkeypatch.setenv("PROBE_TEST_KEY", "sekrit")
+    seen = _answer_capturing(monkeypatch, {"server": {"max_num_seqs": 4}})
+    assert probe.probe("omnissiah") == (4, None)
+    assert seen["auth"] == "Bearer sekrit"
+
+
+def test_an_unset_env_api_key_probes_without_auth(ground, monkeypatch):
+    _, agent = ground
+    (agent / "models.json").write_text(MODEL.replace('"apiKey": "none"', '"apiKey": "$NO_SUCH_PROBE_KEY"'))
+    monkeypatch.delenv("NO_SUCH_PROBE_KEY", raising=False)
+    seen = _answer_capturing(monkeypatch, {"server": {"max_num_seqs": 4}})
+    assert probe.probe("omnissiah") == (4, None)
+    assert seen["auth"] is None
+
+
 def test_a_provider_that_answers_but_reports_no_limit_is_untagged(ground, monkeypatch):
     _, agent = ground
     (agent / "models.json").write_text(MODEL)
