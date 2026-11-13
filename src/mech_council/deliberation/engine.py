@@ -56,6 +56,7 @@ from .state import (
     Item,
     RoundRecord,
     Stance,
+    normalize_text,
     one_line,
 )
 from .termination import evaluate
@@ -520,22 +521,33 @@ class Engine:
     def _answers(self, entries: list[dict], agent: str, round_: int) -> None:
         for entry in entries:
             target = entry.get("to") or ""
-            qid = (entry.get("question") or "").strip()
-            qa = self.docket.qa.get(qid)
-            if qa is None and target:
-                qa = self._latest_unanswered(answered_by=agent, addressed_to=target)
+            said = (entry.get("question") or "").strip()
+            qa = self.docket.qa.get(said.lstrip("#").upper())
             if qa is None:
-                self.emit("qa_answer_unmatched", member=agent, question=qid, round=round_)
-                continue
+                qa, open_ids = self._match_open_answer(agent, target, said)
+                if qa is None:
+                    self.emit("qa_answer_unmatched", member=agent, question=said, round=round_, candidates=open_ids)
+                    continue
             if qa.to != agent:
                 # only the seat the question was put to may answer it
                 self.emit("qa_answer_not_addressed", member=agent, question=qa.id, asked_of=qa.to, round=round_)
                 continue
             qa.answer = one_line(entry.get("text") or entry.get("answer") or "")
 
-    def _latest_unanswered(self, *, answered_by: str, addressed_to: str):
-        matches = [qa for qa in self.docket.qa.values() if qa.asker == addressed_to and qa.to == answered_by and not qa.answer]
-        return max(matches, key=lambda qa: qa.round, default=None)
+    def _match_open_answer(self, agent: str, target: str, said: str) -> tuple[QA | None, list[str]]:
+        """An answer without a q-id: the open question it names, or the one it can only be.
+
+        Several open and no name: refuse with the candidates — a guess is how a wrong answer lands
+        under the wrong question.
+        """
+        open_qa = [qa for qa in self.docket.qa.values() if qa.to == agent and not qa.answer and (not target or qa.asker == target)]
+        if len(open_qa) == 1:
+            return open_qa[0], []
+        if said:
+            hits = [qa for qa in open_qa if normalize_text(qa.text) == normalize_text(said)]
+            if len(hits) == 1:
+                return hits[0], []
+        return None, [qa.id for qa in open_qa]
 
     def _questions(self, entries: list[dict], agent: str, round_: int) -> None:
         for entry in entries:

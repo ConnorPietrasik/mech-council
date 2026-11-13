@@ -619,6 +619,15 @@ def _summary_line(name: str, fields: dict, names: dict[str, str], human: str = "
         return f"{name_of(fields['seat'], names)} answered {fields['id']} {said}"
     if name == "question_unseconded":
         return f"{fields['id']} has no second seat: it is reported, never asked"
+    if name == "qa_answer_unmatched":
+        who = name_of(fields["member"], names)
+        said = fields.get("question") or ""
+        if said:
+            said = f" (named {said[:60]}…)" if len(said) > 60 else f" (named {said})"
+        line = f"{who} answered no open question in `answers`{said}"
+        if fields.get("candidates"):
+            line += f" — open: {', '.join(fields['candidates'])}"
+        return line
     if name == "verdict_ask_refused":
         named = "item" if fields["field"] == "positions" else "ask"
         return f"{name_of(fields['member'], names)} named {named} {fields['id']} in `{fields['field']}`: {fields['reason']}"

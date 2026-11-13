@@ -2897,6 +2897,62 @@ def test_an_answer_naming_nobody_is_logged_and_kept_out_of_the_docket():
     assert not [qa for qa in built.docket.qa.values() if qa.answer]
 
 
+def test_an_answer_with_no_id_among_several_open_questions_lands_nowhere():
+    """Several open questions from one peer: without a q-id the harness refuses, it does not pick the newest."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.who == "Agent1" and ask.round == 1:
+            return {
+                "positions": [],
+                "questions": [{"to": "Agent2", "question": "why is the key safe?"}, {"to": "Agent2", "question": "which host runs it?"}],
+            }
+        if ask.who == "Agent2" and ask.round == 2:
+            return {"positions": [], "answers": [{"to": "Agent1", "answer": "no, by inode"}]}
+        return stance_all(ask, "agree" if ask.who != "Agent3" else "disagree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    assert not [qa for qa in built.docket.qa.values() if qa.answer], "a guess landed the answer on one of the open questions"
+    refused = [r for r in records if r["event"] == "qa_answer_unmatched" and r["member"] == "Agent2"]
+    assert refused, records
+    assert sorted(refused[0]["candidates"]) == ["Q1", "Q2"], "the refusal names what the seat can answer instead"
+
+
+def test_an_answer_named_by_its_text_lands_on_the_question_that_text_is():
+    """Several open questions: a quoted question text settles the one it is, no refusal."""
+    import asyncio
+
+    def reply(ask):
+        if ask.phase == "phase0":
+            return phase0_first(ask.who, "a bug")
+        if ask.who == "Agent1" and ask.round == 1:
+            return {
+                "positions": [],
+                "questions": [{"to": "Agent2", "question": "why is the key safe?"}, {"to": "Agent2", "question": "which host runs it?"}],
+            }
+        if ask.who == "Agent2" and ask.round == 2:
+            return {"positions": [], "answers": [{"to": "Agent1", "question": "which host runs it?", "answer": "the panel host"}]}
+        return stance_all(ask, "agree" if ask.who != "Agent3" else "disagree")
+
+    async def main():
+        built, _port, records = engine(reply=reply, max_rounds=2)
+        await built.run()
+        return built, records
+
+    built, records = asyncio.run(main())
+    by_id = {qa.id: qa for qa in built.docket.qa.values()}
+    assert by_id["Q2"].answer == "the panel host", "the quoted text names the second question"
+    assert not by_id["Q1"].answer
+    assert not [r for r in records if r["event"] == "qa_answer_unmatched"], records
+
+
 # --------------------------------------------------- Escalation defenses
 
 
