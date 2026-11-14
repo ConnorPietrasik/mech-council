@@ -104,7 +104,7 @@ async def _reap(member: Member) -> None:
 async def _await_exit(member: Member) -> None:
     """Wait for the member's own exit without awaiting its transport, which `close_stdin` has already half closed."""
     while member.proc.returncode is None:
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.005)
 
 
 def sweep(namespaces: set[int], *, keep_fds: list[int], exclude: set[int] | None = None) -> SweepResult:

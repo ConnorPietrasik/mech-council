@@ -142,8 +142,11 @@ def test_the_hurried_disposal_asks_with_a_closed_stdin_before_it_kills(tmp_path)
     assert asyncio.run(scenario()) == 0, "a -9 is a KILL that landed before the closed stdin could settle the member"
 
 
-def test_a_member_ignoring_term_escalates_to_kill_and_still_goes(tmp_path):
+def test_a_member_ignoring_term_escalates_to_kill_and_still_goes(tmp_path, monkeypatch):
     """The dispose escalation order, on a child that will not take TERM."""
+    # the graces are what this test's child refuses; shortening them keeps the order, drops the wait
+    monkeypatch.setattr(lifecycle, "STDIN_CLOSE_GRACE_S", 0.05)
+    monkeypatch.setattr(lifecycle, "TERM_GRACE_S", 0.05)
     stubborn = subprocess.Popen(
         [sys.executable, "-c", "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(300)\n"],
         stdin=subprocess.PIPE,

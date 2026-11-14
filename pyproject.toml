@@ -28,7 +28,7 @@ Repository = "https://github.com/ConnorPietrasik/mech-council"
 Issues = "https://github.com/ConnorPietrasik/mech-council/issues"
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-timeout"]
+test = ["pytest", "pytest-timeout", "pytest-xdist"]
 dev = ["ruff==0.17.2", "mypy==2.4.0"]
 
 [project.scripts]
@@ -68,9 +68,12 @@ select = ["E4", "E7", "E9", "F", "I", "E501", "W291", "W292", "W293", "W605",
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not slow' -p no:cacheprovider"
+addopts = "-m 'not slow' -n auto -p no:cacheprovider"
 timeout = 120
 timeout_method = "signal"
+# xdist workers are multi-threaded (execnet), and the suite forks from them (tests/support/namespaces.py,
+# test_sandbox.py); each fork comes from the test's own thread, the worker's other threads parked in C-level reads
+filterwarnings = ["ignore:This process \\(pid=\\d+\\) is multi-threaded, use of fork\\(\\) may lead to deadlocks in the child\\.:DeprecationWarning"]
 markers = [
     "slow: real-pi smoke test that spends tokens (deselected by default)",
     "sandbox: the overlay/mount family, needs plain-fs fixture ground",

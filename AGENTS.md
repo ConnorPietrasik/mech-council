@@ -7,6 +7,7 @@
 ## Tests
 - Only write regression tests for bugs a future edit is extremely likely to reintroduce. 
 - Tests assert behavior, not wording.
+- An xdist worker cannot serve a debugger: to stop in one, run it in-process with `.venv/bin/pytest -n0 tests/path.py::test_name`.
 
 ## Definition of Done
 - ruff, mypy, and pytest must pass.
