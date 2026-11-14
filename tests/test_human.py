@@ -96,7 +96,7 @@ def test_the_menu_prints_its_options_numbered():
     docket = build()
     question = offered(docket, "key it on the tenant", "drop the cache")
     question.context = "no caller passes a tenant id"
-    text = render_ask_set(docket, [question], names=NAMES, waiting=True)
+    text = render_ask_set(docket, [question], names=NAMES, waiting=True, terminal=False)
     assert "context: no caller passes a tenant id" in text
     assert "1) key it on the tenant" in text and "2) drop the cache" in text
 
@@ -146,10 +146,18 @@ def test_an_id_and_a_colon_answer_nothing_and_leave_the_ask_open():
 def test_the_listing_prints_even_when_nothing_waits():
     docket = build()
     escalations.raise_question(docket, text="what is the retention policy?", asker="Agent2", item_id=None, blocking=False, round_=1)
-    text = render_ask_set(docket, list(docket.questions.values()), names=NAMES, waiting=False)
+    text = render_ask_set(docket, list(docket.questions.values()), names=NAMES, waiting=False, terminal=False)
     assert "keeps working" in text and "H1" in text and "asked by Senior" in text
     assert "Agent2" not in text, "the checkpoint is console: it names the asker, the id stays in `human_input.json`"
     assert "retention policy" in text
+
+
+def test_the_terminal_listing_says_the_run_is_ending_not_working():
+    """A terminal checkpoint that does not wait (the ceiling, no grace left) ends the run: the header must not promise otherwise."""
+    docket = build()
+    escalations.raise_question(docket, text="what is the retention policy?", asker="Agent2", item_id=None, blocking=False, round_=1)
+    text = render_ask_set(docket, list(docket.questions.values()), names=NAMES, waiting=False, terminal=True)
+    assert "is ending" in text and "keeps working" not in text
 
 
 def test_the_listing_tells_the_human_what_a_seat_answered_and_who_wants_the_wait():
@@ -159,7 +167,7 @@ def test_the_listing_tells_the_human_what_a_seat_answered_and_who_wants_the_wait
     escalations.answer_by_seat(docket, qid="H1", agent="Agent2", text="the config names tenant_id")
     escalations.insist(docket, qid="H1", agent="Agent1", round_=2, seen=1)
     escalations.stop_for(docket, qid="H1", agent="Agent1", round_=2)
-    text = render_ask_set(docket, [docket.questions["H1"]], names=NAMES, waiting=True)
+    text = render_ask_set(docket, [docket.questions["H1"]], names=NAMES, waiting=True, terminal=False)
     assert "Senior: the config names tenant_id" in text, "the answer the asker said was not enough"
     assert "was not enough" in text and "asked that the run wait for this: Metic" in text
     assert "Agent2" not in text, "the checkpoint speaks in names"
@@ -176,7 +184,7 @@ def test_the_split_ask_prints_as_a_choice_of_directions():
         options=["Agent1: land it first", "Agent2: cut over now"],
         round_=2,
     )
-    text = render_ask_set(docket, [ask], names=NAMES, waiting=True)
+    text = render_ask_set(docket, [ask], names=NAMES, waiting=True, terminal=False)
     assert "the council will not converge" in text and "[blocking]" in text and "asked by Gavel" in text
     assert "1) Metic: land it first" in text and "2) Senior: cut over now" in text
     assert "Agent1" not in text, "the menu is stored in the ids the seats answer with and printed in the names the human knows"
@@ -197,7 +205,7 @@ def test_taking_a_split_option_records_the_id_and_echoes_the_name():
 
 def test_an_empty_checkpoint_says_so_and_waits_for_nothing():
     docket = build()
-    assert "no question for you" in render_ask_set(docket, [], names=NAMES, waiting=False)
+    assert "no question for you" in render_ask_set(docket, [], names=NAMES, waiting=False, terminal=False)
 
 
 # --------------------------------------------------------------------------- the wait rule

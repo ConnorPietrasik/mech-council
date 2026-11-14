@@ -553,8 +553,9 @@ def stated_by(config: ConfigFile, name: str, chain: list[str], key: str) -> str 
 
 
 def _pi_cli_stated_by_project(config: ConfigFile, chain: list[str]) -> bool:
-    """Whether the project file is what asked for this `pi_cli`."""
-    return stated_by(config, chain[0], chain[1:], "pi_cli") == config.project_layer
+    """Whether the project file is what asked for this `pi_cli`: a key stated nowhere is nobody's ask."""
+    stated = stated_by(config, chain[0], chain[1:], "pi_cli")
+    return stated is not None and stated == config.project_layer
 
 
 def resolve_pi(explicit: str | None, project: str, *, from_project: bool = False) -> tuple[str, str]:

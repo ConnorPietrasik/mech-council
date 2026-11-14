@@ -90,12 +90,20 @@ def _spoken(question: Question, names: dict[str, str]) -> tuple[str, str]:
     return spoken(question.text, names), spoken(question.context, names)
 
 
-def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool) -> str:
+def render_ask_set(
+    docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool, terminal: bool
+) -> str:
     from .render.text import name_of
 
     if not listing:
         return "the council has no question for you right now"
-    lines = ["the council needs you" if waiting else "open questions (the run keeps working):"]
+    if waiting:
+        heading = "the council needs you"
+    elif terminal:
+        heading = "open questions (the run is ending):"
+    else:
+        heading = "open questions (the run keeps working):"
+    lines = [heading]
     for question in listing:
         where = f" on {question.item_id}" if question.item_id else " (the council will not converge)" if question.direction_ask else ""
         askers = ", ".join(name_of(a, names) for a in question.askers) or "the chair"
@@ -202,7 +210,7 @@ class Checkpoint:
         result = CheckpointOutcome(waited=False)
         if notes:
             self.console.say(render_notes(notes, names=self.names))
-        self.console.say(render_ask_set(self.docket, listing, names=self.names, waiting=waiting))
+        self.console.say(render_ask_set(self.docket, listing, names=self.names, waiting=waiting, terminal=terminal))
         if not listing and not ask_set:
             return result
         if not waiting:

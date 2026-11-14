@@ -912,6 +912,20 @@ def test_a_project_layer_pi_cli_may_not_live_inside_the_project(tmp_path):
     assert config_mod.resolve_pi(PI, project, from_project=True)[0] == os.path.realpath(PI), "and a project may name one outside itself"
 
 
+def test_an_unstated_pi_cli_is_not_the_projects_ask(tmp_path):
+    """A `pi_cli` stated nowhere must not arm the refusal: the missing key is not the project's ask."""
+    path = write(tmp_path, '[councils.review]\ngoal = "g"\n\n[councils.review.chair]\nname = "Chair"\n')
+    loaded = config_mod.load_config(path)
+    assert loaded.project_layer is None, "a single file has no project layer"
+    assert config_mod._pi_cli_stated_by_project(loaded, ["review"]) is False
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project = project_dir / "council.toml"
+    project.write_text(f'[councils.review]\npi_cli = "{PI}"\n', encoding="utf-8")
+    layered = config_mod.load_layers([path, str(project)], project_layer=str(project))
+    assert config_mod._pi_cli_stated_by_project(layered, ["review"]) is True, "the armed path is unchanged"
+
+
 def test_an_unresolvable_pi_leaves_nothing_behind(tmp_path, canary):
     """The startup ordering: a config-stage failure creates no run directory anywhere."""
     text = body().replace(PI, "no-such-pi-cli")

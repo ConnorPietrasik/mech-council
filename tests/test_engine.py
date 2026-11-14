@@ -2732,7 +2732,7 @@ def test_a_split_menu_offers_the_directions_in_ids_and_prints_them_in_names():
         "Agent1: do it → done",
         "Agent2: the gate is green → the helper is called",
     ], "the direction is the seat's plan, keyed to the seat, whatever its latest label is"
-    menu = render_ask_set(built.docket, [ask], names=NAMES, waiting=True)
+    menu = render_ask_set(built.docket, [ask], names=NAMES, waiting=True, terminal=False)
     assert "1) Metic: do it → done" in menu, menu
     assert "2) Senior: the gate is green" in menu, menu
     assert "Metic gates before anything ships" in menu and "Metic buys a safe first release" in menu, menu

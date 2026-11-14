@@ -125,8 +125,8 @@ def _pi(loaded: config_mod.ConfigFile | None, shape: list[tuple[str, config_mod.
         for name, council, _refusal in shape:
             if council is None:
                 continue
-            stated = config_mod.stated_by(loaded, name, council.extends, "pi_cli") == loaded.project_layer
-            checks.add((council.pi_cli or None, stated))
+            by_layer = config_mod.stated_by(loaded, name, council.extends, "pi_cli")
+            checks.add((council.pi_cli or None, by_layer is not None and by_layer == loaded.project_layer))
     if not checks:
         checks = {(None, False)}
     lines: list[str] = []
