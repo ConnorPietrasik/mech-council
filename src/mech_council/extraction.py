@@ -36,7 +36,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "positions": ("positions", "stances", "verdicts", "items", "calls", "reviews"),
     "new_items": ("new_items", "new_findings", "findings", "new", "additions", "new_topics", "topics"),
     "answers": ("answers", "replies", "responses", "qa_answers", "q_a"),
-    "questions": ("questions", "agent_questions", "asks", "queries"),
+    "questions": ("questions", "agent_questions", "asks"),
     "human_input": ("human_input", "human", "needs_human", "questions_for_human", "human_questions", "escalations"),
     "signoff": ("signoff", "sign_off", "signed_off", "approved", "approve", "approval", "done"),
     "summary": ("summary", "overview", "wrap_up"),

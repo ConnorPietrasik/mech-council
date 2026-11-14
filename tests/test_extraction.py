@@ -131,6 +131,35 @@ def test_synonyms_land_on_the_canonical_field():
     assert entry == {"item": "F2", "stance": "disagree", "note": "it is guarded", "evidence": "x.py:9"}
 
 
+def test_no_word_is_claimed_by_two_fields_of_one_pass():
+    """A payload word claimed by two fields of one pass lands in both."""
+    from itertools import combinations
+
+    from mech_council import extraction
+
+    allowed = {
+        # phase 0: the whole reply may be the approach, so its summary doubles as the plan's claim
+        ("claim", "summary", "summary"),
+        # `plan` is the verdict's revised plan and the phase-0 approach; no single pass reads both
+        ("approach", "revised_plan", "plan"),
+    }
+    # every pass's field tuple, found by the `_FIELDS` suffix so a new pass is covered automatically
+    passes = {
+        name: value
+        for name, value in vars(extraction).items()
+        if name.endswith("_FIELDS") and isinstance(value, tuple) and value and all(isinstance(f, str) for f in value)
+    }
+    assert passes, "no *_FIELDS tuples found in extraction"
+    for name, fields in sorted(passes.items()):
+        claims: dict[str, set[str]] = {}
+        for field in fields:
+            for word in (field, *extraction.SYNONYMS.get(field, ())):
+                claims.setdefault(extraction.fold(word), set()).add(field)
+        for word, who in claims.items():
+            for a, b in combinations(sorted(who), 2):
+                assert (a, b, word) in allowed, f"`{word}` is claimed by both `{a}` and `{b}` in {name}"
+
+
 # --------------------------------------------------------------------------- stances
 
 

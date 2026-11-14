@@ -90,9 +90,7 @@ def _spoken(question: Question, names: dict[str, str]) -> tuple[str, str]:
     return spoken(question.text, names), spoken(question.context, names)
 
 
-def render_ask_set(
-    docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool, terminal: bool
-) -> str:
+def render_ask_set(docket: Docket, listing: list[Question], *, names: dict[str, str], waiting: bool, terminal: bool) -> str:
     from .render.text import name_of
 
     if not listing:
