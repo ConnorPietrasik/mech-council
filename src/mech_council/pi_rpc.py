@@ -70,6 +70,7 @@ class PiRpc:
         self._seq = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._reader_task: asyncio.Task | None = None
+        self._pump_failed: Exception | None = None  # what the pump died on, when it is not a closed stdout
         self._ask: asyncio.Future | None = None
         self._answer: Answer | None = None
         self.activity: Activity | None = None
@@ -103,11 +104,19 @@ class PiRpc:
                     self._dispatch(line)
         except asyncio.CancelledError, ChildGone:
             raise
-        except Exception:
-            pass
+        except Exception as failure:
+            # the pump, not the child, is what died: the child may still be alive
+            self._pump_failed = failure
         finally:
             self.alive = False
-            self._fail_pending(ChildGone(f"{self.label}: child stdout closed"))
+            self._fail_pending(self._gone("child stdout closed"))
+
+    def _gone(self, why: str) -> ChildGone:
+        """ChildGone for callers: a stored pump failure is named, otherwise the given reason."""
+        if self._pump_failed is not None:
+            cause = self._pump_failed
+            return ChildGone(f"{self.label}: the pump died ({type(cause).__name__}: {cause}) — the child may still be alive")
+        return ChildGone(f"{self.label}: {why}")
 
     def _dispatch(self, line: bytes) -> None:
         line = line.rstrip(b"\r")
@@ -227,7 +236,7 @@ class PiRpc:
 
     async def _request(self, command: dict, timeout: float | None = None) -> dict:
         if not self.alive:
-            raise ChildGone(f"{self.label}: child is gone")
+            raise self._gone("child is gone")
         self._seq += 1
         request_id = f"{self.label}-{self._seq}"
         payload = {"id": request_id, **command}

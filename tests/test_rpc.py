@@ -24,7 +24,7 @@ from .conftest import FAKE_PI
 pytestmark = pytest.mark.timeout(60)
 
 
-async def start(script=None, *, extra_env=None, argv_extra=()):
+async def start(script=None, *, extra_env=None, argv_extra=(), transcript=None):
     env = dict(os.environ, FAKE_PI_QUIET="1")
     if script is not None:
         env["FAKE_PI_SCRIPT"] = script if isinstance(script, str) else json.dumps(script)
@@ -44,7 +44,7 @@ async def start(script=None, *, extra_env=None, argv_extra=()):
     )
     events: list[dict] = []
     assert child.stdout is not None and child.stdin is not None, "both halves were PIPEd above"
-    rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin, on_event=events.append)
+    rpc = PiRpc(label="Agent1", stdout=child.stdout, stdin=child.stdin, on_event=events.append, transcript=transcript)
     rpc.start()
     return child, rpc, events  # the list is the transcript sink the spawner would hand over
 
@@ -307,6 +307,30 @@ def test_a_child_that_closes_its_stdout_ends_every_wait():
             await rpc.stop()
 
     run(main())
+
+
+def test_a_pump_failure_is_named_as_the_cause_not_a_dead_child():
+    """The pump can die while the child lives — a broken transcript sink here; disk-full there.
+    The failed ask must carry the pump's error, not a diagnosis of a dead child."""
+
+    class NoSpace:
+        def append_raw(self, chunk):
+            raise OSError(28, "No space left on device")
+
+    async def main():
+        child, rpc, _events = await start(transcript=NoSpace())
+        try:
+            with pytest.raises(ChildGone) as raised:
+                await rpc.ask("go")
+            return str(raised.value), child.returncode
+        finally:
+            await rpc.stop()
+            child.terminate()
+            await child.wait()
+
+    message, returncode = run(main())
+    assert "No space left on device" in message, "the pump's own failure, not a closed stdout"
+    assert returncode is None, "the child never died: only the pump did"
 
 
 def test_a_child_that_refuses_our_commands_is_a_protocol_error_not_a_retry():

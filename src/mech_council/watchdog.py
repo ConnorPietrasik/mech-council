@@ -85,18 +85,22 @@ class Watchdog:
             label = decision.get("agent") or decision.get("id") or ""
             action = decision.get("action") or ""
             reason = decision.get("reason") or decision.get("note") or ""
-            if action == "keep":
+            if action == "restart":
+                file_base = self.lanes.resolve(label)
+                if file_base is None:
+                    self.console.event("watchdog_unknown_agent", member=label)
+                    self.console.say(f"watchdog: the chair named {label!r}, which is not a member of this run — nobody is restarted")
+                    continue
+                self.console.event("watchdog_restart", member=label, reason=reason)
+                self.console.say(f"watchdog: restarting {self.lanes.display_for(file_base)} ({reason or 'no reason given'})")
+                await self._restart(file_base, reason or "watchdog restart")
+            elif action == "keep":
                 if reason:
                     self.console.event("watchdog_keep", member=label, note=reason)
-                continue
-            file_base = self.lanes.resolve(label)
-            if file_base is None:
-                self.console.event("watchdog_unknown_agent", member=label)
-                self.console.say(f"watchdog: the chair named {label!r}, which is not a member of this run — nobody is restarted")
-                continue
-            self.console.event("watchdog_restart", member=label, reason=reason)
-            self.console.say(f"watchdog: restarting {self.lanes.display_for(file_base)} ({reason or 'no reason given'})")
-            await self._restart(file_base, reason or "watchdog restart")
+            else:
+                # a restart wipes the seat's session, so only a spelled-out restart may spend it
+                self.console.event("watchdog_unknown_action", member=label, action=action)
+                self.console.say(f"watchdog: {action or 'nothing'} is not keep or restart for {label!r} — the seat is kept")
 
     async def _restart(self, file_base: str, why: str) -> None:
         try:

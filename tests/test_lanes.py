@@ -893,6 +893,19 @@ def test_a_pass_naming_an_id_that_is_not_on_the_roster_restarts_nobody():
     assert any(e["type"] == "watchdog_unknown_agent" for e in console.events)
 
 
+def test_an_action_the_chair_invented_keeps_the_seat_not_restarting_it():
+    """A restart wipes the seat's session, so only a spelled-out `restart` may spend it."""
+
+    async def main():
+        _board, members, console, watchdog = chair_board({})
+        await watchdog.enforce({"decisions": [{"agent": "Agent1", "action": "reboot", "reason": "?"}]})
+        return members.members["seat1-one"].restarts, console
+
+    restarts, console = run(main())
+    assert restarts == 0, "the invented action is not a restart"
+    assert any(e["type"] == "watchdog_unknown_action" for e in console.events)
+
+
 def test_watchdog_sec_zero_disables_the_tick_and_says_so():
     async def main():
         _board, _members, console, watchdog = chair_board({}, watchdog=0)
