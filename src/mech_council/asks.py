@@ -50,7 +50,6 @@ class Outcome:
     rejected: bool = False  # extraction refused the message
     repairs: int = 0
     prompts: int = 0
-    seconds: float = 0.0
 
 
 def needs_repair(parsed: object) -> bool:
@@ -314,7 +313,6 @@ class Lanes:
     ) -> str:
         spec = self.members.spec_for(file_base)
         who = self.members.display_for(file_base)
-        started = time.monotonic()
         detail = "no answer"
         for attempt in (0, 1):
             first_prompt = self.prompts.get(file_base, 0) == 0
@@ -325,7 +323,6 @@ class Lanes:
                 if answer.errored:
                     detail = answer.error_message or f"stopReason: {answer.stop_reason or 'error'}"
                 else:
-                    outcome.seconds += time.monotonic() - started
                     return answer.text
                 if classify_unusable and first_prompt:
                     raise AskUnusable(who, spec.provider, spec.model, detail, self.prompts.get(file_base, 0))

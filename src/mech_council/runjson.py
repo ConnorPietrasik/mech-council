@@ -209,8 +209,3 @@ def _write(manifest: RunManifest) -> None:
         json.dump(manifest.data, handle, indent=2, ensure_ascii=False, default=str)
         handle.write("\n")
     os.replace(tmp, manifest.path)
-
-
-def read(path: str) -> dict:
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
