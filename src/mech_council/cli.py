@@ -16,7 +16,8 @@ class ConfigError(Exception):
 
 
 #: What a run's directory keeps beyond the report, lowest level first: summary adds `run.json`,
-#: detail adds `human_input.json`, debug adds `events.jsonl`, full adds the verbatim transcripts.
+#: detail adds `human_input.json` (and, for plan runs, the full deliberation `report.md`),
+#: debug adds `events.jsonl`, full adds the verbatim transcripts.
 VERBOSITY_LEVELS: tuple[str, ...] = ("quiet", "summary", "detail", "debug", "full")
 
 #: each level's index in VERBOSITY_LEVELS, so comparisons read as `verbosity >= SUMMARY`
@@ -100,8 +101,9 @@ flags:
       --dirty              implement and fix runs: start even on a dirty git tree — the stage diffs and
                            the report's diffstat are measured against it
       --verbosity <lvl>    quiet (default) < summary < detail < debug < full: what the run directory keeps beyond
-                           the report — summary adds run.json, detail adds human_input.json, debug adds events.jsonl,
-                           full adds the verbatim transcripts under agents/
+                           the report — summary adds run.json, detail adds human_input.json and, for plan runs,
+                           the full deliberation report.md (always kept when no plan shipped), debug adds
+                           events.jsonl, full adds the verbatim transcripts under agents/
       --format <fmt>       md (default), html, json or both: the report's format. html is one self-contained
                            page — inline styles, no scripts, nothing to fetch; json is the docket as one
                            machine-readable document; both writes the .md and the .html side by side.

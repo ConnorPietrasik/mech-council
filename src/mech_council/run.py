@@ -136,6 +136,7 @@ async def orchestrate(launch, sandbox) -> int:
     transcripts = Transcripts(run_dir, "full" if council.verbosity >= FULL else "off")
     outcome, aborted = ABORTED, ""
     report, markdown_text = "", ""
+    keep_record = False  # whether the run keeps the deliberation record; settled once, in the finally
     members: Members | None = None
     lanes: Lanes | None = None
     crews: Crews | None = None
@@ -201,9 +202,12 @@ async def orchestrate(launch, sandbox) -> int:
         # claimed before the write: an exit landing mid-write must not replace the manifest being written
         manifest_claimed = True
         extra = run_json_extra()
-        if len(report_paths(launch)) > 1:
-            md_path, html_path = report_paths(launch)
-            extra["reports"] = {"md": md_path, "html": html_path}
+        # the manifest keys reports by the format's extension; a bare -o target would be the markdown
+        reports = {os.path.splitext(path)[1].lstrip(".").lower() or "md": path for path in report_paths(launch)}
+        if keep_record:
+            reports["record"] = os.path.join(run_dir, council.adapter.companion)
+        if len(reports) > 1:
+            extra["reports"] = reports
         runjson.finalize(
             manifest,
             outcome=outcome,
@@ -228,6 +232,7 @@ async def orchestrate(launch, sandbox) -> int:
             aborted,
             brake.at,
             report_at=launch.output_path,
+            keep_record=keep_record,
             sink_claim=transcripts.sink_claim(),
             transcript_bytes=transcripts.bytes_written,
             stderr_bytes=transcripts.stderr_bytes,
@@ -305,6 +310,7 @@ async def orchestrate(launch, sandbox) -> int:
             "run_aborted", reason=aborted, kind=type(failure).__name__, frames=traceback.format_exc(limit=6).strip().splitlines()[-4:]
         )
     finally:
+        keep_record = _keep_record(council, docket)
         # prompt counts while the lanes are still reachable; a disposed crew stashed its counts at dispose
         crew_prompts: list[tuple[str, dict]] = []
         if is_build and crews is not None:
@@ -327,7 +333,10 @@ async def orchestrate(launch, sandbox) -> int:
             owed(console, "prompt counts", manifest.record_prompts, lanes.prompts)
         owed(console, "run.json", write_run_json, survivors, journal, report)
         owed(console, "the transcripts", transcripts.close)
-        owed(console, "the disk tally", console.say, _disk_line(run_dir, report_paths(launch)))
+        tally = list(report_paths(launch))
+        if keep_record:
+            tally.append(os.path.join(run_dir, council.adapter.companion))
+        owed(console, "the disk tally", console.say, _disk_line(run_dir, tally))
         if brake.first:
             console.say(f"exiting on signal {brake.first}")
             if brake.skipped:
@@ -711,6 +720,7 @@ def _report(
     aborted: str,
     interrupted: Interrupted | None = None,
     *,
+    keep_record: bool = False,
     report_at: str = "",
     sink_claim: str = "",
     transcript_bytes: int = 0,
@@ -728,6 +738,7 @@ def _report(
 
     files = council.adapter.report_files(council.report_format)
     html_file = next((name for name in files if name.endswith(".html")), "")
+    record_name = council.adapter.companion if keep_record else ""
     if report_at:
         paths = [report_at] if len(files) == 1 else [os.path.join(report_at, name) for name in files]
     else:
@@ -748,6 +759,8 @@ def _report(
             report_path=paths[0] if report_at else "",
             report_html_name=html_file if html_file != files[0] else "",
             report_html_path=paths[files.index(html_file)] if report_at and html_file and html_file != files[0] else "",
+            companion_name=record_name,
+            companion_written=keep_record,
             sink_claim=sink_claim,
             transcript_bytes=transcript_bytes,
             stderr_bytes=stderr_bytes,
@@ -763,7 +776,7 @@ def _report(
             elif council.mode == "fix":
                 doc = report_fix.build(docket, context, run_dir=run_dir)
             elif council.mode == "plan":
-                doc = report_plan.build(docket, context, run_dir=run_dir, converged=_converged(docket))
+                doc = report_plan.build(docket, context, run_dir=run_dir, converged=_converged(docket), record_name=record_name)
             else:
                 doc = report_review.build(docket, context, run_dir=run_dir)
         page_title = f"{council.name} · {council.project}"
@@ -824,6 +837,30 @@ def _report(
                 os.unlink(tmp)
             console.say(f"could not write the report: {failure}")
             return "", ""
+    if keep_record and doc is not None and docket is not None and context is not None:
+        # the record stays in the run directory even when `--output` sends the report elsewhere
+        record_path = os.path.join(run_dir, council.adapter.companion)
+        try:
+            record = report_plan.build_record(docket, context, run_dir=run_dir, converged=_converged(docket))
+            record_text = markdown_render.render_md(record)
+        except Exception as failure:
+            console.say(f"the record could not be rendered ({type(failure).__name__}: {failure}) — the report stands without it")
+            console.event(
+                "report_render_failed",
+                kind=type(failure).__name__,
+                reason=str(failure),
+                frames=traceback.format_exc(limit=4).strip().splitlines()[-3:],
+            )
+        else:
+            tmp = f"{record_path}.tmp-{os.getpid()}-{time.time_ns()}"
+            try:
+                with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as handle:
+                    handle.write(record_text)
+                os.replace(tmp, record_path)
+            except OSError as failure:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+                console.say(f"could not write the record: {failure}")
     if report_at:
         for path in paths:
             console.say(f"report {path}")
@@ -833,6 +870,19 @@ def _report(
 def _converged(docket) -> str | None:
     satisfied, token, _reason = direction_rule(docket)
     return token if satisfied and token and token != NO_PREFERENCE else None
+
+
+def _keep_record(council: Council, docket: Docket | None) -> bool:
+    """Whether the run directory keeps the full deliberation record beside the report.
+
+    A plan that shipped nothing is explained only by the record, so it stays whatever the verbosity is;
+    a shipped plan keeps it only from `detail` up, with the rest of the evidence.
+    """
+    if not council.adapter.companion or docket is None or docket.blank:
+        return False
+    if council.verbosity >= DETAIL:
+        return True
+    return _converged(docket) is None
 
 
 def _report_context(
@@ -848,6 +898,8 @@ def _report_context(
     report_path: str = "",
     report_html_name: str = "",
     report_html_path: str = "",
+    companion_name: str = "",
+    companion_written: bool = False,
     sink_claim: str = "",
     transcript_bytes: int = 0,
     stderr_bytes: int = 0,
@@ -897,6 +949,8 @@ def _report_context(
         report_path=report_path,
         report_html_name=report_html_name,
         report_html_path=report_html_path,
+        companion_name=companion_name,
+        companion_written=companion_written,
         goal=council.goal,
         aborted_reason=aborted,
         captions=(_implement_captions(manifest) if docket is not None and docket.mode in ("implement", "fix") else council.roster_names),

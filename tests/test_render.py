@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from mech_council.deliberation import dispositions, escalations, state
+from mech_council.prompts.implement import RECORD_HEADINGS
 from mech_council.render import docket as docket_render
 from mech_council.render import markdown, preview, report_fix, report_implement, report_plan, report_review
 from mech_council.render.context import Interrupted, ReportContext, RosterRow, minimal_report
@@ -365,7 +366,7 @@ def test_a_folded_ask_still_names_who_raised_it():
     block = section(report_review.render(docket, context()), "Open questions").split("### H2")[1]
     assert "asked by: Senior" in block and "(nobody" not in block
 
-    human_input = section(report_plan.render(docket, context(mode="plan")), "Human input")
+    human_input = section(report_plan.render_record(docket, context(mode="plan")), "Human input")
     line = next(row for row in human_input.splitlines() if row.startswith("- H2"))
     assert "Senior" in line and "(nobody)" not in line
 
@@ -404,7 +405,7 @@ def test_a_no_human_ask_in_the_plan_ledger_is_never_asked_not_standing():
     escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, blocking=False, round_=1)
     escalations.second(docket, qid="H1", agent="Agent2", round_=1)
     docket.questions["H1"].markers.append(escalations.NO_HUMAN)
-    text = report_plan.render(docket, context(human="none"))
+    text = report_plan.render_record(docket, context(human="none"))
     human_input = section(text, "Human input")
     assert "H1 (never asked)" in human_input
     assert "no human to answer it" in human_input
@@ -418,7 +419,7 @@ def test_a_held_back_ask_in_the_plan_ledger_is_unseconded_not_standing():
     docket = build(mode="plan")
     escalations.raise_question(docket, text="which palette?", asker="Agent1", item_id=None, round_=1)
     docket.questions["H1"].markers.append(escalations.UNBACKED)
-    text = report_plan.render(docket, context())
+    text = report_plan.render_record(docket, context())
     human_input = section(text, "Human input")
     assert "H1 (unseconded)" in human_input
     assert "never put this to you" in human_input
@@ -572,8 +573,10 @@ def test_the_plan_report_shows_the_chosen_plan_the_backing_and_the_shrugs():
     assert "rules for the implementer" in text.lower(), "the plan report opens with the rules"
     assert "no_preference" in text.replace("no preference", "no_preference"), "the roster prints the shrug, never 'abstained'"
     assert "abstained" not in text.lower(), "that word belongs to item stances"
-    assert "the staging" in text and "big bang" in text
-    assert "land it in two steps" in text, "Agent1's plan is the chosen direction"
+    assert "the staging" in text
+    record = report_plan.render_record(docket, ctx)
+    assert "land it in two steps" in record, "Agent1's plan stands in the record's alternatives"
+    assert "big bang" in record, "the rejected alternative stands in the record's alternatives"
 
 
 def test_the_plan_report_prints_deferred_questions_as_named_assumptions():
@@ -607,7 +610,16 @@ def test_the_plan_report_carries_no_review_only_sections():
     docket = build(mode="plan")
     text = report_plan.render(docket, context(mode="plan"))
     assert "## Consensus findings" not in text
-    assert "Decision points" in text
+    assert "Decision index" in text
+
+
+def test_the_plan_surface_uses_no_record_heading():
+    """`settled_surface` cuts a re-read plan at the first record heading, so the surface a run
+    re-reads must not wear one: its index and folded ids would be cut off with the debate."""
+    docket = build(mode="plan")
+    text = report_plan.render(docket, context(mode="plan"))
+    for heading in RECORD_HEADINGS:
+        assert heading not in text, f"{heading} in the surface would be cut off when the plan is re-read"
 
 
 def test_the_plan_report_does_not_ask_a_human_that_is_not_on_the_run():
@@ -716,7 +728,7 @@ def test_the_review_report_keeps_a_retracted_note_the_human_was_shown():
 def test_a_note_no_checkpoint_showed_still_reaches_the_report():
     docket = build()
     noted(docket, "retention is a contract, not a config choice")
-    body = section(report_plan.render(docket, context(), converged="Agent1"), "Notes for the human")
+    body = section(report_plan.render_record(docket, context()), "Notes for the human")
     assert "N1" in body and "retention is a contract" in body, "the report holds the ledger, shown or not"
 
 
@@ -757,7 +769,7 @@ def test_the_plan_report_files_notes_under_their_item_not_the_flat_ledger():
     docket = build()
     item(docket, "T1", "the cache ignores tenants")
     noted(docket, "the fix should extend the conditional write", by="Agent2", item_id="T1")
-    text = report_plan.render(docket, context(), converged="Agent1")
+    text = report_plan.render_record(docket, context())
     points = section(text, "Decision points (1)")
     assert "the fix should extend the conditional write" in points, "a note about an item prints with that item"
     body = section(text, "Notes for the human (0)")

@@ -1223,4 +1223,4 @@ class Implement:
 
     def _read_plan_file(self) -> str:
         with open(self.plan_file, encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+            return impl_text.settled_surface(handle.read())

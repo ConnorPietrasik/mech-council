@@ -603,34 +603,111 @@ PLAN_SCRIPT = json.dumps(
 )
 
 
-def test_a_plan_council_writes_plan_md_and_says_plainly_when_no_direction_was_chosen(cli, project):
-    """plan mode offline: the same protocol over plan-mode data; an unsettled direction is reported."""
+def test_a_plan_council_writes_the_plan_and_keeps_the_record_when_no_direction_was_chosen(cli, project):
+    """plan mode offline: an unsettled direction keeps the full record beside the plan's surface —
+    the record is the only account of why nothing shipped, so it stays whatever the verbosity is."""
     env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
     result = cli(["plan"], cwd=project, env=env, timeout=150)
     assert result.returncode == 0, result.console
     assert result.manifest["mode"] == "plan"
-    assert os.path.exists(os.path.join(result.run_dir, "plan.md")), "plan mode writes plan.md, not report.md"
-    assert not os.path.exists(os.path.join(result.run_dir, "report.md"))
-    report = result.report()
-    # The plan report's sections, each earned by something in this run rather than printed empty.
+    assert result.manifest["report"].endswith("plan.md"), "plan mode's report is plan.md"
+    plan = result.artifact("plan.md")
+    record = result.artifact("report.md")
+    # The plan's sections, each earned by something in this run rather than printed empty.
     for heading in (
         "## Rules for the implementer",
         "## Chosen direction",
         "## Stages",
         "## Assumptions",
         "## Agreed points",
-        "## Alternatives on the table",
+        "## Decision index",
     ):
-        assert heading in report, f"{heading} missing from\n{report[:600]}"
+        assert heading in plan, f"{heading} missing from\n{plan[:600]}"
+    # The deliberation is the record's, not the plan's.
+    for heading in ("## Decision points", "## Human input", "## Alternatives on the table", "## Round-by-round verdicts"):
+        assert heading not in plan, f"{heading} is the record's section, not the plan's"
+        assert heading in record, f"{heading} missing from the record\n{record[:600]}"
     # The offline plan fixture never converges, so the section must say so rather than print a heading nobody chose.
-    direction = report.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
+    direction = plan.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
     assert "did not settle a direction" in direction, f"the report chose a direction this run never agreed:\n{direction[:400]}"
     assert "backed by" not in direction.split("The candidates")[0], "no `backed by` line stands where no direction was chosen"
+    record_direction = record.split("## Chosen direction", 1)[1].split("\n## ", 1)[0]
+    assert "did not settle a direction" in record_direction, "the record records that no direction settled"
     # Nothing here invents a chair-authored rule list.
-    assert "prescriptive" in report and "descriptive" in report
-    assert "wrap the call in a retry helper" in report, "the stage gates reach the plan"
-    assert "bounded backoff" in report
+    assert "prescriptive" in plan and "descriptive" in plan
+    assert "wrap the call in a retry helper" in record, "the stage gates reach the record"
+    assert "bounded backoff" in record
     assert result.manifest["outcome"] in ("consensus", "stalemate", "round_limit_reached")
+
+
+def test_a_quiet_plan_run_that_shipped_nothing_keeps_the_record_without_contradicting_it(cli, project):
+    """At `quiet` an unconverged plan keeps the record — the only account of why nothing shipped —
+    and the artifacts section lists it without also claiming `quiet` writes no record."""
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"', 'verbosity = "quiet"'))
+    result = cli(["plan"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT), timeout=150)
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert written == ["plan.md", "report.md"], f"an unconverged plan keeps its record at quiet: {written}"
+    plan = result.artifact("plan.md")
+    record = result.artifact("report.md")
+    artifacts = plan.split("## Artifacts", 1)[1]
+    assert "report.md" not in plan.split("writes no", 1)[1], "the plan keeps the record and says quiet writes no record:\n" + artifacts
+    assert "this report" not in record.split("## Artifacts", 1)[1], "the record does not call the plan its own report"
+
+
+CONVERGED_SCRIPT = json.dumps(
+    [
+        {
+            "contains": "Phase 0",
+            "reply": {
+                "approach": {
+                    "claim": "retry the sync call with a bounded backoff",
+                    "stages": [
+                        {"state": "wrap the call in a retry helper", "gate": "the helper has a test for each failure kind"},
+                        {"state": "point the sync path at the helper", "gate": "the existing tests still pass"},
+                    ],
+                }
+            },
+        },
+        {"contains": "Round ", "reply": {"positions": [], "sign_off": True, "backing": "Agent1"}},
+        {"contains": "# Compare the plans", "reply": {"agreed": ["both seats want the same retry"], "conflicts": []}},
+    ]
+)
+
+
+def test_a_converged_plan_run_keeps_only_the_plan_at_quiet(cli, project):
+    """A plan that shipped is its own deliverable: at `quiet` the record is not kept, and plan.md
+    holds the settled surface — the direction, the stages, and a line per decision point."""
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"', 'verbosity = "quiet"'))
+    result = cli(["plan"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=CONVERGED_SCRIPT), timeout=150)
+    assert result.returncode == 0, result.console
+    assert "outcome: consensus" in result.console, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert written == ["plan.md"], f"a quiet run that shipped a plan keeps only the plan: {written}"
+    plan = result.artifact("plan.md")
+    assert "converged token" in plan and "wrap the call in a retry helper" in plan, "the settled direction and its stages stand in the plan"
+    assert "## Human input" not in plan and "## Round-by-round verdicts" not in plan
+    assert "full deliberation is in" not in plan, "the plan does not point at a record the run never kept"
+
+
+def test_a_converged_plan_run_keeps_the_record_from_detail_up(cli, project):
+    """`detail` is where the evidence starts: the record keeps the deliberation beside the plan.
+    Below it, a shipped plan stands alone; above it, the record is always there."""
+    write_project_config(project, DEFAULT_CONFIG.format(pi_cli=FAKE_PI).replace('verbosity = "debug"', 'verbosity = "detail"'))
+    result = cli(["plan"], cwd=project, env=dict(runs_env(project), FAKE_PI_SCRIPT=CONVERGED_SCRIPT), timeout=150)
+    assert result.returncode == 0, result.console
+    written = sorted(name for name in os.listdir(result.run_dir) if os.path.isfile(os.path.join(result.run_dir, name)))
+    assert written == ["human_input.json", "plan.md", "report.md", "run.json"], written
+    assert result.manifest["reports"] == {
+        "md": os.path.join(result.run_dir, "plan.md"),
+        "record": os.path.join(result.run_dir, "report.md"),
+    }, "run.json names the plan and its record by role"
+    plan = result.artifact("plan.md")
+    record = result.artifact("report.md")
+    assert "full deliberation is in" in plan and "report.md" in plan, "the plan points at the record it stands beside"
+    assert "## Alternatives on the table" in record and "## Round-by-round verdicts" in record
+    token = plan.split("converged token: ", 1)[1].splitlines()[0]
+    assert token and token in record, "the record names the token the plan settled on"
 
 
 def test_a_plan_council_needs_a_backer_and_the_direction_rule_holds(cli, project):
@@ -864,6 +941,19 @@ def test_a_relative_output_lands_in_the_project_you_invoked_from(cli, project):
     assert "note: the report lands inside" in result.console, "an ordinary write into the project is said out loud"
 
 
+def test_a_mixed_case_output_is_keyed_by_the_lowercase_format_in_the_manifest(cli, project):
+    """The extension check is case-insensitive, so the manifest must not inherit the target's case."""
+    env = dict(runs_env(project), FAKE_PI_SCRIPT=PLAN_SCRIPT)
+    result = cli(["plan", "-o", "plan.MD"], cwd=project, env=env, timeout=150)
+    assert result.returncode == 0, result.console
+    target = os.path.join(project, "plan.MD")
+    assert result.manifest["reports"] == {
+        "md": target,
+        "record": os.path.join(result.run_dir, "report.md"),
+    }, "the manifest keys the report by the format, not the target's case"
+    assert "## Decision index" in result.report(), "the helper returns the plan sent to -o, not the record kept beside it"
+
+
 # ------------------------------------------------------ The report's format
 
 
@@ -917,6 +1007,7 @@ def test_format_from_the_config_not_the_flag(cli, project, tmp_path):
     [
         (["review", "--format", "hmtl"], "--format is one of md|html|json|both"),
         (["review", "-o", "PLAN.md", "--format", "both"], "--output names a file, but 'both' writes two reports"),
+        (["review", "-o", "PLAN"], "the file's extension must match"),
     ],
 )
 def test_format_usage_errors_exit_two(cli, project, canary, argv, wanted):

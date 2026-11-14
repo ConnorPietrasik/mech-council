@@ -188,9 +188,10 @@ class Run:
             return handle.read()
 
     def report(self) -> str:
-        """The report's text, wherever it landed."""
-        paths = [os.path.join(self.run_dir, name) for name in ("report.md", "plan.md")] if self.run_dir else []
-        paths.append(str(self.manifest.get("report", "")))
+        """The report's text, wherever it landed. Plan mode's report is plan.md; report.md is its record."""
+        paths = [str(self.manifest.get("report", ""))]
+        names = ("plan.md", "report.md") if self.manifest.get("mode") == "plan" else ("report.md", "plan.md")
+        paths += [os.path.join(self.run_dir, name) for name in names] if self.run_dir else []
         for path in paths:
             if path and os.path.exists(path):
                 with open(path, encoding="utf-8") as handle:

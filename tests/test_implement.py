@@ -1319,6 +1319,49 @@ def test_a_builders_prompt_lists_the_live_seats_by_id_not_names(cli, project):
     assert "Forge" not in text and "Wordsmith" not in text, "no display name reaches a seat"
 
 
+def test_a_plan_file_with_a_full_record_keeps_the_deliberation_off_the_chair(cli, project):
+    """A pre-split plan.md is the whole record: the run cuts it at the deliberation, so the
+    structuring chair and the builders read the settled surface — index and folded ids included,
+    never the debate."""
+    write_project_config(project, solo_config())
+    commit_all(project)
+    plan = os.path.join(os.path.dirname(project), "plan.md")
+    with open(plan, "w", encoding="utf-8") as handle:
+        handle.write(
+            "# Implementation plan\n\n"
+            "## Chosen direction\n\nconverged token: retry\n\n"
+            "## Stages\n\n### Stage 1: write the hello module\n- gate: test -f hello.py\n\n"
+            "## Agreed points\n\n- SETTLED-SURFACE: both seats want the same retry\n\n"
+            "## Decision index (1)\n\n- T1 [agreed] INDEX-LINE: the retry is the smallest safe fix — raised by Agent1\n\n"
+            "## Folded ids — name the survivor, not the folded one (1)\n\n- FOLDED-ID: T3 → T1\n\n"
+            "## Decision points (1)\n\n### T1 [agreed] the retry is the smallest safe fix\n\n"
+            "- SECRET-DELIBERATION: the full debate, stances and retraction history\n\n"
+            "## Human input\n\n- Q1 (settled) the retention question\n\n"
+            "## Round-by-round verdicts\n\n### Round 1\n\n- Metic: agree\n"
+        )
+    prompts = os.path.join(os.path.dirname(project), "prompts.jsonl")
+    script = json.dumps(
+        [
+            {"contains": "# Structure the plan", "reply": {"stages": [{"state": "write the hello module", "gate": "test -f hello.py"}]}},
+            {"contains": "# Your work", "reply": {"summary": "built it", "changed": ["hello.py"], "open_issues": []}},
+        ]
+    )
+    result = cli(
+        ["build", "--plan", plan],
+        cwd=project,
+        env=dict(runs_env(project), FAKE_PI_SCRIPT=script, FAKE_PI_PROMPTS=prompts),
+        timeout=150,
+    )
+    assert result.returncode == 0, result.console
+    with open(prompts, encoding="utf-8") as handle:
+        messages = [record["message"] for record in map(json.loads, handle)]
+    for message in messages:
+        assert "SECRET-DELIBERATION" not in message, "no deliberation line reaches a seat\n" + message[:400]
+    structuring = [message for message in messages if "# Structure the plan" in message]
+    assert structuring and "SETTLED-SURFACE" in structuring[0], "the chair still reads the settled surface"
+    assert "INDEX-LINE" in structuring[0] and "FOLDED-ID" in structuring[0], "the index and folded ids are surface, not deliberation"
+
+
 def test_a_gate_that_never_passes_blocks_the_stage_and_the_run_ends_partial(cli, project):
     write_project_config(project, solo_config().replace("[councils.build]", "[councils.build]\nfix_budget = 1\nreplans = 0"))
     commit_all(project)

@@ -10,5 +10,6 @@ PLAN = register(
         id_prefix="T",
         report_name="plan.md",
         phase0_schema="plan",
+        companion="report.md",
     )
 )

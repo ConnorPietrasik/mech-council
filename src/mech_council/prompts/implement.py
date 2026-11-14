@@ -396,6 +396,26 @@ def chair_gate_task(*, gate: str, state: str, project: str) -> str:
     )
 
 
+RECORD_HEADINGS = (
+    "## Decision points",
+    "## Human input",
+    "## Notes for the human",
+    "## Planner Q&A",
+    "## Alternatives on the table",
+    "## Round-by-round verdicts",
+)
+
+
+def settled_surface(document: str) -> str:
+    """The plan half of a plan document: a pre-split plan.md is the whole record, and the
+    deliberation is cut where it begins, so a chair or builder never reads it."""
+    cuts = [document.find(heading) for heading in RECORD_HEADINGS]
+    cuts = [cut for cut in cuts if cut != -1]
+    if not cuts:
+        return document
+    return document[: min(cuts)].rstrip() + "\n"
+
+
 def structure_task(document: str, goal: str) -> str:
     """The run's chair, structuring a `--plan` document into the gated stages the run builds."""
     from . import common

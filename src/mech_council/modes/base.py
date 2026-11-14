@@ -23,6 +23,9 @@ class ModeAdapter(Protocol):
     def report_files(self, report_format: str) -> tuple[str, ...]: ...  # the report files one format writes
 
     @property
+    def companion(self) -> str: ...  # the record file written beside the report, when one is kept
+
+    @property
     def phase0_schema(self) -> str: ...  # the word the phase-0 count is reported in
 
 
@@ -34,6 +37,7 @@ class BaseAdapter:
     id_prefix: str = "I"
     report_name: str = "report.md"
     phase0_schema: str = "findings"
+    companion: str = ""  # the record the report summarizes; stays in the run directory, never follows `--output`
 
     @property
     def report_base(self) -> str:

@@ -178,9 +178,11 @@ started in the background ignores `SIGINT` — so the run keeps working as if no
 
 ## What you get
 
-The report is the one artifact every run writes. The rest of the run directory is a verbosity
-ladder — `quiet` (the default) keeps the report and per-member stderr, each level adds one more
-artifact, and the levels exist mostly for debugging:
+The report is the one artifact every run writes — a plan run keeps the full deliberation behind
+its plan beside it as `report.md`: always when no direction shipped, and from `detail` up when
+one did. The rest of the run directory is a verbosity ladder — `quiet` (the default) keeps the
+report and per-member stderr, each level adds one more artifact, and the levels exist mostly for
+debugging:
 
 | Level | Keeps |
 |---|---|
@@ -192,7 +194,8 @@ artifact, and the levels exist mostly for debugging:
 
 | File | What's in it |
 |---|---|
-| `report.md` / `plan.md` / `implementation.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get stages, gates and named assumptions instead; implementations get the crews, the adopted plan, the stage ledger, what landed, and the decision points the run recorded. `--format html` writes the same content as `report.html` / `plan.html` instead, and `--format json` the docket as `report.json` / `plan.json` for a program to read back — see below. |
+| `report.md` / `plan.md` / `implementation.md` | The result: consensus findings, what was never fully vetted and by whom, disputes verbatim, rejections with the notes that killed them, and the questions you never answered. Plans get the settled surface instead — stages, gates, named assumptions and a one-line index of the decision points; implementations get the crews, the adopted plan, the stage ledger, what landed, and the decision points the run recorded. `--format html` writes the same content as `report.html` / `plan.html` instead, and `--format json` the docket as `report.json` / `plan.json` for a program to read back — see below. |
+| `report.md` beside `plan.md` (plan runs) | The full deliberation the plan summarizes: the direction's verdict, each decision point's debate and stances, the human input, the notes, the Q&A and the round verdicts. Always kept when no direction shipped, and from `detail` up when one did. Never follows `--output`. |
 | `run.json` (`summary`+) | Config, roster, settings, pi version, every member's namespaces and prompt count, the write journal, the outcome, and any process the cleanup left behind. An interrupted run adds where it stood and what a second signal gave up. |
 | `events.jsonl` (`debug`+) | The append-only event log — one JSON object per line, the whole run in order. The run never reads it back; it is there for you. |
 | `human_input.json` (`detail`+) | Every question and whatever became of it: who asked, who backed it, what a seat answered instead, whether the run waited on it, and the answer, skip, or reason it was never asked. Plus every note, the round each one was shown at, and every direct message you sent with its reply or failure. |
@@ -204,7 +207,8 @@ The run directory is `$COUNCIL_RUNS_DIR`, else `$XDG_CACHE_HOME/council/runs`, e
 ### `--output`: the report somewhere else
 
 `-o`/`--output <path>` writes the report there instead of the run directory — one file moves,
-nothing else follows it. An existing directory keeps the mode's name, so `-o docs/` writes
+nothing else follows it (a plan run's deliberation `report.md` stays behind with the rest). An
+existing directory keeps the mode's name, so `-o docs/` writes
 `docs/plan.md`; anything else is the file itself. At `summary` verbosity or higher, `run.json`
 stays in the run directory and names the path the report landed at.
 
@@ -229,8 +233,9 @@ cleanly. `json` writes the docket as one machine-readable document — `report.j
 severity and disposition, every question and what became of it, the notes and messages, and the
 mode's own record (a plan's approaches and backing, an implementation's crews and stages).
 Nothing is styled or worded; a program reads it back. `both` writes the markdown and the page
-side by side; at `summary` or higher, `run.json` names both (`report` is the markdown,
-`reports` the pair).
+side by side. At `summary` or higher, `run.json` names them: `report` is the primary,
+`reports` one entry per format written, and `record` the plan run's deliberation file when
+the run keeps one.
 
 ```sh
 mech-council review --format html          # -> report.html
@@ -289,7 +294,7 @@ with `--config`.
 | `chair_timeout_sec` | `300` | Bound on one of the chair's passes (merge, fold, compare, direction, structure, pick). |
 | `sandbox_mib` | `32768` | tmpfs shared by all member upper layers. Ignored in place. |
 | `in_place` | `false` | Run members in the real project: no namespaces, no overlays, no write journal. `--in-place` forces it on; an implement or fix run is always in place. |
-| `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json`), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
+| `verbosity` | `quiet` | What the run directory keeps: `quiet` the report and per-member stderr, then `summary` (+`run.json`), `detail` (+`human_input.json` and, for plan runs, the deliberation `report.md` — always kept when no direction shipped), `debug` (+`events.jsonl`), `full` (+ the verbatim protocol streams under `agents/`). `--verbosity` overrides. |
 | `pi_cli` | discovered | Path or name of the pi CLI; probed with `--version`. |
 
 Seats and the chair also take `provider`, `model` (`provider` without `model` is refused, since pi

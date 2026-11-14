@@ -65,6 +65,9 @@ class ReportContext:
     report_path: str = ""
     report_html_name: str = ""
     report_html_path: str = ""
+    #: The record file written beside the report, when the run keeps one (plan mode: `report.md`).
+    companion_name: str = ""
+    companion_written: bool = False
     goal: str | None = None
     aborted_reason: str = ""
     verbosity: int = 0  # what the run directory kept beyond the report
@@ -158,7 +161,8 @@ class ReportContext:
         rows.append(chair)
         return Table(tuple(header), tuple(tuple(row) for row in rows))
 
-    def artifacts(self, run_dir: str) -> list[Block]:
+    def artifacts(self, run_dir: str, *, record: bool = False) -> list[Block]:
+        """The run directory's contents; `record` True when this section renders inside the record itself."""
         manifest = (
             "outcome, in place: no write journal, no namespaces, no sweep"
             if self.in_place
@@ -167,8 +171,15 @@ class ReportContext:
         items: list[ListItem] = []
         if self.verbosity >= SUMMARY:
             items.append(ListItem(T(("run.json", "code"), f" — the machine-readable manifest ({manifest})")))
-        report_line = " — this report" + (" (outside the run directory)" if self.report_path else "")
-        items.append(ListItem(T((self.report_path or self.report_name, "code"), report_line)))
+        outside = " (outside the run directory)" if self.report_path else ""
+        detail = ": the direction's verdict, each point's debate, the human input, the notes, the Q&A and the rounds"
+        if record:
+            report_line, companion_line = " — the settled surface", " — this record" + detail
+        else:
+            report_line, companion_line = " — this report", " — the full deliberation record" + detail
+        items.append(ListItem(T((self.report_path or self.report_name, "code"), report_line + outside)))
+        if self.companion_written:
+            items.append(ListItem(T((self.companion_name, "code"), companion_line)))
         if self.report_html_name:
             items.append(
                 ListItem(

@@ -28,7 +28,8 @@ RULES: tuple[ListItem, ...] = (
 )
 
 
-def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> Report:
+def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None, record_name: str = "") -> Report:
+    """The agreed surface: what an implementer or a `--plan` chair acts on, without the deliberation."""
     blocks: list[Block] = context.interrupted_blocks()
     blocks += [Heading(2, T("Rules for the implementer")), List(RULES)]
     blocks += [Heading(2, T("Roster")), context.roster_table(extra="backing")]
@@ -36,6 +37,18 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converge
     blocks += _stages(docket, context, converged)
     blocks += _assumptions(docket, context)
     blocks += _agreed_points(docket, context)
+    blocks += _decision_index(docket, context)
+    blocks += folded_ids(docket)
+    blocks += _record_pointer(context, record_name)
+    blocks += context.artifacts(run_dir)
+    return Report(title=T("Implementation plan"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
+
+
+def build_record(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> Report:
+    """The full deliberation record behind the plan: what the surface summarizes."""
+    blocks: list[Block] = context.interrupted_blocks()
+    blocks += [Heading(2, T("Roster")), context.roster_table(extra="backing")]
+    blocks += _record_direction(docket, context, converged)
     blocks += _decision_points(docket, context)
     blocks += folded_ids(docket)
     blocks += _human_input(docket, context)
@@ -43,12 +56,22 @@ def build(docket: Docket, context: ReportContext, *, run_dir: str = "", converge
     blocks += _qa(docket, context)
     blocks += _alternatives(docket, context)
     blocks += _rounds(docket, context)
-    blocks += context.artifacts(run_dir)
-    return Report(title=T("Implementation plan"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
+    blocks += context.artifacts(run_dir, record=True)
+    return Report(title=T("The deliberation record"), outcome=context.outcome, meta=context.meta(), blocks=tuple(blocks))
 
 
 def render(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> str:
     return render_md(build(docket, context, run_dir=run_dir, converged=converged))
+
+
+def render_record(docket: Docket, context: ReportContext, *, run_dir: str = "", converged: str | None = None) -> str:
+    return render_md(build_record(docket, context, run_dir=run_dir, converged=converged))
+
+
+def _majority_cut(context: ReportContext) -> str:
+    """An interrupted run's verdict on a direction that never fully settled."""
+    cut = context.interrupted
+    return f"{cut.name} ended the run with this direction holding the majority, not settled" if cut is not None else ""
 
 
 def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> list[Block]:
@@ -84,9 +107,8 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
         return blocks
     artifact, note = resolve_direction(docket, converged)
     token_items: list[ListItem] = [ListItem(T("converged token: ", (converged, "code")))]
-    if context.interrupted is not None:
-        cut_note = f"{context.interrupted.name} ended the run with this direction holding the majority, not settled"
-        token_items.append(ListItem(T((cut_note, "bold"))))
+    if cut := _majority_cut(context):
+        token_items.append(ListItem(T((cut, "bold"))))
     if note:
         token_items.append(ListItem(T((note, "bold"))))
     blocks.append(List(tuple(token_items)))
@@ -97,6 +119,22 @@ def _chosen(docket: Docket, context: ReportContext, converged: str | None) -> li
     if artifact.get("text"):
         tail.append(Paragraph(T(artifact["text"]), wrapped=True))
     blocks.append(Group(tuple(tail)))
+    return blocks
+
+
+def _record_direction(docket: Docket, context: ReportContext, converged: str | None) -> list[Block]:
+    """The direction's verdict: the record says what won, the surface says what to build."""
+    blocks: list[Block] = [Heading(2, T("Chosen direction"))]
+    if not converged:
+        blocks.append(Paragraph(T("The council did not settle a direction.")))
+        return blocks
+    _, note = resolve_direction(docket, converged)
+    items = [ListItem(T("converged token: ", (converged, "code")))]
+    if cut := _majority_cut(context):
+        items.append(ListItem(T((cut, "bold"))))
+    if note:
+        items.append(ListItem(T((note, "bold"))))
+    blocks.append(List(tuple(items)))
     return blocks
 
 
@@ -191,6 +229,39 @@ def _agreed_points(docket: Docket, context: ReportContext) -> list[Block]:
         items.append(ListItem(T(f"{point.get('point')}", tail)))
     blocks.append(List(tuple(items)))
     return blocks
+
+
+def _decision_index(docket: Docket, context: ReportContext) -> list[Block]:
+    """One line a point: what it settled to, and who raised it. The debate is the record's.
+
+    The heading must stay out of RECORD_HEADINGS: a re-read plan is cut at the first record heading.
+    """
+    blocks: list[Block] = [Heading(2, T(f"Decision index ({len(docket.order)})"))]
+    if not docket.order:
+        return blocks + [Paragraph(T("None were raised."))]
+    items: list[ListItem] = []
+    for item in docket.items.values():
+        state = item.disposition if item.closed else derive(docket, item.id)
+        tail = f" — raised by {_names(item.raised_by, context)}"
+        if item.closed:
+            tail += f", closed round {item.closed_round}"
+        items.append(ListItem(T(f"{item.id} ", (f"[{state}]", "code"), f" {item.claim}{tail}")))
+    blocks.append(List(tuple(items)))
+    return blocks
+
+
+def _record_pointer(context: ReportContext, record_name: str) -> list[Block]:
+    if not record_name:
+        return []
+    return [
+        Paragraph(
+            T(
+                "The plan is the settled surface. The full deliberation is in ",
+                (record_name, "code"),
+                " — the direction's verdict, each point's debate and stances, the human input, the notes, the Q&A and the round verdicts.",
+            )
+        )
+    ]
 
 
 def _decision_points(docket: Docket, context: ReportContext) -> list[Block]:
