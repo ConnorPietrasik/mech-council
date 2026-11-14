@@ -374,26 +374,42 @@ def test_the_verdict_names_the_asks_it_wants_the_run_to_wait_for():
 
 def test_the_verdict_carries_the_gate_verdict_when_the_seat_reports_one():
     """The stage review's gate slot: the crew's verdict on the stage's gate, or None when it is no verdict."""
-    out = parse(verdict(**positions(("F1", "agree")), gate={"ok": True, "ran": "pytest -x", "evidence": "42 passed"}))
+    out = parse(verdict(**positions(("F1", "agree")), gate={"ok": True, "ran": "pytest -x", "evidence": "42 passed"}), gate=True)
     assert out.data["gate"] == {"ok": True, "ran": "pytest -x", "evidence": "42 passed"}
-    silent = parse(verdict(**positions(("F1", "agree"))))
+    silent = parse(verdict(**positions(("F1", "agree"))), gate=True)
     assert silent.data["gate"] is None, "a reply with no gate slot is no verdict, not a pass"
 
 
 def test_a_gate_verdict_without_an_ok_is_refused_not_guessed():
-    out = parse(verdict(**positions(("F1", "agree")), gate={"ran": "pytest -x", "evidence": "42 passed"}))
+    out = parse(verdict(**positions(("F1", "agree")), gate={"ran": "pytest -x", "evidence": "42 passed"}), gate=True)
     assert out.data["gate"] is None
     assert any(entry["field"] == "gate" for entry in out.refused)
 
 
 def test_a_bare_word_gate_verdict_reads_as_a_verdict():
-    passed = parse(verdict(**positions(("F1", "agree")), gate="passed: 42 tests ok"))
+    passed = parse(verdict(**positions(("F1", "agree")), gate="passed: 42 tests ok"), gate=True)
     assert passed.data["gate"] == {"ok": True, "ran": "", "evidence": "passed: 42 tests ok"}
-    failed = parse(verdict(**positions(("F1", "agree")), gate="failed: 2 errors"))
+    failed = parse(verdict(**positions(("F1", "agree")), gate="failed: 2 errors"), gate=True)
     assert failed.data["gate"]["ok"] is False
-    vague = parse(verdict(**positions(("F1", "agree")), gate="hmm, probably fine"))
+    vague = parse(verdict(**positions(("F1", "agree")), gate="hmm, probably fine"), gate=True)
     assert vague.data["gate"] is None, "a shrug is no verdict"
     assert any(entry["field"] == "gate" for entry in vague.refused)
+
+
+def test_a_gate_family_field_is_no_verdict_in_a_pass_that_never_asked_for_the_gate():
+    """Review and plan never ask for a gate: a `test` or `check` field is prose — no gate refusal, and an
+    object of nothing but such fields is not the payload the verdict hides behind."""
+    out = parse(verdict(**positions(("F1", "agree")), test="ran pytest, all green"))
+    assert out.data["gate"] is None
+    assert out.refused == []
+    assert out.data["positions"][0]["item"] == "F1"
+    shadowed = 'noise {"test": "ran pytest", "check": "verified"} then the verdict: ' + json.dumps(positions(("F2", "agree")))
+    found = parse(shadowed)
+    assert not found.invalid and found.data["positions"][0]["item"] == "F2"
+    asked = parse(verdict(**positions(("F1", "agree")), test="passed: 42 tests ok"), gate=True)
+    assert asked.data["gate"] == {"ok": True, "ran": "", "evidence": "passed: 42 tests ok"}, (
+        "a pass that asked for the gate still reads the family's fields"
+    )
 
 
 def test_the_gate_check_reads_the_verdict_and_what_the_chair_saw():

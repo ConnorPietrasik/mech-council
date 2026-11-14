@@ -183,6 +183,8 @@ VERDICT_FIELDS = (
     "revised_plan",
     "approach",
 )
+#: a pass that never asked for the stage's gate: a `gate`-family field is prose — neither the payload nor a verdict
+VERDICT_FIELDS_NO_GATE = tuple(field for field in VERDICT_FIELDS if field != "gate")
 #: phase 0 in either mode: `approach` may be the whole reply, or the reply itself
 PHASE0_FIELDS = (
     "summary",
@@ -481,8 +483,10 @@ def parse_verdict(
     mode: str,
     me: str,
     known_items: set[str] | None = None,
+    gate: bool = False,
 ) -> Extraction:
-    data, error = find_json(payload, VERDICT_FIELDS)
+    """`gate` is true only for the passes that asked the seat to run the stage's gate and report a verdict on it."""
+    data, error = find_json(payload, VERDICT_FIELDS if gate else VERDICT_FIELDS_NO_GATE)
     if data is None:
         return Extraction(invalid=True, errors=[error or "no JSON object found"])
     out: Extraction = Extraction(data={})
@@ -543,7 +547,7 @@ def parse_verdict(
             }
         )
     out.data["new_items"] = clean_new
-    out.data["gate"] = _gate_verdict(pick(data, "gate"), out.refused)
+    out.data["gate"] = _gate_verdict(pick(data, "gate"), out.refused) if gate else None
 
     out.data["answers"] = _entries(pick(data, "answers"), ("to", "question"), text=("answer", "text", "reply"))
     out.data["questions"] = _entries(pick(data, "questions"), ("to",), text=("question", "text", "ask"))

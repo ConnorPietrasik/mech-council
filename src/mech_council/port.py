@@ -24,12 +24,20 @@ class Port:
     names: dict[str, str] = field(default_factory=dict)
 
     async def ask_seats(
-        self, batch, *, round_: int, phase: str = "round", classify_unusable: bool = False, context: dict[str, str] | None = None
+        self,
+        batch,
+        *,
+        round_: int,
+        phase: str = "round",
+        classify_unusable: bool = False,
+        context: dict[str, str] | None = None,
+        gate: bool = False,
     ) -> dict[str, RawAsk]:
+        """`gate` true for a verify pass that asked the seats to run the stage's or finding's gate and report a verdict."""
         known = set(self.docket.items) | set(self.docket.item_aliases)
 
         def parse_for(agent: str) -> dict:
-            return {"mode": self.council.mode, "me": agent, "known_items": known}
+            return {"mode": self.council.mode, "me": agent, "known_items": known, "gate": gate}
 
         outcomes = await self.lanes.ask_seats(
             batch,

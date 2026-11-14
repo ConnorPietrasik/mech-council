@@ -892,7 +892,7 @@ class Implement:
             if messages := self._drain(agent):
                 extra += "\n" + impl_text.messages_section(messages)
             batch.append((agent, base + extra))
-        results = await port.ask_seats(batch, round_=rec.index, phase="phase0", classify_unusable=True)
+        results = await port.ask_seats(batch, round_=rec.index, phase="phase0", classify_unusable=True, gate=bool(stage.get("gate")))
         new_ids: list[str] = []
         re_reported: list[str] = []
         for agent in crew.council.seat_ids:
